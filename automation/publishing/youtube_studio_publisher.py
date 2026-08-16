@@ -19,6 +19,41 @@ from .youtube_studio_ui_observer import YouTubeStudioUIObserver
 
 logger = logging.getLogger("ReelsAIFactory.YouTubeStudioPublisher")
 
+def parse_schedule_datetime(scheduled_at_local: str) -> Tuple[str, str]:
+    """
+    Parses a local schedule datetime string (ISO or space separated)
+    and returns (expected_date_str, expected_time_str) in Turkish YouTube Studio format:
+    e.g. '2026-08-17 22:00:00' -> ('17.08.2026', '22:00').
+    """
+    import datetime
+    if not scheduled_at_local:
+        return "", ""
+
+    s = scheduled_at_local.strip()
+    dt_obj = None
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d"
+    ]
+    try:
+        dt_obj = datetime.datetime.fromisoformat(s)
+    except Exception:
+        for fmt in formats:
+            try:
+                dt_obj = datetime.datetime.strptime(s, fmt)
+                break
+            except Exception:
+                pass
+
+    if dt_obj is None:
+        return "", ""
+
+    return dt_obj.strftime("%d.%m.%Y"), dt_obj.strftime("%H:%M")
+
+
 class BaseYouTubePublisher(ABC):
     @abstractmethod
     def upload_and_schedule(self, record: PublishRecord) -> PublishRecord:
@@ -196,11 +231,13 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                         status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
                     )
                     return record
+                expected_date_str, expected_time_str = parse_schedule_datetime(record.scheduled_at_local)
+
                 is_sched, s_msg = observer.verify_remote_scheduled_status(
                     remote_id=target_vid_id,
                     target_title=record.title,
-                    expected_date_str="16.08.2026",
-                    expected_time_str="19:30",
+                    expected_date_str=expected_date_str,
+                    expected_time_str=expected_time_str,
                     channel_id=self.config.youtube_expected_channel_id
                 )
                 if not is_sched:
@@ -282,10 +319,14 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                 if not target_remote_id:
                     record.mark_failed("Commit blocked: record.remote_id is missing; refusing to target a hardcoded draft.")
                     return record
+
+                exp_date, exp_time = parse_schedule_datetime(record.scheduled_at_local)
                 ok, msg = observer.commit_youtube_schedule(
                     target_remote_id=target_remote_id,
                     target_title=record.title,
-                    channel_id=self.config.youtube_expected_channel_id
+                    channel_id=self.config.youtube_expected_channel_id,
+                    expected_date_str=exp_date,
+                    expected_time_str=exp_time
                 )
                 if not ok:
                     record.mark_failed(f"YouTube Studio commit failed: {msg}")

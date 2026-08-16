@@ -2073,9 +2073,11 @@ class YouTubeStudioUIObserver:
 
     def commit_youtube_schedule(
         self,
-        target_remote_id: str = "Sq1nDGQPpOc",
-        target_title: str = "Japanese Zen Temple",
-        channel_id: Optional[str] = "UCahsmsqzTCtwTDDtvCurtBA"
+        target_remote_id: str,
+        target_title: str,
+        channel_id: Optional[str] = None,
+        expected_date_str: Optional[str] = None,
+        expected_time_str: Optional[str] = None
     ) -> Tuple[bool, str]:
         """
         Re-verifies that YouTube Studio is in VISIBILITY with valid inputs and enabled Planla button,
@@ -2093,8 +2095,8 @@ class YouTubeStudioUIObserver:
         is_sched, s_msg = self.verify_remote_scheduled_status(
             remote_id=target_remote_id,
             target_title=target_title,
-            expected_date_str="16.08.2026",
-            expected_time_str="19:30",
+            expected_date_str=expected_date_str or "17.08.2026",
+            expected_time_str=expected_time_str or "19:30",
             channel_id=channel_id
         )
         if not is_sched:
