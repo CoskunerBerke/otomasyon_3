@@ -1,7 +1,8 @@
 """
 Comprehensive Test Suite for Railway Production Deployment Foundation.
 Tests production gates, PostgreSQL driver requirements, real S3 boto3 adapter,
-health diagnostics, safety flags, secret scanning, Railway configuration, and safe dry defaults.
+health diagnostics, safety flags, secret scanning, Railway configuration,
+and strict cloud publishing import isolation.
 """
 import os
 import sys
@@ -110,6 +111,14 @@ def test_health_endpoint_exposes_no_secrets_and_shows_safety_flags(tmp_path):
     assert "SECRET_S3_KEY" not in dumped
 
 
+def test_railway_healthcheck_path_remains_health():
+    """Test: railway.toml healthcheck path remains exactly /health."""
+    railway_toml = Path("railway.toml")
+    assert railway_toml.exists()
+    content = railway_toml.read_text(encoding="utf-8")
+    assert 'healthcheckPath = "/health"' in content
+
+
 # =============================================================================
 # 3. REAL S3 ADAPTER OPERATIONS (MOCKED BOTO3 CLIENT)
 # =============================================================================
@@ -142,7 +151,6 @@ def test_s3_storage_put_get_delete_exists_and_metadata(tmp_path):
 
     # 2. get_file
     target_path = tmp_path / "downloaded.mp4"
-    # simulate download creating the file
     def fake_download(Bucket, Key, Filename):
         Path(Filename).write_bytes(b"downloaded content")
     mock_s3_client.download_file.side_effect = fake_download
@@ -224,9 +232,7 @@ def test_scheduler_subsystem_flags_isolation(tmp_path):
     scheduler = CloudScheduler(cfg, db, mock_approval_svc, mock_ig_worker)
 
     res = scheduler.run_iteration()
-    # weekly approval was skipped because enable_weekly_scheduler is False
     assert res["approvals_sent"] == 0
-    # instagram worker ran because enable_instagram_worker is True
     assert res["instagram_jobs_processed"] == 2
     mock_ig_worker.process_due_jobs.assert_called_once()
 
@@ -252,14 +258,43 @@ def test_first_deploy_safe_defaults(tmp_path):
 # 6. CLOUD IMPORT ISOLATION & DOCKER NO-BROWSER GUARANTEE
 # =============================================================================
 
-def test_cloud_import_does_not_import_playwright():
-    """Test: Importing cloud control plane app does not load Playwright or browser UI automation."""
-    if "playwright" in sys.modules:
-        del sys.modules["playwright"]
+def test_cloud_import_isolation_and_publishing_package():
+    """Test: Importing cloud control plane app does not load Playwright, publisher, or browser modules."""
+    for mod in list(sys.modules.keys()):
+        if (
+            mod.startswith("automation.publishing")
+            or mod.startswith("automation.cloud")
+            or "obsidian" in mod
+            or mod == "playwright"
+        ):
+            del sys.modules[mod]
 
     import automation.cloud.app
-    assert "playwright.sync_api" not in sys.modules
-    assert "automation.flow.browser" not in sys.modules
+    assert "automation.cloud.app" in sys.modules
+    assert "automation.publishing.publisher" not in sys.modules
+    assert "automation.publishing.tiktok_browser" not in sys.modules
+    assert "automation.publishing.tiktok_publisher" not in sys.modules
+    assert "automation.publishing.youtube_publisher" not in sys.modules
+    assert "playwright" not in sys.modules
+    assert not any("obsidian" in m for m in sys.modules)
+
+
+def test_instagram_models_and_api_independent_imports():
+    """Test: Instagram models and API client can be imported independently without heavy dependencies."""
+    from automation.publishing.instagram_models import InstagramConfig, InstagramPublishState
+    from automation.publishing.instagram_api import InstagramAPIClient
+
+    cfg = InstagramConfig(access_token="test_tok")
+    client = InstagramAPIClient(cfg)
+    assert client.config.access_token == "test_tok"
+    assert InstagramPublishState.READY_TO_PUBLISH == "READY_TO_PUBLISH"
+
+
+def test_lazy_export_compatibility():
+    """Test: Lazy package-level exports still load on-demand when requested."""
+    from automation.publishing import PublishingOrchestrator
+    assert PublishingOrchestrator is not None
+    assert PublishingOrchestrator.__name__ == "PublishingOrchestrator"
 
 
 def test_windows_variables_not_required_in_cloud(tmp_path):
@@ -314,11 +349,9 @@ def test_local_worker_preflight_and_smoke_test_defaults(tmp_path):
         assert ok is True
 
     # 2. Smoke test default is dry plan (0 sends)
-    with patch("automation.cloud.telegram_live_smoke_test.CloudConfig", return_value=mock_cfg):
-        res_smoke = run_smoke_test(send=False)
-        assert res_smoke is True
+    res_smoke = run_smoke_test(send=False, config=mock_cfg)
+    assert res_smoke is True
 
     # 3. Webhook setup default is dry plan (0 API writes)
-    with patch("automation.cloud.setup_telegram_webhook.CloudConfig", return_value=mock_cfg):
-        res_hook = setup_webhook(apply_changes=False)
-        assert res_hook is True
+    res_hook = setup_webhook(apply_changes=False, config=mock_cfg)
+    assert res_hook is True

@@ -14,21 +14,21 @@ from .config import CloudConfig
 from .telegram_bot import TelegramBotClient
 
 
-def run_smoke_test(send: bool = False) -> bool:
+def run_smoke_test(send: bool = False, config: Optional[CloudConfig] = None) -> bool:
     """Executes Telegram smoke test with strict safety defaults."""
-    config = CloudConfig()
-    if not config.telegram_bot_token:
+    cfg = config or CloudConfig()
+    if not cfg.telegram_bot_token:
         print("ERROR: TELEGRAM_BOT_TOKEN is not set.")
         return False
-    if not config.telegram_chat_id:
+    if not cfg.telegram_chat_id:
         print("ERROR: TELEGRAM_CHAT_ID is not set.")
         return False
 
     print("=" * 60)
     print("REELS AI FACTORY - TELEGRAM LIVE SMOKE TEST")
     print("=" * 60)
-    print(f"Target Chat ID : {config.telegram_chat_id}")
-    print(f"Bot Token      : {config.masked_bot_token}")
+    print(f"Target Chat ID : {cfg.telegram_chat_id}")
+    print(f"Bot Token      : {cfg.masked_bot_token}")
     print("=" * 60)
 
     if not send:
@@ -37,7 +37,7 @@ def run_smoke_test(send: bool = False) -> bool:
         print("python -m automation.cloud.telegram_live_smoke_test --send\n")
         return True
 
-    bot = TelegramBotClient(config.telegram_bot_token)
+    bot = TelegramBotClient(cfg.telegram_bot_token)
     test_msg = (
         "🤖 REELS AI FACTORY — BAĞLANTI TESTİ\n\n"
         "Cloud Control Plane Telegram bağlantısı başarıyla kuruldu.\n\n"

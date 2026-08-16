@@ -13,14 +13,14 @@ from .config import CloudConfig
 from .telegram_bot import TelegramBotClient
 
 
-def setup_webhook(apply_changes: bool = False, delete: bool = False) -> bool:
+def setup_webhook(apply_changes: bool = False, delete: bool = False, config: Optional[CloudConfig] = None) -> bool:
     """Configures Telegram webhook with safety flags."""
-    config = CloudConfig()
-    if not config.telegram_bot_token:
+    cfg = config or CloudConfig()
+    if not cfg.telegram_bot_token:
         print("ERROR: TELEGRAM_BOT_TOKEN is not set.")
         return False
 
-    bot = TelegramBotClient(config.telegram_bot_token)
+    bot = TelegramBotClient(cfg.telegram_bot_token)
 
     if delete:
         print("=" * 60)
@@ -37,16 +37,16 @@ def setup_webhook(apply_changes: bool = False, delete: bool = False) -> bool:
         print(f"[FAILED] Could not remove webhook: {err}")
         return False
 
-    if not config.public_base_url:
+    if not cfg.public_base_url:
         print("ERROR: PUBLIC_BASE_URL is not set in .env")
         return False
 
-    target_url = f"{config.public_base_url}/telegram/webhook"
+    target_url = f"{cfg.public_base_url}/telegram/webhook"
     print("=" * 60)
     print("TELEGRAM WEBHOOK REGISTRATION")
     print("=" * 60)
     print(f"Target Webhook URL : {target_url}")
-    print(f"Secret Token Set   : {bool(config.telegram_webhook_secret)}")
+    print(f"Secret Token Set   : {bool(cfg.telegram_webhook_secret)}")
     print(f"Allowed Updates    : ['message', 'callback_query']")
     print("=" * 60)
 
@@ -57,7 +57,7 @@ def setup_webhook(apply_changes: bool = False, delete: bool = False) -> bool:
 
     ok, err = bot.set_webhook(
         url=target_url,
-        secret_token=config.telegram_webhook_secret or None,
+        secret_token=cfg.telegram_webhook_secret or None,
         allowed_updates=["message", "callback_query"]
     )
     if ok:
