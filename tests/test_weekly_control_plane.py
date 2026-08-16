@@ -360,6 +360,14 @@ def test_instagram_worker_claims_and_publishes_due_job(tmp_path):
     cfg = CloudConfig(tmp_path)
     cfg.database_url = f"sqlite:///{db_file}"
     cfg.instagram_prepare_minutes_before = 30
+    # CloudConfig defaults to dry_run=True / allow_upload=False / allow_publish=False, so
+    # execute_job() would short-circuit at its dry-run safety gate and never reach the
+    # upload -> poll -> publish -> remote-verify path this test exists to cover. Enabling
+    # the flags here is safe because api_client below is a fully mocked
+    # InstagramAPIClient -- no real Meta Graph API call can happen.
+    cfg.instagram_dry_run = False
+    cfg.instagram_allow_upload = True
+    cfg.instagram_allow_publish = True
 
     db = Database(cfg.database_url)
     storage = LocalMediaStorageAdapter(tmp_path / "media_storage")
@@ -408,6 +416,52 @@ def test_instagram_worker_claims_and_publishes_due_job(tmp_path):
     assert completed_job.status == InstagramJobStatus.REMOTE_VERIFIED
     assert completed_job.remote_media_id == "IG_MEDIA_99999"
     assert completed_job.permalink == "https://instagr.am/p/123"
+
+
+def test_instagram_worker_dry_run_gate_blocks_real_upload(tmp_path):
+    """The default CloudConfig safety flags (dry_run=True / allow_upload=False) must stop
+    execute_job() before any binary upload or publish call reaches Meta -- a job may only
+    be simulated, never really published, unless the flags are explicitly enabled."""
+    db_file = tmp_path / "cloud_test.db"
+    cfg = CloudConfig(tmp_path)
+    cfg.database_url = f"sqlite:///{db_file}"
+    cfg.instagram_prepare_minutes_before = 30
+    # Deliberately NOT enabling instagram_dry_run/allow_upload/allow_publish.
+
+    db = Database(cfg.database_url)
+    storage = LocalMediaStorageAdapter(tmp_path / "media_storage")
+
+    mock_mp4 = tmp_path / "mock_reel.mp4"
+    mock_mp4.write_bytes(b"x" * 2048)
+    media_key = storage.put_file(mock_mp4, "reels/REEL-0012.mp4")
+
+    now_dt = datetime.datetime.now()
+    job = InstagramScheduledJob(
+        job_id="JOB-IG-DRY",
+        week_id="2026-W35",
+        reel_id="REEL-2026-0012",
+        scheduled_at_local=(now_dt + datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
+        scheduled_at_utc=(now_dt - datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+        media_object_key=media_key,
+        media_sha256=compute_file_sha256(mock_mp4),
+        caption="Dry run guard",
+        status=InstagramJobStatus.MEDIA_READY
+    )
+    db.save_instagram_job(job)
+
+    mock_api = MagicMock(spec=InstagramAPIClient)
+    mock_api.check_publishing_limit.return_value = (True, {"quota_usage": 0, "config": {"quota_total": 25}}, None)
+    mock_api.create_reels_container.return_value = (True, "CREATED", "CONT_DRY", "https://rupload.meta.com/dry")
+
+    worker = InstagramCloudWorker(cfg, db, storage, api_client=mock_api)
+    assert worker.process_due_jobs("test_worker") == 1
+
+    mock_api.upload_video_resumable.assert_not_called()
+    mock_api.publish_media.assert_not_called()
+
+    dry_job = db.get_instagram_job("JOB-IG-DRY")
+    assert dry_job.remote_media_id == "MOCK_DRY_RUN_ID"
+    assert dry_job.status == InstagramJobStatus.PUBLISHED
 
 
 def test_notification_duplicate_prevention(tmp_path):
