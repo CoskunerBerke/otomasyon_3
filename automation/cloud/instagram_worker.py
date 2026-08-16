@@ -1,7 +1,7 @@
 """
 Always-On Instagram Cloud Publishing Worker.
 Processes scheduled Instagram jobs, manages preparation windows, streams binary media from storage,
-executes official Meta Graph API publishing, and enforces strict exactly-once safety.
+executes official Meta Graph API publishing, and enforces strict exactly-once safety and safety flags.
 """
 import os
 import time
@@ -50,9 +50,9 @@ class InstagramCloudWorker:
                 graph_version=config.meta_graph_version,
                 account_id=config.instagram_account_id,
                 expected_username=config.instagram_expected_username,
-                dry_run=False,
-                allow_upload=True,
-                allow_publish=True
+                dry_run=config.instagram_dry_run,
+                allow_upload=config.instagram_allow_upload,
+                allow_publish=config.instagram_allow_publish
             )
             self.client = InstagramAPIClient(ig_cfg)
 
@@ -61,7 +61,6 @@ class InstagramCloudWorker:
         Scans for due jobs within the preparation window and processes them.
         Returns the number of jobs processed.
         """
-        import datetime
         now_dt = datetime.datetime.now()
         # Look ahead by prepare_minutes
         prepare_cutoff = (now_dt + datetime.timedelta(minutes=self.config.instagram_prepare_minutes_before)).strftime("%Y-%m-%d %H:%M:%S")
@@ -81,7 +80,7 @@ class InstagramCloudWorker:
 
     def execute_job(self, job: InstagramScheduledJob) -> bool:
         """
-        Executes a single claimed Instagram job lifecycle with exactly-once safety.
+        Executes a single claimed Instagram job lifecycle with safety flags and exactly-once safety.
         """
         if not job.media_object_key:
             job.status = InstagramJobStatus.FAILED_FATAL
@@ -131,16 +130,16 @@ class InstagramCloudWorker:
                 video_path=temp_video_path,
                 caption=job.caption,
                 share_to_feed=True,
-                dry_run=False,
-                allow_upload=True,
-                allow_publish=True
+                dry_run=self.config.instagram_dry_run,
+                allow_upload=self.config.instagram_allow_upload,
+                allow_publish=self.config.instagram_allow_publish
             )
 
             job.status = InstagramJobStatus.UPLOADING_TO_META
             self.db.save_instagram_job(job)
 
             ok_cont, msg_cont, container_id, upload_uri = self.client.create_reels_container(publish_req)
-            if not ok_cont or not container_id or not upload_uri:
+            if not ok_cont or not container_id:
                 job.status = InstagramJobStatus.FAILED_RETRYABLE
                 job.last_error = f"CONTAINER_CREATE_FAILED: {msg_cont}"
                 self.db.save_instagram_job(job)
@@ -148,12 +147,20 @@ class InstagramCloudWorker:
 
             job.container_id = container_id
 
+            # Dry-run early exit
+            if self.config.instagram_dry_run or not self.config.instagram_allow_upload:
+                logger.info(f"[IG WORKER] DRY RUN / UPLOAD DISABLED: Simulation completed for {job.job_id}")
+                job.status = InstagramJobStatus.PUBLISHED
+                job.remote_media_id = "MOCK_DRY_RUN_ID"
+                self.db.save_instagram_job(job)
+                return True
+
             # 4. Stream binary video to Meta
             ok_up, msg_up = self.client.upload_video_resumable(
                 upload_uri=upload_uri,
                 video_path=temp_video_path,
-                dry_run=False,
-                allow_upload=True
+                dry_run=self.config.instagram_dry_run,
+                allow_upload=self.config.instagram_allow_upload
             )
             if not ok_up:
                 job.status = InstagramJobStatus.FAILED_RETRYABLE
@@ -175,20 +182,24 @@ class InstagramCloudWorker:
             job.status = InstagramJobStatus.READY_TO_PUBLISH
             self.db.save_instagram_job(job)
 
+            # Check if live publish is enabled
+            if not self.config.instagram_allow_publish:
+                logger.info(f"[IG WORKER] PUBLISH DISABLED: Container {container_id} ready but publishing disabled.")
+                return True
+
             # 6. Publish Media (Exactly-once safe)
             job.status = InstagramJobStatus.PUBLISHING
             self.db.save_instagram_job(job)
 
             ok_pub, msg_pub, media_id = self.client.publish_media(
                 container_id=container_id,
-                dry_run=False,
-                allow_publish=True
+                dry_run=self.config.instagram_dry_run,
+                allow_publish=self.config.instagram_allow_publish
             )
 
             if not ok_pub or not media_id:
                 # If network timeout occurs after publish call, reconcile first before retry
                 logger.warning(f"[IG WORKER] Publish call returned {msg_pub}. Performing safety reconciliation...")
-                # Do not immediately retry upload
                 job.status = InstagramJobStatus.FAILED_RETRYABLE
                 job.last_error = f"PUBLISH_FAILED: {msg_pub}"
                 self.db.save_instagram_job(job)

@@ -11,12 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install python dependencies
-COPY requirements.txt* ./
+# Install production python dependencies for cloud control plane
 RUN pip install --no-cache-dir \
     requests \
     tzdata \
-    pyyaml
+    pyyaml \
+    "boto3>=1.34.0" \
+    "psycopg[binary]>=3.1.0"
 
 # Copy application codebase
 COPY . .

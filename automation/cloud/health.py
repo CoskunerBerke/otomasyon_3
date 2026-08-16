@@ -1,6 +1,6 @@
 """
 Health and Status Diagnostics Endpoint for Cloud Control Plane.
-Exposes sanitized system diagnostics for Railway health checks and monitoring.
+Exposes sanitized system diagnostics and safety flags for Railway health checks and monitoring.
 Strictly ensures no secrets or sensitive tokens are exposed.
 """
 import datetime
@@ -59,9 +59,12 @@ def get_health_status(config: CloudConfig, db: Database) -> Dict[str, Any]:
     return {
         "status": overall_status,
         "database": db_status,
-        "scheduler": "ENABLED" if config.enable_weekly_scheduler else "DISABLED",
-        "telegram_configured": config.is_telegram_configured,
+        "weekly_scheduler": "ENABLED" if config.enable_weekly_scheduler else "DISABLED",
         "instagram_worker": "ENABLED" if config.enable_instagram_worker else "DISABLED",
+        "instagram_dry_run": config.instagram_dry_run,
+        "instagram_allow_upload": config.instagram_allow_upload,
+        "instagram_allow_publish": config.instagram_allow_publish,
+        "telegram_configured": config.is_telegram_configured,
         "storage_configured": storage_ok,
         "local_worker_online": worker_online,
         "media_storage_backend": config.media_storage_backend,

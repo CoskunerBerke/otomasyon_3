@@ -9,58 +9,56 @@ Bu kılavuz, Reels AI Factory Cloud Control Plane sistemini **Railway** üzerind
 
 ---
 
-### ADIM 2: Yeni Proje Oluşturun
-1. Railway Dashboard'da **"New Project"** butonuna tıklayın.
+### ADIM 2: Mevcut Projenizi Açın
+1. Railway Dashboard'da oluşturduğunuz projeyi (EU West / Amsterdam) açın.
 
 ---
 
 ### ADIM 3: GitHub Deponuzu Deploy Edin
-1. **"Deploy from GitHub repo"** seçeneğini seçin.
-2. `Otomasyon_3` projenizin bulunduğu depoyu seçin.
+1. Proje tuvalinde **"+ Create"** veya **"+ Add"** -> **"GitHub Repository"** seçin.
+2. `CoskunerBerke/otomasyon_3` deposunu seçin.
 3. Railway, kök dizindeki `Dockerfile` ve `railway.toml` dosyalarını otomatik olarak tanıyacaktır.
 
 ---
 
-### ADIM 4: PostgreSQL Servisini Ekleyin
-1. Proje tuvalinde (Canvas) sağ tıklayın veya **"+ Create"** butonuna basın.
-2. **"Database"** -> **"Add PostgreSQL"** seçeneğini seçin.
+### ADIM 4: PostgreSQL Servisini Doğrulayın
+1. Proje tuvalinde PostgreSQL servisinizin (Postgres) hazır olduğunu doğrulayın.
 
 ---
 
-### ADIM 5: Private Storage Bucket Ekleyin
-1. Proje tuvalinde **"+ Create"** butonuna basın.
-2. **"Storage Bucket"** (S3-Compatible) servisini ekleyin.
-3. Bucket ayarlarından **Public Access = OFF (Private)** olduğundan emin olun.
+### ADIM 5: Private Storage Bucket'ı Doğrulayın
+1. Proje tuvalinde Storage Bucket servisinizin (Örn: `functional-piggybank`) hazır olduğunu doğrulayın.
+2. Bucket ayarlarından **Public Access = OFF (Private)** olduğundan emin olun.
 
 ---
 
 ### ADIM 6: Uygulama Değişkenlerini (Variables) Açın
-1. Deponuzdan deploy edilen **Cloud API** servisine tıklayın.
+1. Deponuzdan deploy edilen **otomasyon_3** servisine tıklayın.
 2. **"Variables"** sekmesini açın.
 
 ---
 
 ### ADIM 7: PostgreSQL Bağlantısını Yapılandırın
-1. Variables içine yeni bir değişken ekleyin:
-   ```env
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
-   ```
-   *(Railway bu referansı otomatik olarak canlı PostgreSQL adresinize bağlar).*
+Railway Variable Reference kullanarak bağlayın:
+```env
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+```
 
 ---
 
 ### ADIM 8: Storage Bucket Değişkenlerini Eşleyin
-Bucket Credentials sekmesindeki değerleri uygulamanıza ekleyin:
+Railway Variable Reference kullanarak eşleyin (Bucket servis adınız `functional-piggybank` ise):
 ```env
 MEDIA_STORAGE_BACKEND=s3
-S3_ENDPOINT_URL=<Bucket_Endpoint_URL>
-S3_BUCKET=<Bucket_Name>
-S3_ACCESS_KEY_ID=<Bucket_Access_Key>
-S3_SECRET_ACCESS_KEY=<Bucket_Secret_Key>
-S3_REGION=us-east-1
+S3_ENDPOINT_URL=${{functional-piggybank.ENDPOINT}}
+S3_BUCKET=${{functional-piggybank.BUCKET}}
+S3_ACCESS_KEY_ID=${{functional-piggybank.ACCESS_KEY_ID}}
+S3_SECRET_ACCESS_KEY=${{functional-piggybank.SECRET_ACCESS_KEY}}
+S3_REGION=${{functional-piggybank.REGION}}
 MEDIA_RETENTION_DAYS=7
 ENABLE_MEDIA_CLEANUP=false
 ```
+*(Not: `BUCKET` değişkeni Railway'in oluşturduğu gerçek S3 bucket adıdır).*
 
 ---
 
@@ -83,11 +81,17 @@ INSTAGRAM_ACCOUNT_ID=17841411536006797
 INSTAGRAM_EXPECTED_USERNAME=builddverse
 INSTAGRAM_PREPARE_MINUTES_BEFORE=15
 
+# İlk Deploy Güvenlik Modu (Simülasyon / Kapalı)
+INSTAGRAM_DRY_RUN=true
+INSTAGRAM_ALLOW_UPLOAD=false
+INSTAGRAM_ALLOW_PUBLISH=false
+
 LOCAL_WORKER_API_KEY=<Secure_Worker_Key>
+LOCAL_WORKER_POLL_SECONDS=60
 
 ENABLE_TELEGRAM_WEBHOOK=true
-ENABLE_WEEKLY_SCHEDULER=true
-ENABLE_INSTAGRAM_WORKER=true
+ENABLE_WEEKLY_SCHEDULER=false
+ENABLE_INSTAGRAM_WORKER=false
 ```
 
 *(Not: `TELEGRAM_WEBHOOK_SECRET` üretmek için yerel terminalde `.venv\Scripts\python.exe -m automation.cloud.generate_webhook_secret` çalıştırabilirsiniz).*
@@ -95,16 +99,16 @@ ENABLE_INSTAGRAM_WORKER=true
 ---
 
 ### ADIM 10: Public Domain Üretin
-1. Cloud API servisinizin **"Settings"** sekmesine gidin.
+1. `otomasyon_3` servisinizin **"Settings"** sekmesine gidin.
 2. **"Networking"** -> **"Generate Domain"** butonuna tıklayın.
-3. Size özel bir URL üretilecektir (Örn: `https://reels-cloud-production.up.railway.app`).
+3. Size özel bir URL üretilecektir (Örn: `https://otomasyon3-production.up.railway.app`).
 
 ---
 
 ### ADIM 11: PUBLIC_BASE_URL Tanımlayın
 1. Üretilen HTTPS domain adresini Variables içine ekleyin:
    ```env
-   PUBLIC_BASE_URL=https://reels-cloud-production.up.railway.app
+   PUBLIC_BASE_URL=https://otomasyon3-production.up.railway.app
    ```
 2. Servis otomatik olarak yeniden deploy olacaktır.
 
@@ -117,9 +121,12 @@ ENABLE_INSTAGRAM_WORKER=true
    {
      "status": "HEALTHY",
      "database": "CONNECTED",
-     "scheduler": "ENABLED",
+     "weekly_scheduler": "DISABLED",
+     "instagram_worker": "DISABLED",
+     "instagram_dry_run": true,
+     "instagram_allow_upload": false,
+     "instagram_allow_publish": false,
      "telegram_configured": true,
-     "instagram_worker": "ENABLED",
      "storage_configured": true
    }
    ```
@@ -159,7 +166,7 @@ S3_ENDPOINT_URL=<Bucket_Endpoint_URL>
 S3_BUCKET=<Bucket_Name>
 S3_ACCESS_KEY_ID=<Bucket_Access_Key>
 S3_SECRET_ACCESS_KEY=<Bucket_Secret_Key>
-S3_REGION=us-east-1
+S3_REGION=auto
 ```
 
 ---

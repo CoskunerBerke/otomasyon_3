@@ -96,9 +96,15 @@ class CloudScheduler:
         return dispatched_count
 
     def run_iteration(self) -> Dict[str, Any]:
-        """Runs a single scheduler evaluation iteration."""
-        approvals_sent = self.check_day6_approvals()
-        ig_jobs_processed = self.instagram_worker.process_due_jobs()
+        """Runs a single scheduler evaluation iteration respecting subsystem feature flags."""
+        approvals_sent = 0
+        ig_jobs_processed = 0
+
+        if self.config.enable_weekly_scheduler:
+            approvals_sent = self.check_day6_approvals()
+
+        if self.config.enable_instagram_worker:
+            ig_jobs_processed = self.instagram_worker.process_due_jobs()
 
         return {
             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
