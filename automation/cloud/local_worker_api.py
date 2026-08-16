@@ -671,7 +671,10 @@ def handle_diagnostic_cleanup(
     - remote_media_id is empty/null
     - container_id is empty/null
     - published_at is empty/null
-    Deletes the exact S3 object and DB row.
+    - week_id == '2099-W52'
+    - reel_id == 'REEL-2099-9999'
+    - media_object_key starts with 'media/2099-W52/REEL-2099-9999/'
+    Deletes the exact S3 object first, verifies S3 deletion, and only then deletes DB row.
     """
     auth_ok, auth_err = _authenticate_worker(headers, config)
     if not auth_ok:
@@ -693,37 +696,63 @@ def handle_diagnostic_cleanup(
             "message": f"Job {job_id} not found."
         }
 
+    # Strict restriction checks
     if (
         job.status != InstagramJobStatus.MEDIA_READY
         or bool(job.remote_media_id)
         or bool(job.container_id)
         or bool(job.published_at)
+        or job.week_id != "2099-W52"
+        or job.reel_id != "REEL-2099-9999"
+        or not (job.media_object_key and job.media_object_key.startswith("media/2099-W52/REEL-2099-9999/"))
     ):
         return 403, {
             "ok": False,
             "error": "DIAGNOSTIC_CLEANUP_NOT_ALLOWED",
-            "message": f"Job {job_id} is in status {job.status.value} and cannot be cleaned via diagnostic API."
+            "message": f"Job {job_id} does not meet diagnostic cleanup requirements."
         }
 
     adapter = storage or get_media_storage(config)
-    s3_deleted = False
 
+    # 1. Delete S3 object first
     if job.media_object_key:
         try:
             adapter.delete_file(job.media_object_key)
-            s3_deleted = not adapter.exists(job.media_object_key)
         except Exception as e:
             logger.error(f"[DIAG CLEANUP] Error deleting S3 object {job.media_object_key}: {e}")
-            s3_deleted = False
-    else:
-        s3_deleted = True
 
-    db_deleted = db.delete_instagram_job(job_id)
+        # 2. Verify S3 object is confirmed deleted (or was already absent)
+        try:
+            if adapter.exists(job.media_object_key):
+                logger.error(f"[DIAG CLEANUP] S3 object {job.media_object_key} still exists after delete attempt.")
+                return 500, {
+                    "ok": False,
+                    "error": "DIAGNOSTIC_S3_CLEANUP_FAILED",
+                    "message": f"S3 object {job.media_object_key} could not be confirmed deleted."
+                }
+        except Exception as e:
+            logger.error(f"[DIAG CLEANUP] Error verifying S3 object deletion: {e}")
+            return 500, {
+                "ok": False,
+                "error": "DIAGNOSTIC_S3_CLEANUP_FAILED",
+                "message": f"S3 object deletion verification failed: {e}"
+            }
+
+    # 3. S3 is confirmed clean -> Delete DB record
+    db.delete_instagram_job(job_id)
+
+    # 4. Verify DB record is confirmed deleted
+    if db.get_instagram_job(job_id) is not None:
+        logger.error(f"[DIAG CLEANUP] DB job {job_id} still exists after delete attempt.")
+        return 500, {
+            "ok": False,
+            "error": "DIAGNOSTIC_DB_CLEANUP_FAILED",
+            "message": f"Database job {job_id} could not be confirmed deleted."
+        }
 
     return 200, {
         "ok": True,
         "status": "DIAGNOSTIC_CLEANED",
-        "job_id": job_id,
-        "s3_deleted": s3_deleted,
-        "db_deleted": db_deleted
+        "s3_deleted": True,
+        "db_deleted": True
     }

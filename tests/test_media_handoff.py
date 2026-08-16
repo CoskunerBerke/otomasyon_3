@@ -492,6 +492,90 @@ def test_diagnostic_cleanup_auth_and_restrictions(tmp_path):
     assert resp["error"] == "DIAGNOSTIC_CLEANUP_NOT_ALLOWED"
 
 
+def test_diagnostic_cleanup_fails_if_s3_still_exists_and_preserves_db(tmp_path):
+    """Test: If S3 object cannot be deleted and still exists, DB row is PRESERVED and 500 is returned."""
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = "valid_secret_key_123"
+    db = Database(f"sqlite:///{tmp_path / 'test.db'}")
+
+    diag_job = InstagramScheduledJob(
+        job_id="DIAG-HANDOFF-s3fail",
+        week_id="2099-W52",
+        reel_id="REEL-2099-9999",
+        scheduled_at_local="2099-12-28 19:30:00",
+        scheduled_at_utc="2099-12-28 16:30:00",
+        media_object_key="media/2099-W52/REEL-2099-9999/test.mp4",
+        status=InstagramJobStatus.MEDIA_READY
+    )
+    db.save_instagram_job(diag_job)
+
+    mock_storage = MagicMock()
+    mock_storage.exists.return_value = True  # S3 still exists!
+
+    headers = {"X-Worker-Api-Key": "valid_secret_key_123"}
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "DIAG-HANDOFF-s3fail"}, cfg, db, storage=mock_storage)
+
+    assert code == 500
+    assert resp["error"] == "DIAGNOSTIC_S3_CLEANUP_FAILED"
+
+    # CRITICAL: DB row MUST NOT be deleted when S3 delete fails
+    job_in_db = db.get_instagram_job("DIAG-HANDOFF-s3fail")
+    assert job_in_db is not None
+
+
+def test_diagnostic_cleanup_rejects_wrong_week_or_reel_or_prefix(tmp_path):
+    """Test: Diagnostic cleanup strictly rejects jobs not matching 2099-W52 / REEL-2099-9999 / media/2099-W52/..."""
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = "valid_secret_key_123"
+    db = Database(f"sqlite:///{tmp_path / 'test.db'}")
+    headers = {"X-Worker-Api-Key": "valid_secret_key_123"}
+
+    # 1. Wrong week_id
+    job1 = InstagramScheduledJob(
+        job_id="DIAG-HANDOFF-wrongweek",
+        week_id="2026-W34",
+        reel_id="REEL-2099-9999",
+        scheduled_at_local="2099-12-28 19:30:00",
+        scheduled_at_utc="2099-12-28 16:30:00",
+        media_object_key="media/2099-W52/REEL-2099-9999/test.mp4",
+        status=InstagramJobStatus.MEDIA_READY
+    )
+    db.save_instagram_job(job1)
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "DIAG-HANDOFF-wrongweek"}, cfg, db)
+    assert code == 403
+    assert resp["error"] == "DIAGNOSTIC_CLEANUP_NOT_ALLOWED"
+
+    # 2. Wrong reel_id
+    job2 = InstagramScheduledJob(
+        job_id="DIAG-HANDOFF-wrongreel",
+        week_id="2099-W52",
+        reel_id="REEL-2026-0011",
+        scheduled_at_local="2099-12-28 19:30:00",
+        scheduled_at_utc="2099-12-28 16:30:00",
+        media_object_key="media/2099-W52/REEL-2099-9999/test.mp4",
+        status=InstagramJobStatus.MEDIA_READY
+    )
+    db.save_instagram_job(job2)
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "DIAG-HANDOFF-wrongreel"}, cfg, db)
+    assert code == 403
+    assert resp["error"] == "DIAGNOSTIC_CLEANUP_NOT_ALLOWED"
+
+    # 3. Wrong media_object_key prefix
+    job3 = InstagramScheduledJob(
+        job_id="DIAG-HANDOFF-wrongkey",
+        week_id="2099-W52",
+        reel_id="REEL-2099-9999",
+        scheduled_at_local="2099-12-28 19:30:00",
+        scheduled_at_utc="2099-12-28 16:30:00",
+        media_object_key="media/2026-W34/REEL-2026-0011/test.mp4",
+        status=InstagramJobStatus.MEDIA_READY
+    )
+    db.save_instagram_job(job3)
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "DIAG-HANDOFF-wrongkey"}, cfg, db)
+    assert code == 403
+    assert resp["error"] == "DIAGNOSTIC_CLEANUP_NOT_ALLOWED"
+
+
 def test_diagnostic_cleanup_success(tmp_path):
     """Test: Diagnostic cleanup deletes exact S3 object and DB row for valid DIAG-HANDOFF job."""
     cfg = CloudConfig(tmp_path)
@@ -522,9 +606,7 @@ def test_diagnostic_cleanup_success(tmp_path):
     assert resp["s3_deleted"] is True
     assert resp["db_deleted"] is True
 
-    # S3 delete called
     mock_storage.delete_file.assert_called_once_with("media/2099-W52/REEL-2099-9999/test.mp4")
-    # DB row deleted
     assert db.get_instagram_job("DIAG-HANDOFF-clean123") is None
 
 
