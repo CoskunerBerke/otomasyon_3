@@ -195,7 +195,8 @@ class WeeklyOrchestrator:
         # 5. GENERATE MISSING V3 REELS (IF LIVE & NEEDED)
         if needed > 0 and not self.dry_run:
             logger.info(f"[ORCHESTRATOR] Generating {needed} missing V3 Reels via Flow...")
-            generated_reels = self._generate_missing_v3_reels(needed=needed, week_id=week_id)
+            already_eligible_ids = {r["id"] for r in available_reels}
+            generated_reels = self._generate_missing_v3_reels(needed=needed, week_id=week_id, used_ids=already_eligible_ids)
             # Re-validate through the same live-eligibility gate used for scanned inventory.
             # This is what keeps MockVideoProvider output from entering live publishing even
             # within the same run (e.g. an orchestrator misconfigured with mock=True, live).
@@ -361,7 +362,7 @@ class WeeklyOrchestrator:
 
         return sorted(eligible, key=lambda r: r["id"])
 
-    def _generate_missing_v3_reels(self, needed: int, week_id: str) -> List[Dict[str, Any]]:
+    def _generate_missing_v3_reels(self, needed: int, week_id: str, used_ids: Optional[set] = None) -> List[Dict[str, Any]]:
         """
         Generates missing V3 Reels sequentially using ContentEngine, VideoProvider, and VideoValidator.
 
@@ -371,11 +372,21 @@ class WeeklyOrchestrator:
         second run sees COMPLETE/PASS state and never re-generates or re-spends Flow
         credits) and ensures metadata never falls back to a generic placeholder.
 
+        `used_ids` must contain every Reel ID already resolved as live-eligible inventory
+        by the caller (_scan_v3_inventory). Without this, the ID-selection loop below only
+        checked is_reel_available_for_new_batch() -- a PLATFORM-PUBLISH-status check, not a
+        "does this ID already have a real video" check -- so it could and did pick an ID
+        like REEL-2026-0011 that already had a COMPLETE real video, generate entirely
+        different content under the same ID, and overwrite its ReelState (2026-08-17
+        incident: this silently destroyed the backfilled state for REEL-2026-0011/0013/0014
+        and wasted real Flow credits regenerating them).
+
         Reels produced by MockVideoProvider (self.mock=True) are tagged with
         source=mock_test_provider so they can never re-enter live inventory later, even
         though they are returned here for the caller to re-validate through the same
         live-eligibility gate used for scanned inventory.
         """
+        used_ids = used_ids or set()
         if self.flow_provider is None:
             self._init_publishers_if_needed(need_generation=True)
 
@@ -400,9 +411,18 @@ class WeeklyOrchestrator:
             while True:
                 candidate_id = f"REEL-2026-{curr_num:04d}"
                 curr_num += 1
-                if candidate_id not in HARD_EXCLUDED_REEL_IDS and self.repo.is_reel_available_for_new_batch(candidate_id):
-                    chosen_id = candidate_id
-                    break
+                if candidate_id in HARD_EXCLUDED_REEL_IDS or candidate_id in used_ids:
+                    continue
+                if not self.repo.is_reel_available_for_new_batch(candidate_id):
+                    continue
+                existing_state = self.repo.get_reel_state(candidate_id)
+                if existing_state is not None and existing_state.generation_status == "COMPLETE":
+                    # Already has a real, generated video -- never overwrite it with new content.
+                    used_ids.add(candidate_id)
+                    continue
+                chosen_id = candidate_id
+                used_ids.add(chosen_id)
+                break
 
             logger.info(f"[GENERATION] Generating {chosen_id} ({plan.title}) via Flow...")
             target_filename = f"clean_{chosen_id}_{plan.topic_key}.mp4"
@@ -491,7 +511,21 @@ class WeeklyOrchestrator:
                 used_ids.add(slot.reel_id)
 
         curr_num = 11
-        avail_ids = [r["id"] for r in available_reels if r["id"] not in used_ids]
+        # Defense-in-depth de-duplication: available_reels can (in principle) contain more
+        # than one entry for the same reel_id (e.g. one from the initial scan and one from
+        # freshly generated inventory). Assigning the same reel_id to two different slots
+        # is a severe failure mode -- it causes two slots to try scheduling the same video
+        # to two different times on the same platform, corrupting the shared browser page
+        # state for every subsequent slot in the run (2026-08-17 incident: this is exactly
+        # what happened to REEL-2026-0011/0013/0014, cascading into ACCOUNT_MISMATCH for
+        # every remaining Reel that run). The real fix is in _generate_missing_v3_reels
+        # (used_ids), but this guard stays as a hard backstop.
+        seen_ids = set()
+        avail_ids = []
+        for r in available_reels:
+            if r["id"] not in used_ids and r["id"] not in seen_ids:
+                avail_ids.append(r["id"])
+                seen_ids.add(r["id"])
 
         for slot in plan.slots:
             if not slot.reel_id or slot.reel_id in HARD_EXCLUDED_REEL_IDS:

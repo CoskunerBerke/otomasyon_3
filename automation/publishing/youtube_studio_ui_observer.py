@@ -62,6 +62,20 @@ class YouTubeStudioUIObserver:
         self.current_remote_id: Optional[str] = None
         self._active_wizard_dialog: Optional[Any] = None
 
+    def capture_error_snapshot(self, tag: str) -> None:
+        """Capture screenshot + HTML dump for post-mortem diagnosis of opaque wizard/schedule
+        failures, mirroring automation/flow/page.py's FlowPage.capture_error_snapshot."""
+        try:
+            import datetime as _dt
+            shots_dir = Path("screenshots") / "errors"
+            shots_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.page.screenshot(path=str(shots_dir / f"error_{tag}_{timestamp}.png"), full_page=True)
+            html_content = self.page.content()
+            (shots_dir / f"error_{tag}_{timestamp}.html").write_text(html_content, encoding="utf-8", errors="ignore")
+        except Exception as e:
+            logger.debug(f"[SNAPSHOT] Failed to capture error snapshot for '{tag}': {e}")
+
     def is_logged_in(self) -> bool:
         """Check if user has an active session on YouTube Studio."""
         curr_url = self.page.url
@@ -117,6 +131,7 @@ class YouTubeStudioUIObserver:
             if exp_handle_norm in det_norm or "buildverse" in det_norm:
                 return True, detected_text, f"YouTube Channel Verified: {detected_text}"
             else:
+                self.capture_error_snapshot("account_mismatch")
                 return False, detected_text, f"ACCOUNT_MISMATCH: Expected '{expected_handle}', detected '{detected_text}'"
 
         return True, expected_handle, f"YouTube Channel assumed active ({expected_handle})"
@@ -364,6 +379,7 @@ class YouTubeStudioUIObserver:
             except Exception as e:
                 logger.debug(f"File input selector {sel} failed: {e}")
 
+        self.capture_error_snapshot("file_input_not_found")
         return False
 
     def wait_for_upload_completion(self, timeout_seconds: int = 120) -> bool:
@@ -1126,6 +1142,7 @@ class YouTubeStudioUIObserver:
                 return False, "WIZARD_STEP_TRANSITION_FAILED: Could not click Next from CHECKS"
             logger.info("[CHECKS] Waiting for VISIBILITY")
             if not self._wait_for_wizard_step(WizardStep.VISIBILITY, timeout_seconds=15):
+                self.capture_error_snapshot("wizard_visibility_transition_failed")
                 return False, f"WIZARD_STEP_TRANSITION_FAILED: Expected VISIBILITY, got {self.detect_current_wizard_step()}"
             logger.info("[WIZARD] VISIBILITY reached")
             current_step = WizardStep.VISIBILITY
@@ -1968,6 +1985,7 @@ class YouTubeStudioUIObserver:
             time.sleep(1.5)
 
         logger.error("[SCHEDULE_CONFIRMATION_NOT_VERIFIED] Final Schedule was clicked, but no confirmation UI was observed within timeout.")
+        self.capture_error_snapshot("schedule_confirmation_not_verified")
         return False, "SCHEDULE_CONFIRMATION_NOT_VERIFIED"
 
     def verify_remote_scheduled_status(

@@ -85,8 +85,21 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                         break
                 if not page:
                     page = context.new_page()
-                    channel_url = f"https://studio.youtube.com/channel/{self.config.youtube_expected_channel_id or ''}"
+
+                # Always return to a known-clean canonical page before touching this
+                # page's state. Without this, a page left open from a PREVIOUS reel's
+                # failed/partial attempt (e.g. stuck mid-editor after a wizard-step or
+                # schedule-confirmation failure) gets reused as-is: verify_logged_in_channel()
+                # then reads whatever text happens to be on that leftover page (e.g. the
+                # previous video's title) instead of the actual channel name, misreporting
+                # ACCOUNT_MISMATCH for every subsequent Reel in the same run (2026-08-17
+                # incident: 10 consecutive Reels falsely blocked after Reel #1 left the page
+                # in a bad state).
+                channel_url = f"https://studio.youtube.com/channel/{self.config.youtube_expected_channel_id or ''}"
+                try:
                     page.goto(channel_url, wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:
+                    logger.warning(f"[{record.reel_id}] Failed to navigate to canonical channel page: {e}")
 
                 observer = YouTubeStudioUIObserver(page)
                 time.sleep(2.0)

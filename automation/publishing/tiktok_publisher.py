@@ -48,7 +48,17 @@ class TikTokPublisher(BaseTikTokPublisher):
                         break
                 if not page:
                     page = context.new_page()
+
+                # Always return to a known-clean canonical page before touching this
+                # page's state -- same fix and same reasoning as YouTubeStudioPublisher:
+                # a page left open mid-editor from a previous Reel's attempt causes
+                # verify_logged_in_username() to read stale/wrong DOM content (e.g. a raw
+                # numeric user ID) instead of the actual @handle, misreporting
+                # ACCOUNT_MISMATCH for every subsequent Reel in the same run.
+                try:
                     page.goto(self.config.tiktok_url, wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:
+                    logger.warning(f"[{record.reel_id}] Failed to navigate to canonical TikTok page: {e}")
 
                 observer = TikTokUIObserver(page)
                 time.sleep(2.0)

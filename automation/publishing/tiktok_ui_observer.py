@@ -19,6 +19,20 @@ class TikTokUIObserver:
     def __init__(self, page: Any):
         self.page = page
 
+    def capture_error_snapshot(self, tag: str) -> None:
+        """Capture screenshot + HTML dump for post-mortem diagnosis, mirroring
+        automation/flow/page.py's FlowPage.capture_error_snapshot."""
+        try:
+            import datetime as _dt
+            shots_dir = Path("screenshots") / "errors"
+            shots_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.page.screenshot(path=str(shots_dir / f"error_{tag}_{timestamp}.png"), full_page=True)
+            html_content = self.page.content()
+            (shots_dir / f"error_{tag}_{timestamp}.html").write_text(html_content, encoding="utf-8", errors="ignore")
+        except Exception as e:
+            logger.debug(f"[SNAPSHOT] Failed to capture error snapshot for '{tag}': {e}")
+
     def is_logged_in(self) -> bool:
         """Check if user has an active logged-in session on TikTok Studio."""
         curr_url = self.page.url
@@ -78,6 +92,7 @@ class TikTokUIObserver:
             if act_norm == exp_norm or "kitchenverse" in act_norm:
                 return True, f"@{detected_username}", f"TikTok User Verified: @{detected_username}"
             else:
+                self.capture_error_snapshot("account_mismatch")
                 return False, f"@{detected_username}", f"ACCOUNT_MISMATCH: Expected '{expected_username}', detected '@{detected_username}'"
 
         return True, expected_username, f"TikTok User assumed active ({expected_username})"
