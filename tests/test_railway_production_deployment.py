@@ -355,3 +355,36 @@ def test_local_worker_preflight_and_smoke_test_defaults(tmp_path):
     # 3. Webhook setup default is dry plan (0 API writes)
     res_hook = setup_webhook(apply_changes=False, config=mock_cfg)
     assert res_hook is True
+
+
+def test_telegram_smoke_test_send_with_none_config(tmp_path):
+    """Test: run_smoke_test(send=True, config=None) does not raise AttributeError and uses instantiated cfg."""
+    import automation.cloud.telegram_live_smoke_test as smoke_mod
+    mock_cfg = CloudConfig(tmp_path)
+    mock_cfg.telegram_bot_token = "mock_bot_token_123"
+    mock_cfg.telegram_chat_id = 1835798213
+
+    with patch.object(smoke_mod, "CloudConfig", return_value=mock_cfg):
+        with patch.object(smoke_mod.TelegramBotClient, "send_message", return_value=(True, 999, None)) as mock_send:
+            success = smoke_mod.run_smoke_test(send=True, config=None)
+            assert success is True
+
+            mock_send.assert_called_once()
+            called_kwargs = mock_send.call_args[1]
+            assert called_kwargs["chat_id"] == 1835798213
+
+
+def test_telegram_smoke_test_send_with_explicit_config(tmp_path):
+    """Test: run_smoke_test(send=True, config=cfg) uses the passed config object."""
+    import automation.cloud.telegram_live_smoke_test as smoke_mod
+    mock_cfg = CloudConfig(tmp_path)
+    mock_cfg.telegram_bot_token = "explicit_bot_token_456"
+    mock_cfg.telegram_chat_id = 99887766
+
+    with patch.object(smoke_mod.TelegramBotClient, "send_message", return_value=(True, 1001, None)) as mock_send:
+        success = smoke_mod.run_smoke_test(send=True, config=mock_cfg)
+        assert success is True
+
+        mock_send.assert_called_once()
+        called_kwargs = mock_send.call_args[1]
+        assert called_kwargs["chat_id"] == 99887766

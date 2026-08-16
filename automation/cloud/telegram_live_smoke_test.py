@@ -54,7 +54,7 @@ def run_smoke_test(send: bool = False, config: Optional[CloudConfig] = None) -> 
 
     print("\nSending live test message to Telegram...")
     ok, msg_id, err = bot.send_message(
-        chat_id=config.telegram_chat_id,
+        chat_id=cfg.telegram_chat_id,
         text=test_msg,
         reply_markup=test_keyboard
     )
