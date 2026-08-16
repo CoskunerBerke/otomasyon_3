@@ -1,0 +1,61 @@
+<!-- Sanitized Real DOM Snapshot of TikTok Studio Upload & Joyride Overlay Controls -->
+<div class="tiktok-studio-container">
+  <!-- React Joyride Onboarding / Tour Overlay -->
+  <div id="react-joyride-portal">
+    <div role="presentation" data-test-id="overlay" class="react-joyride__overlay" style="position: fixed; inset: 0px; z-index: 1500; pointer-events: auto;">
+      <div class="react-joyride__tooltip" style="position: absolute; z-index: 1501;">
+        <div class="tooltip-body">İçerik planlama özelliğini kullanın</div>
+        <button aria-label="Close" data-action="close" class="jsx-btn-close">Kapat</button>
+        <button aria-label="Skip" data-action="skip" class="jsx-btn-skip">Atla</button>
+        <button aria-label="Next" data-action="next" class="jsx-btn-next">İleri</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Caption / Açıklama (DraftEditor) -->
+  <div class="caption-container">
+    <div aria-autocomplete="list" aria-expanded="false" class="notranslate public-DraftEditor-content" contenteditable="true" role="combobox" spellcheck="false" style="outline: none; user-select: text; white-space: pre-wrap; word-break: break-word;">
+      <div data-contents="true">
+        <div data-block="true" data-editor="editor-id" data-offset-key="0-0-0">
+          <div data-offset-key="0-0-0" class="public-DraftStyleDefault-block public-DraftStyleDefault-ltr">
+            <span data-offset-key="0-0-0">REEL-2026-0010_Japanese_Zen_Temple</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schedule Mode Radios (Planla / Şimdi) -->
+  <div class="jsx-2483585186 schedule-radio-container">
+    <label class="Radio__root Radio__root--disabled-false">
+      <span class="Radio__circle Radio__circle--checked-true">
+        <input type="radio" name="post_mode" value="now" checked="" class="Radio__input">
+      </span>
+      <span class="Radio__text">Şimdi</span>
+    </label>
+
+    <label class="Radio__root Radio__root--disabled-false">
+      <span class="Radio__circle Radio__circle--checked-false">
+        <input type="radio" name="post_mode" value="schedule" class="Radio__input">
+      </span>
+      <span class="Radio__text">Planla</span>
+    </label>
+  </div>
+
+  <!-- Date & Time Inputs -->
+  <div class="schedule-datetime-container">
+    <div class="date-picker-input">
+      <input type="text" placeholder="YYYY-MM-DD" value="2026-08-16" class="Tiktok-date-input">
+    </div>
+    <div class="time-picker-input">
+      <input type="text" placeholder="HH:mm" value="19:30" class="Tiktok-time-input">
+    </div>
+  </div>
+
+  <!-- Final Schedule / Paylaş Action Button -->
+  <div class="bottom-action-container">
+    <button type="button" class="TUXButton TUXButton--primary TUXButton--medium">
+      <span class="TUXButton-content">Planla</span>
+    </button>
+  </div>
+</div>

@@ -1,0 +1,52 @@
+# Virtual Environments
+.venv/
+env/
+venv/
+
+# Environment and Secrets (CRITICAL)
+.env
+.env.local
+.env.development
+.env.production
+*.key
+*.pem
+secrets/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Browser Profiles and Playwright Binaries
+browser-profile/
+.playwright/
+
+# Media Archives and Video Files
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wav
+*.mp3
+AI_Reels/
+workspace/downloads/
+workspace/segments/
+workspace/cloud_media_storage/
+tmp_dl/
+
+# Logs and Screenshots
+logs/
+screenshots/
+*.log
+
+# Git
+.git/
+.github/
+.gitignore
+
+# Obsidian Vault
+obsidian/
+Obsidian/

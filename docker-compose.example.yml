@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # Cloud Control Plane Web & Webhook Server
+  cloud_api:
+    build: .
+    container_name: reels_ai_cloud_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///workspace/cloud_control_plane.db
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ALLOWED_USER_ID=${TELEGRAM_ALLOWED_USER_ID}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
+      - WEEKLY_APPROVAL_DAY=6
+      - WEEKLY_APPROVAL_LOCAL_TIME=${WEEKLY_APPROVAL_LOCAL_TIME}
+      - LOCAL_WORKER_API_KEY=${LOCAL_WORKER_API_KEY}
+      - MEDIA_STORAGE_BACKEND=local
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - INSTAGRAM_ACCOUNT_ID=${INSTAGRAM_ACCOUNT_ID}
+      - INSTAGRAM_EXPECTED_USERNAME=${INSTAGRAM_EXPECTED_USERNAME}
+    volumes:
+      - ./workspace:/app/workspace
+
+  # Background Scheduler & Instagram Worker
+  cloud_scheduler:
+    build: .
+    container_name: reels_ai_cloud_scheduler
+    restart: unless-stopped
+    command: ["python", "-m", "automation.cloud.scheduler"]
+    environment:
+      - DATABASE_URL=sqlite:///workspace/cloud_control_plane.db
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ALLOWED_USER_ID=${TELEGRAM_ALLOWED_USER_ID}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - WEEKLY_APPROVAL_DAY=6
+      - WEEKLY_APPROVAL_LOCAL_TIME=${WEEKLY_APPROVAL_LOCAL_TIME}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - INSTAGRAM_ACCOUNT_ID=${INSTAGRAM_ACCOUNT_ID}
+      - INSTAGRAM_EXPECTED_USERNAME=${INSTAGRAM_EXPECTED_USERNAME}
+    volumes:
+      - ./workspace:/app/workspace
+    depends_on:
+      - cloud_api

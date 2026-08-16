@@ -1,0 +1,61 @@
+<!-- Sanitized Real DOM Snapshot of YouTube Studio Upload/Edit Draft Wizard -->
+<div class="ytcp-uploads-dialog">
+  <!-- Stepper -->
+  <div role="tablist" class="ytcp-stepper">
+    <tp-yt-paper-tab class="style-scope ytcp-stepper" aria-selected="true">
+      <div class="tab-content">Ayrıntılar</div>
+    </tp-yt-paper-tab>
+    <tp-yt-paper-tab class="style-scope ytcp-stepper" aria-selected="false">
+      <div class="tab-content">Video öğeleri</div>
+    </tp-yt-paper-tab>
+    <tp-yt-paper-tab class="style-scope ytcp-stepper" aria-selected="false">
+      <div class="tab-content">İlk kontrol</div>
+    </tp-yt-paper-tab>
+    <tp-yt-paper-tab class="style-scope ytcp-stepper" aria-selected="false">
+      <div class="tab-content">Görünürlük</div>
+    </tp-yt-paper-tab>
+  </div>
+
+  <!-- Draft Banner on /edit page -->
+  <div class="draft-banner">
+    <span>Bu video taslak durumunda</span>
+    <button id="edit-draft-button" class="ytcp-button" aria-label="Taslağı düzenle">Taslağı düzenle</button>
+  </div>
+
+  <!-- Audience Section (Details Step) -->
+  <div id="audience" class="style-scope ytcp-video-metadata-editor-basics">
+    <div id="radioLabel" class="style-scope ytkc-made-for-kids-select">Bu video çocuklara özel mi? (zorunlu)</div>
+    <tp-yt-paper-radio-group class="style-scope ytkc-made-for-kids-select" role="radiogroup">
+      <tp-yt-paper-radio-button name="VIDEO_MADE_FOR_KIDS_MFK" class="style-scope ytkc-made-for-kids-select iron-selected" role="radio" tabindex="0" toggles="" aria-checked="true">
+        <div id="radioContainer" class="style-scope tp-yt-paper-radio-button">
+          <div id="offRadio" class="style-scope tp-yt-paper-radio-button"></div>
+          <div id="onRadio" class="style-scope tp-yt-paper-radio-button"></div>
+        </div>
+        <div id="radioLabel" class="style-scope tp-yt-paper-radio-button">Evet, çocuklara özel</div>
+      </tp-yt-paper-radio-button>
+
+      <tp-yt-paper-radio-button name="VIDEO_MADE_FOR_KIDS_NOT_MFK" class="style-scope ytkc-made-for-kids-select" role="radio" tabindex="-1" toggles="" aria-checked="false">
+        <div id="radioContainer" class="style-scope tp-yt-paper-radio-button">
+          <div id="offRadio" class="style-scope tp-yt-paper-radio-button"></div>
+          <div id="onRadio" class="style-scope tp-yt-paper-radio-button"></div>
+        </div>
+        <div id="radioLabel" class="style-scope tp-yt-paper-radio-button">Hayır, çocuklara özel değil</div>
+      </tp-yt-paper-radio-button>
+    </tp-yt-paper-radio-group>
+  </div>
+
+  <!-- Visibility Step Schedule Accordion -->
+  <div id="schedule-section" class="style-scope ytcp-uploads-review">
+    <div id="heading" class="style-scope ytcp-uploads-review">Planlayın</div>
+    <div id="second-container-expand-button" class="style-scope ytcp-uploads-review" role="button" aria-expanded="true"></div>
+    <div id="datetime-picker" class="style-scope ytcp-datetime-picker">
+      <label id="paper-input-label-1" class="style-scope tp-yt-paper-input">Saat</label>
+      <tp-yt-paper-input id="time-input" class="style-scope ytcp-datetime-picker">
+        <input class="style-scope tp-yt-paper-input" autocomplete="off" placeholder="" autocapitalize="none" autocorrect="off" aria-describedby="" aria-labelledby="paper-input-label-1" value="00:00">
+      </tp-yt-paper-input>
+    </div>
+    <ytcp-button id="done-button" track-click="" type="filled" class="style-scope ytcp-uploads-dialog" button-style="default">
+      <button class="ytcp-button-shape-impl">Planla</button>
+    </ytcp-button>
+  </div>
+</div>

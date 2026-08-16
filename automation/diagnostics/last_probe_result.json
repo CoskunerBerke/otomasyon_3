@@ -1,0 +1,68 @@
+{
+  "youtube": {
+    "cdp_connected": true,
+    "remote_draft_opened": true,
+    "draft_banner_found": true,
+    "edit_draft_button_found": true,
+    "edit_draft_button_text": "Taslağı düzenle",
+    "wizard_ready": false,
+    "active_step": null,
+    "stepper_labels": [],
+    "audience_yes": {
+      "index": 8,
+      "label_type": "YES (Made for Kids)",
+      "name": "VIDEO_MADE_FOR_KIDS_MFK",
+      "visible": true,
+      "aria_checked": "true",
+      "text": "Evet, çocuklara özel\n.\nKişiselleştirilmiş reklamlar ve bildirimler gibi özellikler, çocuklara özel videolarda kullanılamaz. Çocuklara Özel olarak ayarladığınız videoların, diğer çocuk videolarının yanında önerilme olasılığı daha yüksektir. Daha fazla bilgi",
+      "html": "<tp-yt-paper-radio-button name=\"VIDEO_MADE_FOR_KIDS_MFK\" class=\"style-scope ytkc-made-for-kids-select iron-selected\" role=\"radio\" tabindex=\"0\" toggles"
+    },
+    "audience_no": {
+      "index": 9,
+      "label_type": "NO (Not Made for Kids)",
+      "name": "VIDEO_MADE_FOR_KIDS_NOT_MFK",
+      "visible": true,
+      "aria_checked": "false",
+      "text": "Hayır, çocuklara özel değil",
+      "html": "<tp-yt-paper-radio-button name=\"VIDEO_MADE_FOR_KIDS_NOT_MFK\" class=\"style-scope ytkc-made-for-kids-select\" role=\"radio\" tabindex=\"-1\" toggles=\"\" aria-"
+    },
+    "audience_current_checked": null,
+    "paper_inputs": [
+      {
+        "index": 0,
+        "visible": true,
+        "value": "00:00",
+        "aria_labelledby": "paper-input-label-1",
+        "resolved_label": "",
+        "html": "<input class=\"style-scope tp-yt-paper-input\" autocomplete=\"off\" placeholder=\"\" autocapitalize=\"none\" autocorrect=\"off\" aria-describedby=\"\" aria-labelledby=\"paper-input-label-1\">"
+      }
+    ],
+    "schedule_time_input": {
+      "index": 0,
+      "visible": true,
+      "value": "00:00",
+      "aria_labelledby": "paper-input-label-1",
+      "resolved_label": "",
+      "html": "<input class=\"style-scope tp-yt-paper-input\" autocomplete=\"off\" placeholder=\"\" autocapitalize=\"none\" autocorrect=\"off\" aria-describedby=\"\" aria-labelledby=\"paper-input-label-1\">"
+    },
+    "schedule_date_input": null,
+    "final_schedule_button": {
+      "text": "Planla",
+      "enabled": true,
+      "html": "<ytcp-button id=\"done-button\" track-click=\"\" type=\"filled\" class=\"style-scope ytcp-uploads-dialog\" tabindex=\"-1\" button-style=\"default\" icon-alignment"
+    }
+  },
+  "tiktok": {
+    "cdp_connected": true,
+    "editor_detected": false,
+    "joyride_overlay_found": false,
+    "joyride_buttons": [],
+    "caption_editor_found": false,
+    "caption_current_text": null,
+    "planla_radio_found": false,
+    "simdi_radio_found": false,
+    "date_input": null,
+    "time_input": null,
+    "final_action_button": null
+  }
+}
