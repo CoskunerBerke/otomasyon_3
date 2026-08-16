@@ -29,7 +29,8 @@ from .local_worker_api import (
     handle_get_next_command,
     handle_complete_command,
     handle_sync_cloud_state,
-    handle_storage_self_test
+    handle_storage_self_test,
+    handle_media_upload
 )
 
 
@@ -49,9 +50,11 @@ class CloudApp:
 
     def route_request(self, method: str, path: str, headers: Dict[str, str], body_json: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
         """Unified internal router for HTTP / ASGI / WSGI."""
-        clean_path = path.rstrip("/")
+        clean_path = path.split("?")[0].rstrip("/")
+        if not clean_path:
+            clean_path = "/"
 
-        if method == "GET" and (clean_path == "/health" or clean_path == ""):
+        if method == "GET" and (clean_path == "/health" or clean_path == "/"):
             return 200, get_health_status(self.config, self.db)
 
         if method == "POST" and clean_path == "/telegram/webhook":
@@ -75,6 +78,9 @@ class CloudApp:
 
         if method == "POST" and clean_path == "/worker/storage/self-test":
             return handle_storage_self_test(headers, self.config, self.storage)
+
+        if method == "POST" and clean_path == "/worker/media/upload":
+            return handle_media_upload(headers, body_json, self.config, self.db, self.storage)
 
         return 404, {"ok": False, "error": "NOT_FOUND"}
 
@@ -123,13 +129,23 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         headers_dict = {k: v for k, v in self.headers.items()}
         content_len = int(self.headers.get("Content-Length", 0))
+        content_type = self.headers.get("Content-Type", "")
+
+        if content_len > 105 * 1024 * 1024:
+            self._send_json(413, {"ok": False, "error": "MEDIA_TOO_LARGE", "message": "Request exceeds maximum 100 MB limit"})
+            return
+
         body_data = {}
         if content_len > 0:
             raw_body = self.rfile.read(content_len)
-            try:
-                body_data = json.loads(raw_body.decode("utf-8"))
-            except Exception:
-                body_data = {}
+            if "multipart/form-data" in content_type:
+                body_data = {"__raw_multipart__": raw_body, "__content_type__": content_type}
+            else:
+                try:
+                    body_data = json.loads(raw_body.decode("utf-8"))
+                except Exception:
+                    body_data = {"__raw_body__": raw_body}
+
         code, resp = self.app.route_request("POST", self.path, headers_dict, body_data)
         self._send_json(code, resp)
 

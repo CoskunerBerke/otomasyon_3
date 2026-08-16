@@ -1,7 +1,8 @@
 """
 REST Handlers for Local Windows Worker Communication with Cloud Control Plane.
 Protects endpoints with Worker API Key authentication.
-Includes worker heartbeat, command dispatching, state sync, and private storage diagnostic round-trip.
+Includes worker heartbeat, command dispatching, state sync, private storage self-test,
+and authenticated MP4 media upload with S3 storage and Instagram job registration.
 """
 import os
 import uuid
@@ -19,7 +20,9 @@ from .database import Database
 from .models import (
     WorkerHeartbeat,
     LocalWorkerCommand,
-    CommandStatus
+    CommandStatus,
+    InstagramScheduledJob,
+    InstagramJobStatus
 )
 from .security import verify_worker_api_key
 from .media_storage import MediaStorageInterface, compute_file_sha256, get_media_storage
@@ -37,6 +40,37 @@ def _authenticate_worker(headers: Dict[str, str], config: CloudConfig) -> Tuple[
     if verify_worker_api_key(received_key, config.local_worker_api_key):
         return True, None
     return False, "UNAUTHORIZED_WORKER_KEY"
+
+
+def _parse_multipart_form(raw_body: bytes, content_type: str) -> Tuple[Dict[str, str], Optional[Tuple[str, str, bytes]]]:
+    """
+    Parses multipart/form-data into form fields and a file tuple (filename, content_type, file_bytes).
+    Returns (form_fields_dict, file_info_or_None).
+    """
+    from email.parser import BytesParser
+    from email.policy import default
+
+    header_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
+    msg = BytesParser(policy=default).parsebytes(header_bytes + raw_body)
+
+    fields = {}
+    file_info = None
+
+    for part in msg.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        filename = part.get_filename()
+        if filename:
+            file_bytes = part.get_payload(decode=True) or b""
+            part_content_type = part.get_content_type()
+            file_info = (filename, part_content_type, file_bytes)
+        elif name:
+            val_bytes = part.get_payload(decode=True) or b""
+            try:
+                fields[name] = val_bytes.decode("utf-8")
+            except Exception:
+                fields[name] = val_bytes.decode("latin-1", errors="replace")
+
+    return fields, file_info
 
 
 def handle_worker_heartbeat(
@@ -284,3 +318,211 @@ def handle_storage_self_test(
                     f.unlink()
                 except Exception:
                     pass
+
+
+def handle_media_upload(
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    config: CloudConfig,
+    db: Database,
+    storage: Optional[MediaStorageInterface] = None
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handles POST /worker/media/upload.
+    Receives finalized MP4 file via multipart/form-data or dict payload,
+    validates size, extension, SHA256 integrity, uploads to private S3 deterministically,
+    and registers InstagramScheduledJob with status MEDIA_READY in PostgreSQL.
+    """
+    auth_ok, auth_err = _authenticate_worker(headers, config)
+    if not auth_ok:
+        return 401, {"ok": False, "error": auth_err}
+
+    # Extract multipart fields and file
+    file_bytes = b""
+    filename = ""
+    fields = {}
+
+    if "__raw_multipart__" in payload:
+        raw_mp = payload["__raw_multipart__"]
+        ct = payload.get("__content_type__", "")
+        fields, file_info = _parse_multipart_form(raw_mp, ct)
+        if file_info:
+            filename, _, file_bytes = file_info
+    else:
+        fields = payload
+        file_bytes = payload.get("file", b"")
+        filename = payload.get("filename", "video.mp4")
+
+    # If file_bytes is str (e.g. mock or json), encode to bytes
+    if isinstance(file_bytes, str):
+        file_bytes = file_bytes.encode("utf-8")
+
+    week_id = str(fields.get("week_id", "")).strip()
+    reel_id = str(fields.get("reel_id", "")).strip()
+    scheduled_at_local = str(fields.get("scheduled_at_local", "")).strip()
+    scheduled_at_utc = str(fields.get("scheduled_at_utc", "")).strip()
+    timezone_str = str(fields.get("timezone", config.timezone_str or "Europe/Istanbul")).strip()
+    caption = str(fields.get("caption", "")).strip()
+    client_sha256 = str(fields.get("media_sha256", "")).strip().lower()
+    job_id = str(fields.get("job_id", "")).strip() or f"JOB-{week_id}-{reel_id}"
+
+    # Validation: week_id and reel_id (no traversal, no slashes)
+    if not week_id or "/" in week_id or "\\" in week_id or ".." in week_id:
+        return 400, {"ok": False, "error": "INVALID_WEEK_ID", "message": "Invalid or unsafe week_id"}
+    if not reel_id or "/" in reel_id or "\\" in reel_id or ".." in reel_id:
+        return 400, {"ok": False, "error": "INVALID_REEL_ID", "message": "Invalid or unsafe reel_id"}
+
+    # Validation: filename must end in .mp4
+    if not filename.lower().endswith(".mp4"):
+        return 400, {"ok": False, "error": "INVALID_MEDIA_FORMAT", "message": "File must end in .mp4"}
+
+    # Validation: file size
+    if not file_bytes or len(file_bytes) == 0:
+        return 400, {"ok": False, "error": "MEDIA_EMPTY", "message": "Uploaded media file is empty"}
+
+    max_size = 100 * 1024 * 1024  # 100 MB
+    if len(file_bytes) > max_size:
+        return 413, {"ok": False, "error": "MEDIA_TOO_LARGE", "message": "File exceeds maximum 100 MB limit"}
+
+    # Write to local temp file to compute server SHA256
+    temp_dir = Path(tempfile.gettempdir()) / "cloud_media_uploads"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_file = temp_dir / f"upload_{uuid.uuid4().hex[:12]}.mp4"
+
+    temp_file.write_bytes(file_bytes)
+    server_sha256 = compute_file_sha256(temp_file).lower()
+
+    if not client_sha256 or client_sha256 != server_sha256:
+        if temp_file.exists():
+            temp_file.unlink()
+        return 400, {
+            "ok": False,
+            "error": "MEDIA_SHA256_MISMATCH",
+            "message": f"Calculated SHA256 ({server_sha256}) did not match provided SHA256 ({client_sha256})"
+        }
+
+    # Deterministic object key (strictly without traversal)
+    object_key = f"media/{week_id}/{reel_id}/{server_sha256}.mp4"
+
+    # Pre-check existing PostgreSQL job for conflicts or advanced state
+    existing_job = db.get_instagram_job(job_id)
+    if existing_job:
+        adv_statuses = {
+            InstagramJobStatus.PUBLISHED,
+            InstagramJobStatus.REMOTE_VERIFIED,
+            InstagramJobStatus.PUBLISHING,
+            InstagramJobStatus.UPLOADING_TO_META,
+            InstagramJobStatus.PROCESSING,
+            InstagramJobStatus.READY_TO_PUBLISH,
+            InstagramJobStatus.PREPARING
+        }
+        if existing_job.status in adv_statuses:
+            if temp_file.exists():
+                temp_file.unlink()
+            return 409, {
+                "ok": False,
+                "error": "JOB_ALREADY_ADVANCED",
+                "message": f"Job {job_id} is already in state {existing_job.status.value} and cannot be reset to MEDIA_READY."
+            }
+
+        if existing_job.media_sha256 and existing_job.media_sha256.lower() != server_sha256:
+            if temp_file.exists():
+                temp_file.unlink()
+            return 409, {
+                "ok": False,
+                "error": "MEDIA_CONFLICT",
+                "message": f"Job {job_id} already exists with different media SHA ({existing_job.media_sha256})."
+            }
+
+    adapter = storage or get_media_storage(config)
+    if not adapter.is_ready():
+        if temp_file.exists():
+            temp_file.unlink()
+        return 500, {"ok": False, "error": "STORAGE_NOT_READY", "message": "Media storage backend is not ready"}
+
+    newly_created_s3_object = False
+    try:
+        # Check if exact S3 object exists (Idempotency)
+        if adapter.exists(object_key):
+            is_idempotent = True
+        else:
+            adapter.put_file(temp_file, object_key, content_type="video/mp4")
+            newly_created_s3_object = True
+            is_idempotent = False
+
+        # Verify storage
+        exists_verified = adapter.exists(object_key)
+        if not exists_verified:
+            return 500, {"ok": False, "error": "STORAGE_VERIFICATION_FAILED", "message": "Object not found in storage after upload"}
+
+        meta = adapter.get_metadata(object_key)
+        if meta and meta.get("size_bytes") and meta.get("size_bytes") != len(file_bytes):
+            return 500, {"ok": False, "error": "STORAGE_VERIFICATION_FAILED", "message": "Storage object size mismatch"}
+
+        # If existing job is already MEDIA_READY with same sha, return idempotent success
+        if existing_job and existing_job.status == InstagramJobStatus.MEDIA_READY and existing_job.media_sha256 == server_sha256:
+            return 200, {
+                "ok": True,
+                "status": "MEDIA_READY",
+                "job_id": existing_job.job_id,
+                "week_id": existing_job.week_id,
+                "reel_id": existing_job.reel_id,
+                "media_object_key": existing_job.media_object_key,
+                "media_sha256": existing_job.media_sha256,
+                "size_bytes": len(file_bytes),
+                "storage_verified": True,
+                "idempotent": True
+            }
+
+        # Create or update InstagramScheduledJob
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        job = InstagramScheduledJob(
+            job_id=job_id,
+            week_id=week_id,
+            reel_id=reel_id,
+            scheduled_at_local=scheduled_at_local,
+            scheduled_at_utc=scheduled_at_utc,
+            timezone=timezone_str,
+            media_object_key=object_key,
+            media_sha256=server_sha256,
+            caption=caption,
+            status=InstagramJobStatus.MEDIA_READY,
+            created_at=existing_job.created_at if existing_job else now_str,
+            updated_at=now_str
+        )
+
+        try:
+            db.save_instagram_job(job)
+        except Exception as db_err:
+            logger.error(f"[MEDIA UPLOAD] Failed to save Instagram job to database: {db_err}")
+            # Rollback: if we created a new S3 object in this request, delete it
+            if newly_created_s3_object:
+                try:
+                    adapter.delete_file(object_key)
+                except Exception:
+                    pass
+            return 500, {
+                "ok": False,
+                "error": "DATABASE_SAVE_FAILED",
+                "message": f"Failed to persist job to database: {db_err}"
+            }
+
+        return 200, {
+            "ok": True,
+            "status": "MEDIA_READY",
+            "job_id": job.job_id,
+            "week_id": job.week_id,
+            "reel_id": job.reel_id,
+            "media_object_key": job.media_object_key,
+            "media_sha256": job.media_sha256,
+            "size_bytes": len(file_bytes),
+            "storage_verified": True,
+            "idempotent": is_idempotent
+        }
+
+    finally:
+        if temp_file.exists():
+            try:
+                temp_file.unlink()
+            except Exception:
+                pass

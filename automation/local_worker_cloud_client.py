@@ -1,16 +1,19 @@
 """
 Lightweight Cloud API Client for Local Windows Worker.
 Communicates with Railway Cloud Control Plane via authenticated HTTP REST endpoints.
-Handles heartbeats, command polling, completion reporting, and state synchronization.
+Handles heartbeats, command polling, completion reporting, state synchronization,
+private storage self-test, and multipart media upload for Instagram scheduling.
 Strictly avoids exposing API keys in logs and provides clear error diagnostics.
 """
 import logging
-from typing import Dict, Any, Optional, Tuple, List
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple, List, Union
 import requests
 
 logger = logging.getLogger("ReelsAIFactory.LocalWorkerCloudClient")
 
 from automation.cloud.config import mask_secret
+from automation.cloud.media_storage import compute_file_sha256
 
 
 class LocalWorkerCloudClient:
@@ -194,4 +197,91 @@ class LocalWorkerCloudClient:
                 return False, data, f"HTTP_{resp.status_code}"
         except requests.exceptions.RequestException as e:
             logger.error(f"[CLOUD CLIENT] Connection error running storage self-test: {e}")
+            return False, {}, "CLOUD_UNREACHABLE"
+
+    def upload_media_for_instagram(
+        self,
+        local_path: Union[str, Path],
+        week_id: str,
+        reel_id: str,
+        scheduled_at_local: str,
+        scheduled_at_utc: str,
+        timezone: str = "Europe/Istanbul",
+        caption: str = "",
+        job_id: Optional[str] = None
+    ) -> Tuple[bool, Dict[str, Any], Optional[str]]:
+        """
+        Uploads a finalized local MP4 file to Railway private S3 storage and registers MEDIA_READY Instagram job.
+        Computes SHA256 locally, sends authenticated multipart POST to /worker/media/upload.
+        Returns (success, response_dict, error_code).
+        """
+        if not self.public_base_url:
+            return False, {}, "PUBLIC_BASE_URL_MISSING"
+        if not self.api_key:
+            return False, {}, "WORKER_API_DISABLED"
+
+        p = Path(local_path).resolve()
+        if not p.exists() or not p.is_file():
+            return False, {}, "FILE_NOT_FOUND"
+
+        if not p.name.lower().endswith(".mp4"):
+            return False, {}, "INVALID_MEDIA_FORMAT"
+
+        file_size = p.stat().st_size
+        if file_size == 0:
+            return False, {}, "MEDIA_EMPTY"
+
+        if file_size > 100 * 1024 * 1024:
+            return False, {}, "MEDIA_TOO_LARGE"
+
+        local_sha256 = compute_file_sha256(p).lower()
+
+        url = self._url("/worker/media/upload")
+        form_data = {
+            "week_id": week_id,
+            "reel_id": reel_id,
+            "scheduled_at_local": scheduled_at_local,
+            "scheduled_at_utc": scheduled_at_utc,
+            "timezone": timezone,
+            "caption": caption,
+            "media_sha256": local_sha256
+        }
+        if job_id:
+            form_data["job_id"] = job_id
+
+        try:
+            with open(p, "rb") as f:
+                files = {
+                    "file": (p.name, f, "video/mp4")
+                }
+                resp = self.session.post(
+                    url,
+                    data=form_data,
+                    files=files,
+                    timeout=max(self.timeout, 60.0)
+                )
+
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            if resp.status_code == 200:
+                logger.info(f"[CLOUD CLIENT] Media upload succeeded: {data.get('media_object_key')}")
+                return True, data, None
+            elif resp.status_code in (401, 403):
+                return False, data, "UNAUTHORIZED_WORKER_KEY"
+            elif resp.status_code == 409:
+                err_code = data.get("error", "CONFLICT")
+                return False, data, err_code
+            elif resp.status_code == 413:
+                return False, data, "MEDIA_TOO_LARGE"
+            elif resp.status_code == 400:
+                err_code = data.get("error", "BAD_REQUEST")
+                return False, data, err_code
+            else:
+                return False, data, f"HTTP_{resp.status_code}"
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[CLOUD CLIENT] Connection error during media upload: {e}")
             return False, {}, "CLOUD_UNREACHABLE"
