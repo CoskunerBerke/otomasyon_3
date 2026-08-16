@@ -1,4 +1,19 @@
 """
+LEGACY / DEPRECATED FOR LIVE WEEKLY EXECUTION (as of 2026-08-17).
+
+The live production entrypoint is now automation/simple_weekly_pipeline.py -- a
+deterministic, sequential, one-Reel-at-a-time pipeline (PLAN -> GENERATE -> VALIDATE ->
+LOCK -> YOUTUBE -> TIKTOK -> INSTAGRAM_HANDOFF -> DONE) that never lets a platform phase
+start before the previous one is fully (14/14) done. HAFTALIK_14_REEL_URET_VE_PLANLA.bat
+and LocalWorker's GENERATE_WEEK command both call it, not this module.
+
+This module is kept only for backward compatibility (existing tests, manual/legacy
+invocation) and must not be treated as a production entrypoint or patched further to
+add live-execution behavior -- extend automation/simple_weekly_pipeline.py instead.
+See .claude/skills/weekly-resume-manager for the current pipeline's resume contract.
+
+--- Original docstring below ---
+
 Weekly 14-Reel Orchestrator & Multi-Platform Publishing Control Center.
 Coordinates 7-day 14-Reel production, QC, slot scheduling (19:30 & 22:00 Europe/Istanbul),
 real Flow V3 generation, real YouTube Studio native scheduling, real TikTok Studio native scheduling,

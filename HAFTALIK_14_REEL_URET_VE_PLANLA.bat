@@ -18,15 +18,15 @@ if not exist ".venv\Scripts\python.exe" (
 set ARGS=--live
 if "%1"=="--dry-run" set ARGS=--dry-run
 
-echo Running Weekly Orchestrator (%ARGS%)...
-.venv\Scripts\python.exe -m automation.weekly_orchestrator %ARGS%
+echo Running Simple Weekly Pipeline (%ARGS%)...
+.venv\Scripts\python.exe -m automation.simple_weekly_pipeline %ARGS%
 set EXIT_CODE=%ERRORLEVEL%
 
 echo.
 if %EXIT_CODE% equ 0 (
     echo [SUCCESS] Weekly pipeline execution completed successfully.
 ) else (
-    echo [FAILED] Weekly orchestrator encountered an error.
+    echo [FAILED] Weekly pipeline stopped - see terminal output above for the phase and Reel that needs attention.
 )
 
 pause

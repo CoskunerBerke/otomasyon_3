@@ -18,7 +18,7 @@ from automation.cloud.config import CloudConfig
 from automation.cloud.media_storage import get_media_storage, MediaStorageInterface
 from automation.cloud_sync import CloudObsidianSync
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
-from automation.weekly_orchestrator import WeeklyOrchestrator
+from automation.simple_weekly_pipeline import SimpleWeeklyPipeline
 
 
 class LocalWorker:
@@ -46,7 +46,11 @@ class LocalWorker:
                 worker_id=self.worker_id
             )
 
-        self.orchestrator = WeeklyOrchestrator(
+        # simple_weekly_pipeline.SimpleWeeklyPipeline is the LIVE production entrypoint
+        # (deterministic, sequential PLAN->GENERATE->LOCK->YOUTUBE->TIKTOK->INSTAGRAM_HANDOFF->DONE).
+        # weekly_orchestrator.WeeklyOrchestrator is legacy/deprecated for live execution --
+        # do not route real weekly generation through it.
+        self.pipeline = SimpleWeeklyPipeline(
             base_dir=self.base_dir,
             vault_path=vault_path,
             dry_run=False,
@@ -81,14 +85,19 @@ class LocalWorker:
 
         try:
             if cmd_type == "GENERATE_WEEK":
-                # Execute weekly pipeline locally
-                success, report, plan = self.orchestrator.run_weekly_pipeline(week_id=week_id)
+                # Execute the deterministic sequential pipeline locally, one phase at a
+                # time (see automation/simple_weekly_pipeline.py). week_id comes from the
+                # cloud command, so it must be set on the pipeline before each run.
+                self.pipeline.week_id = week_id
+                success, results, manifest = self.pipeline.run()
                 if success:
                     self.client.complete_command(cmd_id, status="COMPLETE")
                     logger.info(f"[LOCAL WORKER] Command {cmd_id} completed successfully.")
                     return cmd_id
                 else:
-                    self.client.complete_command(cmd_id, status="FAILED_RETRYABLE", error_message="Orchestrator failed")
+                    last_result = results[-1] if results else None
+                    error_message = last_result.message if last_result else "Pipeline failed"
+                    self.client.complete_command(cmd_id, status="FAILED_RETRYABLE", error_message=error_message)
                     return cmd_id
 
             elif cmd_type == "SYNC_STATE":
