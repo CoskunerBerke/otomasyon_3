@@ -157,3 +157,41 @@ class LocalWorkerCloudClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"[CLOUD CLIENT] Connection error syncing cloud state: {e}")
             return False, {}, "CLOUD_UNREACHABLE"
+
+    def run_storage_self_test(self) -> Tuple[bool, Dict[str, Any], Optional[str]]:
+        """
+        Triggers cloud private S3 storage round-trip diagnostic via POST /worker/storage/self-test.
+        Sends X-Worker-Api-Key and X-Storage-Smoke-Test: true.
+        Returns (success, response_dict, error_code).
+        """
+        if not self.public_base_url:
+            return False, {}, "PUBLIC_BASE_URL_MISSING"
+        if not self.api_key:
+            return False, {}, "WORKER_API_DISABLED"
+
+        url = self._url("/worker/storage/self-test")
+        custom_headers = {
+            "X-Storage-Smoke-Test": "true"
+        }
+
+        try:
+            resp = self.session.post(url, headers=custom_headers, timeout=self.timeout)
+            if resp.status_code == 200:
+                return True, resp.json(), None
+            elif resp.status_code in (401, 403):
+                return False, {}, "UNAUTHORIZED_WORKER_KEY"
+            elif resp.status_code == 400:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {}
+                return False, data, "CONFIRMATION_REQUIRED"
+            else:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {}
+                return False, data, f"HTTP_{resp.status_code}"
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[CLOUD CLIENT] Connection error running storage self-test: {e}")
+            return False, {}, "CLOUD_UNREACHABLE"

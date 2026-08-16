@@ -537,3 +537,129 @@ def test_cloud_obsidian_sync_from_payload(tmp_path):
     content = expected_note.read_text(encoding="utf-8")
     assert "approval_id: appr_99" in content
     assert "2026-W35" in content
+
+
+# =============================================================================
+# 9. RAILWAY PRIVATE S3 LIVE ROUND-TRIP DIAGNOSTIC
+# =============================================================================
+
+def test_storage_self_test_auth_and_confirmation_gate(tmp_path):
+    """Test: /worker/storage/self-test requires valid worker API key and confirmation header."""
+    from automation.cloud.local_worker_api import handle_storage_self_test
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = "valid_key_123"
+
+    # 1. Invalid key -> 401
+    code, resp = handle_storage_self_test({"X-Worker-Api-Key": "wrong_key"}, cfg)
+    assert code == 401
+    assert resp["error"] == "UNAUTHORIZED_WORKER_KEY"
+
+    # 2. Missing confirmation header -> 400
+    code, resp = handle_storage_self_test({"X-Worker-Api-Key": "valid_key_123"}, cfg)
+    assert code == 400
+    assert resp["error"] == "CONFIRMATION_REQUIRED"
+
+
+def test_storage_self_test_successful_round_trip(tmp_path):
+    """Test: handle_storage_self_test executes full PUT -> HEAD -> GET -> SHA -> DELETE cycle."""
+    from automation.cloud.local_worker_api import handle_storage_self_test
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = "valid_key_123"
+    cfg.media_storage_backend = "s3"
+
+    mock_storage = MagicMock()
+    mock_storage.is_ready.return_value = True
+    mock_storage.put_file.return_value = "diagnostics/storage-smoke/test.bin"
+    mock_storage.exists.side_effect = [True, False]  # exists after upload -> True, exists after delete -> False
+    mock_storage.get_metadata.return_value = {"size_bytes": 2048, "etag": "etag_123"}
+    
+    def fake_get_file(obj_key, target_path):
+        # Write same byte count
+        Path(target_path).write_bytes(mock_storage._uploaded_bytes)
+        return True
+    
+    def fake_put_file(src_path, obj_key, content_type="application/octet-stream"):
+        mock_storage._uploaded_bytes = Path(src_path).read_bytes()
+        return obj_key
+
+    mock_storage.put_file.side_effect = fake_put_file
+    mock_storage.get_file.side_effect = fake_get_file
+    mock_storage.delete_file.return_value = True
+
+    headers = {
+        "X-Worker-Api-Key": "valid_key_123",
+        "X-Storage-Smoke-Test": "true"
+    }
+
+    code, resp = handle_storage_self_test(headers, cfg, storage=mock_storage)
+    assert code == 200
+    assert resp["ok"] is True
+    assert resp["status"] == "S3_ROUND_TRIP_PASS"
+    assert resp["upload"] is True
+    assert resp["exists_after_upload"] is True
+    assert resp["download"] is True
+    assert resp["sha256_match"] is True
+    assert resp["delete"] is True
+    assert resp["exists_after_delete"] is False
+    assert resp["size_bytes"] == 2048
+
+    # Ensure no secrets in response
+    resp_dump = json.dumps(resp)
+    assert "valid_key_123" not in resp_dump
+
+
+def test_storage_self_test_guarantees_cleanup_on_failure(tmp_path):
+    """Test: handle_storage_self_test attempts delete_file even if SHA verification or download fails."""
+    from automation.cloud.local_worker_api import handle_storage_self_test
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = "valid_key_123"
+
+    mock_storage = MagicMock()
+    mock_storage.is_ready.return_value = True
+    mock_storage.put_file.return_value = "diagnostics/storage-smoke/fail_test.bin"
+    mock_storage.exists.side_effect = [True, False]
+    mock_storage.get_metadata.return_value = {"size_bytes": 2048}
+    mock_storage.get_file.return_value = False  # Download fails
+    mock_storage.delete_file.return_value = True
+
+    headers = {
+        "X-Worker-Api-Key": "valid_key_123",
+        "X-Storage-Smoke-Test": "true"
+    }
+
+    code, resp = handle_storage_self_test(headers, cfg, storage=mock_storage)
+    assert code == 500
+    assert resp["ok"] is False
+    # Verify delete_file was called in cleanup
+    mock_storage.delete_file.assert_called_once()
+
+
+def test_storage_live_smoke_test_cli(tmp_path):
+    """Test: storage_live_smoke_test defaults to 0 writes and executes exactly one test on --apply."""
+    from automation.storage_live_smoke_test import run_storage_smoke_test
+    mock_cfg = CloudConfig(tmp_path)
+    mock_cfg.public_base_url = "https://reels.up.railway.app"
+    mock_cfg.local_worker_api_key = "worker_key_123"
+
+    # 1. Default dry-run -> True without remote calls
+    res_dry = run_storage_smoke_test(apply_changes=False, config=mock_cfg)
+    assert res_dry is True
+
+    # 2. Apply mode -> calls client.run_storage_self_test()
+    mock_client = MagicMock()
+    mock_client.run_storage_self_test.return_value = (
+        True,
+        {
+            "ok": True,
+            "status": "S3_ROUND_TRIP_PASS",
+            "size_bytes": 2048,
+            "exists_after_delete": False,
+            "storage_backend": "s3"
+        },
+        None
+    )
+
+    res_live = run_storage_smoke_test(apply_changes=True, client=mock_client, config=mock_cfg)
+    assert res_live is True
+    mock_client.run_storage_self_test.assert_called_once()
+

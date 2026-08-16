@@ -28,7 +28,8 @@ from .local_worker_api import (
     handle_worker_heartbeat,
     handle_get_next_command,
     handle_complete_command,
-    handle_sync_cloud_state
+    handle_sync_cloud_state,
+    handle_storage_self_test
 )
 
 
@@ -71,6 +72,9 @@ class CloudApp:
 
         if method == "GET" and clean_path == "/worker/state/sync":
             return handle_sync_cloud_state(headers, self.config, self.db)
+
+        if method == "POST" and clean_path == "/worker/storage/self-test":
+            return handle_storage_self_test(headers, self.config, self.storage)
 
         return 404, {"ok": False, "error": "NOT_FOUND"}
 
