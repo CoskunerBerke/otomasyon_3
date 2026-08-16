@@ -112,7 +112,20 @@ def test_youtube_studio_planlayin_and_schedule_accordion_detection():
     tabs_locator.count.return_value = 1
     tabs_locator.nth = lambda i: visibility_tab
 
+    # detect_current_wizard_step() scopes its queries to the resolved active
+    # ytcp-uploads-dialog, so that locator must also route through this same
+    # selector logic (not just mock_page.locator) for the VISIBILITY tab to
+    # be found.
+    mock_dialog = MagicMock()
+    mock_dialog.is_visible.return_value = True
+    mock_dialog.count.return_value = 1
+    mock_dialog.first = mock_dialog
+    mock_dialog.nth.return_value = mock_dialog
+    mock_dialog.get_attribute.return_value = ""
+
     def locator_side_effect(sel):
+        if "ytcp-uploads-dialog" in sel:
+            return mock_dialog
         if sel == "tp-yt-paper-tab":
             return tabs_locator
         res = MagicMock()
@@ -123,6 +136,7 @@ def test_youtube_studio_planlayin_and_schedule_accordion_detection():
         return res
 
     mock_page.locator.side_effect = locator_side_effect
+    mock_dialog.locator.side_effect = locator_side_effect
 
     observer = YouTubeStudioUIObserver(mock_page)
     expanded = observer.find_and_expand_schedule_card()
@@ -858,7 +872,17 @@ from automation.publishing.youtube_studio_ui_observer import WizardStep
 
 
 def _make_mock_page_with_tabs(active_tab_text="Ayrıntılar", tab_count=4):
-    """Create a mock page with tp-yt-paper-tab elements for wizard step detection."""
+    """Create a mock page with a resolved active ytcp-uploads-dialog whose
+    tp-yt-paper-tab stepper reflects the given active tab.
+
+    detect_current_wizard_step() scopes all of its DOM queries to the
+    active-dialog locator returned by get_active_upload_dialog(), so the
+    stepper tabs must be reachable via THAT locator's .locator(...), not
+    just mock_page.locator(...). Selector matching uses exact string
+    equality (never bare "in" substring checks) so that :not(tp-yt-paper-tab)
+    exclusion clauses used by other detection heuristics don't get
+    misidentified as the stepper-tab selector itself.
+    """
     mock_page = MagicMock()
     tab_texts = ["Ayrıntılar", "Video öğeleri", "İlk kontrol", "Görünürlük"]
 
@@ -875,16 +899,31 @@ def _make_mock_page_with_tabs(active_tab_text="Ayrıntılar", tab_count=4):
 
     tabs_locator.nth = lambda i: tab_elements[i]
 
-    def locator_side_effect(sel):
-        if "tp-yt-paper-tab" in sel:
-            return tabs_locator
-        # Default: return a mock that's not visible
+    def _not_found():
         m = MagicMock()
         m.first = MagicMock()
         m.first.is_visible.return_value = False
         m.first.is_enabled.return_value = False
         m.count.return_value = 0
         return m
+
+    def dialog_locator_side_effect(sel):
+        if sel == "tp-yt-paper-tab":
+            return tabs_locator
+        return _not_found()
+
+    mock_dialog = MagicMock()
+    mock_dialog.is_visible.return_value = True
+    mock_dialog.count.return_value = 1
+    mock_dialog.first = mock_dialog
+    mock_dialog.nth.return_value = mock_dialog
+    mock_dialog.get_attribute.return_value = ""
+    mock_dialog.locator = MagicMock(side_effect=dialog_locator_side_effect)
+
+    def locator_side_effect(sel):
+        if "ytcp-uploads-dialog" in sel:
+            return mock_dialog
+        return dialog_locator_side_effect(sel)
 
     mock_page.locator = MagicMock(side_effect=locator_side_effect)
     return mock_page
@@ -957,12 +996,18 @@ def test_exact_live_bug_regression_stale_details_with_video_elements_content():
 
     def dialog_loc(sel):
         res = MagicMock()
-        if "Video öğeleri" in sel or "h1" in sel or "h2" in sel:
+        # Match on the actual heading text only: a bare "h1"/"h2" tag check
+        # would also match unrelated heading selectors (e.g. the Görünürlük
+        # heading query), since every step's heading selector uses h1/h2 tags.
+        if "Video öğeleri" in sel:
             res.first = mock_heading
             res.is_visible.return_value = True
         elif "İlgili video" in sel or "Altyazılar" in sel:
             return mock_cards
-        elif "tp-yt-paper-tab" in sel or "ytcp-stepper" in sel:
+        elif ("tp-yt-paper-tab" in sel or "ytcp-stepper" in sel) and ":not(" not in sel:
+            # Real CSS :not(tp-yt-paper-tab) exclusion clauses (used by other
+            # detection heuristics to exclude stepper elements) must NOT be
+            # treated as a query FOR the stepper tab itself.
             res.first = mock_tab
             res.count.return_value = 1
             res.nth.return_value = mock_tab
@@ -1021,10 +1066,16 @@ def test_wizard_step_detection_all_four_steps_with_stale_previous_clones():
 
         def dialog_loc(sel):
             res = MagicMock()
-            if heading_text in sel or "h1" in sel:
+            # Match on the actual heading text only: a bare "h1"/"h2" tag
+            # check would match EVERY step's heading selector (they all use
+            # h1/h2 tags), falsely marking a different step's heading visible.
+            if heading_text in sel:
                 res.first = mock_heading
                 res.is_visible.return_value = True
-            elif "tp-yt-paper-tab" in sel or "ytcp-stepper" in sel:
+            elif ("tp-yt-paper-tab" in sel or "ytcp-stepper" in sel) and ":not(" not in sel:
+                # Real CSS :not(tp-yt-paper-tab) exclusion clauses (used by other
+                # detection heuristics to exclude stepper elements) must NOT be
+                # treated as a query FOR the stepper tab itself.
                 res.first = mock_tab
                 res.count.return_value = 1
                 res.nth.return_value = mock_tab

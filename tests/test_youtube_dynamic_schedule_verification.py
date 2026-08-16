@@ -87,6 +87,9 @@ def test_youtube_studio_publisher_calls_dynamic_verification(tmp_path):
     mock_observer = MagicMock()
     mock_observer.is_logged_in.return_value = True
     mock_observer.verify_logged_in_channel.return_value = (True, "@BuiIdVerse", "OK")
+    mock_observer.upload_file.return_value = True
+    mock_observer.wait_for_upload_completion.return_value = True
+    mock_observer.capture_video_id_and_url.return_value = ("Sq1nDGQPpOc", "https://youtube.com/shorts/Sq1nDGQPpOc")
     mock_observer.advance_wizard_to_visibility.return_value = (True, "OK")
     mock_observer.find_and_expand_schedule_card.return_value = True
     mock_observer.set_schedule_datetime.return_value = True

@@ -132,6 +132,9 @@ class ObsidianControlCenter:
         tt_status = reel.tiktok_status.value if isinstance(reel.tiktok_status, ReelPlatformStatus) else str(reel.tiktok_status)
         ig_status = reel.instagram_status.value if isinstance(reel.instagram_status, ReelPlatformStatus) else str(reel.instagram_status)
 
+        source = getattr(reel, "source", "legacy_unverified")
+        quarantine_reason = getattr(reel, "quarantine_reason", None)
+
         frontmatter = [
             "---",
             f"reel_id: {reel.reel_id}",
@@ -141,6 +144,8 @@ class ObsidianControlCenter:
             f"scheduled_at_local: {reel.scheduled_at_local or 'null'}",
             f"generation_status: {reel.generation_status}",
             f"qc_status: {reel.qc_status}",
+            f"source: {source}",
+            f"quarantined: {str(bool(quarantine_reason)).lower()}",
             f"youtube_status: {yt_status}",
             f"youtube_remote_id: {reel.youtube_remote_id or 'null'}",
             f"tiktok_status: {tt_status}",
@@ -153,7 +158,18 @@ class ObsidianControlCenter:
             "",
             f"# {reel.reel_id}: {reel.title or 'Untitled Reel'}",
             "",
+        ]
+
+        if quarantine_reason:
+            frontmatter.extend([
+                "> [!danger] QUARANTINED -- excluded from live inventory",
+                f"> {quarantine_reason}",
+                ""
+            ])
+
+        frontmatter.extend([
             "## Content Metadata",
+            f"- **Source**: `{source}`" + (" ⚠️ NOT live-eligible" if source != "flow_live_generation" else " ✅ live-eligible"),
             f"- **Caption**: {reel.caption or 'N/A'}",
             f"- **Hashtags**: {' '.join(reel.hashtags) if reel.hashtags else 'N/A'}",
             f"- **Video Path**: `{reel.video_path or 'N/A'}`",
@@ -164,7 +180,7 @@ class ObsidianControlCenter:
             f"- **TikTok**: `{tt_status}` (ID: `{reel.tiktok_remote_id or 'None'}`)",
             f"- **Instagram**: `{ig_status}` (Media ID: `{reel.instagram_remote_media_id or 'None'}`)",
             ""
-        ]
+        ])
 
         return self._write_note(file_path, "\n".join(frontmatter))
 
