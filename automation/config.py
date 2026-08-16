@@ -182,11 +182,18 @@ def auto_detect_vault() -> Optional[Path]:
 
     return None
 
-def load_config(config_file: Optional[str] = None, count_override: Optional[int] = None) -> AppConfig:
+def load_config(
+    config_file: Optional[str] = None,
+    count_override: Optional[int] = None,
+    base_dir: Optional[Path] = None
+) -> AppConfig:
     """
     Load configuration from JSON file or create with sensible defaults.
     """
-    base_dir = Path(__file__).parent.parent.resolve()
+    if base_dir is None:
+        base_dir = Path(__file__).parent.parent.resolve()
+    else:
+        base_dir = Path(base_dir).resolve()
 
     config_path = None
     if config_file:
