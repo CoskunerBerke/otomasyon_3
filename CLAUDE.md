@@ -76,3 +76,18 @@ scanned as live inventory and uploaded to YouTube as REEL-2026-0001).
   focused, consolidated regression test file per repair.
 - No real browser, no real Flow generation, no real YouTube/TikTok/Instagram/Telegram
   calls in tests — mocks/fakes only.
+
+## Available project skills
+
+Project-level skills live in `.claude/skills/` and are auto-discoverable by Claude Code
+in this repository. Use the one matching the task instead of re-deriving the rules below
+from scratch:
+
+- **reels-pipeline-doctor** — pipeline genelinde uçtan uca kök neden teşhisi ve düzeltme.
+- **production-media-guardian** — yayın öncesi eligibility/gate mantığı (mock/test medya, Reel ID invariant, placeholder metadata).
+- **youtube-tiktok-safety** — YouTube/TikTok Studio DOM otomasyonu, Kural 31.
+- **weekly-resume-manager** — 14 Reel'lik haftalık envanter, slot atama, resume/idempotency.
+- **reel-metadata-director** — gerçek ReelConceptPlan'dan başlık/caption/hashtag üretimi.
+- **obsidian-state-reconciler** — Obsidian vault notlarını gerçek state ile senkron tutma.
+- **railway-cloud-operator** — Local Worker ↔ Railway ↔ PostgreSQL ↔ S3 ↔ Instagram mimarisi.
+- **safe-test-and-release** — test/secret-scan/commit/push operasyonel iş akışı.
