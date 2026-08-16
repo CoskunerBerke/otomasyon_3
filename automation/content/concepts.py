@@ -582,3 +582,19 @@ CATEGORIES: List[ConceptDefinition] = [
         topic_description="Empty wooden workbench transforming into an exquisitely detailed living miniature diorama"
     ),
 ]
+
+
+def find_concept_by_topic_key(topic_key: str) -> "ConceptDefinition | None":
+    """
+    Resolves the ConceptDefinition that produced a given topic_key
+    (format: '{id_slug}-{env_last_word}-{arch_last_word}', see PromptEngine.build_concept_plan).
+    Used to deterministically reconstruct real metadata for a Reel on resume, when the
+    original ReelConceptPlan object is no longer in memory. Matches the longest id_slug
+    that is a prefix of topic_key, since id_slug itself may contain hyphens.
+    """
+    if not topic_key:
+        return None
+    candidates = [c for c in CATEGORIES if topic_key.startswith(c.id_slug + "-") or topic_key == c.id_slug]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda c: len(c.id_slug))

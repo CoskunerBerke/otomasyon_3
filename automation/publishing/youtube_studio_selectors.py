@@ -320,3 +320,19 @@ class YouTubeStudioSelectors:
         "button[aria-label*='Close']",
         "button[aria-label*='Kapat']"
     ]
+
+    # Informational "we're still checking your content" review notice (TR: "İçeriğinizi
+    # kontrol etmeye devam ediyoruz" / "İçeriği tekrar gözden geçirmenizi öneririz").
+    # This is NOT a failed schedule -- it must be safely dismissed (never treated as
+    # fatal) without ever switching from schedule to publish-now.
+    CONTENT_REVIEW_INFO_TEXT_MARKERS: List[str] = [
+        "kontrol etmeye devam",
+        "gözden geçirmenizi öneririz",
+        "we're still checking",
+        "we recommend you review"
+    ]
+
+    CONTENT_REVIEW_INFO_DISMISS_BUTTONS: List[str] = [
+        "button:has-text('Anladım')",
+        "button:has-text('Got it')"
+    ]

@@ -4,6 +4,7 @@ Tests 14 slots (19:30 & 22:00), Flow generation wiring, YouTube Studio wiring, T
 media handoff wiring, exclusion of REEL-2026-0010, idempotency/resume, and independent platform failures.
 Uses strict mocks only: 0 real Flow calls, 0 real YouTube writes, 0 real TikTok writes, 0 real S3 uploads.
 """
+import hashlib
 import os
 import datetime
 import pytest
@@ -16,9 +17,36 @@ from automation.orchestration.models import (
     PublishingSlot,
     ReelState,
     ReelPlatformStatus,
+    ReelProvenance,
     RunReport
 )
 from automation.publishing.models import Platform, PlatformPublicationStatus, PublishRecord
+
+
+def _seed_live_reel(orchestrator: WeeklyOrchestrator, dl_dir: Path, reel_id: str, content: bytes = b"ready reel content") -> Path:
+    """
+    Test helper: writes a video file AND the persisted ReelState with real production
+    provenance that live inventory scanning now requires (see
+    automation/publishing/eligibility.py:is_live_production_eligible). A bare file on
+    disk is no longer sufficient after the 2026-08-16 live-inventory hardening.
+    """
+    video_path = dl_dir / f"clean_{reel_id}.mp4"
+    video_path.write_bytes(content)
+    state = ReelState(
+        reel_id=reel_id,
+        pipeline_version=3,
+        content_mode="silent_global_step_by_step",
+        generation_status="COMPLETE",
+        qc_status="PASS",
+        video_path=str(video_path),
+        video_sha256=hashlib.sha256(content).hexdigest(),
+        source=ReelProvenance.FLOW_LIVE_GENERATION.value,
+        title=f"Real Production Title {reel_id}",
+        caption="Real production caption derived from the content plan.",
+        hashtags=["#Shorts", "#Architecture"]
+    )
+    orchestrator.repo.save_reel_state(state)
+    return video_path
 
 
 def test_weekly_orchestrator_generates_14_slots(tmp_path):
@@ -134,16 +162,11 @@ def test_weekly_orchestrator_handles_independent_platform_failures(tmp_path):
     dl_dir = tmp_path / "workspace" / "downloads"
     dl_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pre-populate 14 ready videos
-    for i in range(11, 25):
-        vid = dl_dir / f"clean_REEL-2026-{i:04d}.mp4"
-        vid.write_bytes(b"ready reel content")
-
     # YouTube fails
     mock_yt = MagicMock()
     def failing_yt(record: PublishRecord):
         record.status = PlatformPublicationStatus.FAILED_RETRYABLE
-        record.error_message = "YouTube Studio connection timeout"
+        record.last_error = "YouTube Studio connection timeout"
         return record
     mock_yt.upload_and_schedule.side_effect = failing_yt
 
@@ -171,6 +194,11 @@ def test_weekly_orchestrator_handles_independent_platform_failures(tmp_path):
         cloud_client=mock_client
     )
 
+    # Pre-populate 14 ready videos WITH real-production ReelState (bare files are no
+    # longer sufficient for live inventory eligibility).
+    for i in range(11, 25):
+        _seed_live_reel(orchestrator, dl_dir, f"REEL-2026-{i:04d}")
+
     start_date = datetime.date(2026, 8, 17)
     ok, report, plan = orchestrator.run_weekly_pipeline(start_date=start_date, week_id="2026-W34")
 
@@ -191,17 +219,13 @@ def test_weekly_orchestrator_preserves_needs_user_html(tmp_path):
     dl_dir = tmp_path / "workspace" / "downloads"
     dl_dir.mkdir(parents=True, exist_ok=True)
 
-    for i in range(11, 25):
-        vid = dl_dir / f"clean_REEL-2026-{i:04d}.mp4"
-        vid.write_bytes(b"ready reel content")
-
     mock_yt = MagicMock()
     mock_yt.upload_and_schedule.side_effect = lambda r: setattr(r, "status", PlatformPublicationStatus.SCHEDULED) or r
 
     mock_tt = MagicMock()
     def user_html_tt(record: PublishRecord):
         record.status = "NEEDS_USER_HTML"
-        record.error_message = "TikTok Studio UI changed (Rule 31: max 2 attempts reached)"
+        record.last_error = "TikTok Studio UI changed (Rule 31: max 2 attempts reached)"
         return record
     mock_tt.upload_and_schedule.side_effect = user_html_tt
 
@@ -220,6 +244,9 @@ def test_weekly_orchestrator_preserves_needs_user_html(tmp_path):
         tt_publisher=mock_tt,
         cloud_client=mock_client
     )
+
+    for i in range(11, 25):
+        _seed_live_reel(orchestrator, dl_dir, f"REEL-2026-{i:04d}")
 
     start_date = datetime.date(2026, 8, 17)
     ok, report, plan = orchestrator.run_weekly_pipeline(start_date=start_date, week_id="2026-W34")

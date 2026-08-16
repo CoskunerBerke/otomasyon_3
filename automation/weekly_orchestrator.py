@@ -5,7 +5,6 @@ real Flow V3 generation, real YouTube Studio native scheduling, real TikTok Stud
 authenticated Railway S3 media handoff (PostgreSQL MEDIA_READY), and Obsidian Control Center sync.
 """
 import os
-import re
 import sys
 import time
 import hashlib
@@ -31,9 +30,13 @@ from automation.publishing.tiktok_publisher import (
     TikTokPublisher,
     MockTikTokPublisher
 )
+from automation.publishing.metadata_builder import PublishingMetadataBuilder
+from automation.publishing.eligibility import is_live_production_eligible, HARD_EXCLUDED_REEL_IDS
+from automation.publishing.preflight_gate import run_pre_publish_hard_gate, verify_reel_id_invariant
 from automation.flow.generator import GoogleFlowWebProvider, MockVideoProvider, VideoProvider
 from automation.content.engine import ContentEngine
 from automation.content.prompt_engine import ReelConceptPlan
+from automation.content.concepts import find_concept_by_topic_key
 from automation.quality.validator import VideoValidator
 from automation.media_handoff import handoff_reel_to_cloud
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
@@ -42,6 +45,7 @@ from automation.orchestration.models import (
     PublishingSlot,
     ReelState,
     ReelPlatformStatus,
+    ReelProvenance,
     InstagramScheduledJob,
     RunReport,
     ReconciliationStatus
@@ -192,7 +196,16 @@ class WeeklyOrchestrator:
         if needed > 0 and not self.dry_run:
             logger.info(f"[ORCHESTRATOR] Generating {needed} missing V3 Reels via Flow...")
             generated_reels = self._generate_missing_v3_reels(needed=needed, week_id=week_id)
-            available_reels.extend(generated_reels)
+            # Re-validate through the same live-eligibility gate used for scanned inventory.
+            # This is what keeps MockVideoProvider output from entering live publishing even
+            # within the same run (e.g. an orchestrator misconfigured with mock=True, live).
+            for g in generated_reels:
+                g_state = self.repo.get_reel_state(g["id"])
+                g_ok, g_reason = is_live_production_eligible(g_state, Path(g["video_file"]))
+                if g_ok:
+                    available_reels.append(g)
+                else:
+                    logger.error(f"[ORCHESTRATOR] Freshly generated {g['id']} rejected by live gate: {g_reason}")
 
         # 6. QC (MEDIA INSPECTION)
         qc_passed_count = len(available_reels)
@@ -211,6 +224,11 @@ class WeeklyOrchestrator:
             if slot.youtube_status in ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED"):
                 logger.info(f"[{slot.reel_id}] YouTube already {slot.youtube_status}, skipping.")
                 yt_scheduled += 1
+                continue
+
+            if not self.dry_run and (r_state.generation_status != "COMPLETE" or r_state.qc_status != "PASS"):
+                slot.youtube_status = "WAITING_FOR_GENERATION"
+                logger.info(f"[{slot.reel_id}] YouTube skipped: Reel is not COMPLETE/PASS yet (WAITING_FOR_GENERATION).")
                 continue
 
             if self.dry_run:
@@ -238,6 +256,11 @@ class WeeklyOrchestrator:
                 tt_scheduled += 1
                 continue
 
+            if not self.dry_run and (r_state.generation_status != "COMPLETE" or r_state.qc_status != "PASS"):
+                slot.tiktok_status = "WAITING_FOR_GENERATION"
+                logger.info(f"[{slot.reel_id}] TikTok skipped: Reel is not COMPLETE/PASS yet (WAITING_FOR_GENERATION).")
+                continue
+
             if self.dry_run:
                 slot.tiktok_status = "SCHEDULED"
                 r_state.tiktok_status = ReelPlatformStatus.SCHEDULED
@@ -261,6 +284,11 @@ class WeeklyOrchestrator:
             if slot.instagram_status in ("MEDIA_READY", "SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED"):
                 logger.info(f"[{slot.reel_id}] Instagram handoff already {slot.instagram_status}, skipping.")
                 ig_queued += 1
+                continue
+
+            if not self.dry_run and (r_state.generation_status != "COMPLETE" or r_state.qc_status != "PASS"):
+                slot.instagram_status = "WAITING_FOR_GENERATION"
+                logger.info(f"[{slot.reel_id}] Instagram skipped: Reel is not COMPLETE/PASS yet (WAITING_FOR_GENERATION).")
                 continue
 
             if self.dry_run:
@@ -300,37 +328,53 @@ class WeeklyOrchestrator:
 
     def _scan_v3_inventory(self) -> List[Dict[str, Any]]:
         """
-        Scans for V3-eligible Reels, strictly excluding REEL-2026-0010 and legacy content.
+        Scans for LIVE-eligible V3 Reels.
+
+        A file is only ever treated as production inventory if it has a persisted
+        ReelState proving real Google Flow provenance (source == 'flow_live_generation'),
+        COMPLETE generation, PASS QC, and V3 pipeline metadata. A filename matching
+        clean_REEL-*.mp4 is NEVER sufficient on its own -- see
+        automation/publishing/eligibility.py:is_live_production_eligible. This is what
+        keeps mock/test/diagnostic/legacy media (e.g. REEL-2026-0001, REEL-2026-0010)
+        out of live weekly inventory even if the file physically sits in
+        workspace/downloads/.
         """
         eligible = []
-        dl_dir = self.base_dir / "workspace" / "downloads"
+        for reel_state in self.repo.list_all_reels():
+            if reel_state.reel_id in HARD_EXCLUDED_REEL_IDS:
+                continue
+            video_file = self._resolve_video_file(reel_state.reel_id)
+            ok, reason = is_live_production_eligible(reel_state, video_file)
+            if not ok:
+                logger.debug(f"[INVENTORY] {reel_state.reel_id} excluded from live inventory: {reason}")
+                continue
+            if not self.repo.is_reel_available_for_new_batch(reel_state.reel_id):
+                continue
 
-        if dl_dir.exists():
-            for p in sorted(dl_dir.glob("clean_REEL-2026-*.mp4")):
-                filename = p.stem
-                m = re.search(r"(REEL-\d{4}-\d{4})", filename)
-                if not m:
-                    continue
-                reel_id = m.group(1)
-                if reel_id == "REEL-2026-0010":
-                    continue
+            eligible.append({
+                "id": reel_state.reel_id,
+                "video_file": str(video_file.resolve()),
+                "status": "READY",
+                "pipeline_version": reel_state.pipeline_version,
+                "content_mode": reel_state.content_mode
+            })
 
-                if not self.repo.is_reel_available_for_new_batch(reel_id):
-                    continue
-
-                eligible.append({
-                    "id": reel_id,
-                    "video_file": str(p.resolve()),
-                    "status": "READY",
-                    "pipeline_version": 3,
-                    "content_mode": "silent_global_step_by_step"
-                })
-
-        return eligible
+        return sorted(eligible, key=lambda r: r["id"])
 
     def _generate_missing_v3_reels(self, needed: int, week_id: str) -> List[Dict[str, Any]]:
         """
         Generates missing V3 Reels sequentially using ContentEngine, VideoProvider, and VideoValidator.
+
+        Immediately persists a ReelState with real production provenance and real
+        ReelConceptPlan-derived metadata (title/caption/hashtags via PublishingMetadataBuilder)
+        for every successfully generated+QC-passed Reel. This makes resume idempotent (a
+        second run sees COMPLETE/PASS state and never re-generates or re-spends Flow
+        credits) and ensures metadata never falls back to a generic placeholder.
+
+        Reels produced by MockVideoProvider (self.mock=True) are tagged with
+        source=mock_test_provider so they can never re-enter live inventory later, even
+        though they are returned here for the caller to re-validate through the same
+        live-eligibility gate used for scanned inventory.
         """
         if self.flow_provider is None:
             self._init_publishers_if_needed(need_generation=True)
@@ -343,6 +387,12 @@ class WeeklyOrchestrator:
         plans = content_engine.generate_next_reels(count=needed, past_records=past_history, duration_seconds=30)
         validator = VideoValidator(reject_wrong_ratio=True, audio_enabled=False)
 
+        provenance_source = (
+            ReelProvenance.MOCK_TEST_PROVIDER.value
+            if isinstance(self.flow_provider, MockVideoProvider)
+            else ReelProvenance.FLOW_LIVE_GENERATION.value
+        )
+
         generated = []
         curr_num = 11
 
@@ -350,7 +400,7 @@ class WeeklyOrchestrator:
             while True:
                 candidate_id = f"REEL-2026-{curr_num:04d}"
                 curr_num += 1
-                if candidate_id != "REEL-2026-0010" and self.repo.is_reel_available_for_new_batch(candidate_id):
+                if candidate_id not in HARD_EXCLUDED_REEL_IDS and self.repo.is_reel_available_for_new_batch(candidate_id):
                     chosen_id = candidate_id
                     break
 
@@ -373,7 +423,35 @@ class WeeklyOrchestrator:
                     logger.error(f"[GENERATION] QC failed for {chosen_id}: {qc_res.error_message}")
                     continue
 
-                final_mp4 = qc_res.processed_video_path
+                final_mp4 = Path(qc_res.processed_video_path)
+                file_sha = hashlib.sha256(final_mp4.read_bytes()).hexdigest()
+
+                yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_youtube_metadata(
+                    reel_id=chosen_id,
+                    title=plan.title,
+                    category=plan.category,
+                    environment=plan.environment,
+                    architecture=plan.architecture,
+                    transformation=plan.transformation,
+                    reveal=plan.reveal
+                )
+
+                reel_state = ReelState(
+                    reel_id=chosen_id,
+                    week_id=week_id,
+                    pipeline_version=3,
+                    content_mode="silent_global_step_by_step",
+                    generation_status="COMPLETE",
+                    qc_status="PASS",
+                    video_path=str(final_mp4),
+                    video_sha256=file_sha,
+                    source=provenance_source,
+                    title=yt_title,
+                    caption=plan.topic_description,
+                    hashtags=yt_tags
+                )
+                self.repo.save_reel_state(reel_state)
+
                 generated.append({
                     "id": chosen_id,
                     "video_file": str(final_mp4),
@@ -397,51 +475,93 @@ class WeeklyOrchestrator:
         """
         Assigns exactly 14 unique Reel IDs to the 14 slots of the week.
         Preserves existing slot assignments if already populated.
+
+        A slot only receives generation_status=COMPLETE / qc_status=PASS when a real,
+        live-eligible ReelState already exists for it (see is_live_production_eligible).
+        Slots with no real inventory available are left as WAITING_FOR_GENERATION and
+        must never be scheduled/published (enforced by the guards in run_weekly_pipeline).
+        Dry-run mode simulates completion for reporting purposes only -- it never reaches
+        a real publisher.
         """
         assigned_states = []
         used_ids = set()
 
         for slot in plan.slots:
-            if slot.reel_id and slot.reel_id != "REEL-2026-0010":
+            if slot.reel_id and slot.reel_id not in HARD_EXCLUDED_REEL_IDS:
                 used_ids.add(slot.reel_id)
 
         curr_num = 11
         avail_ids = [r["id"] for r in available_reels if r["id"] not in used_ids]
 
         for slot in plan.slots:
-            if not slot.reel_id or slot.reel_id == "REEL-2026-0010":
+            if not slot.reel_id or slot.reel_id in HARD_EXCLUDED_REEL_IDS:
                 if avail_ids:
                     chosen_id = avail_ids.pop(0)
                 else:
                     while True:
                         candidate = f"REEL-2026-{curr_num:04d}"
                         curr_num += 1
-                        if candidate != "REEL-2026-0010" and candidate not in used_ids and self.repo.is_reel_available_for_new_batch(candidate):
+                        if candidate not in HARD_EXCLUDED_REEL_IDS and candidate not in used_ids and self.repo.is_reel_available_for_new_batch(candidate):
                             chosen_id = candidate
                             break
                 slot.reel_id = chosen_id
                 used_ids.add(chosen_id)
 
-            slot.qc_status = "PASS"
+            video_file = self._resolve_video_file(slot.reel_id)
             reel_state = self.repo.get_reel_state(slot.reel_id)
-            if not reel_state:
-                video_file = self._resolve_video_file(slot.reel_id)
+
+            carried_youtube = ReelPlatformStatus(slot.youtube_status) if slot.youtube_status in ReelPlatformStatus.__members__ else ReelPlatformStatus.NOT_STARTED
+            carried_tiktok = ReelPlatformStatus(slot.tiktok_status) if slot.tiktok_status in ReelPlatformStatus.__members__ else ReelPlatformStatus.NOT_STARTED
+            carried_instagram = ReelPlatformStatus(slot.instagram_status) if slot.instagram_status in ReelPlatformStatus.__members__ else ReelPlatformStatus.NOT_STARTED
+
+            if reel_state is not None:
+                ok, reason = is_live_production_eligible(reel_state, video_file)
+                if ok:
+                    slot.qc_status = "PASS"
+                elif self.dry_run:
+                    slot.qc_status = "PASS"
+                else:
+                    logger.warning(f"[{slot.reel_id}] Existing state is not live-eligible ({reason}); leaving as PENDING.")
+                    slot.qc_status = "PENDING"
+            elif self.dry_run:
+                # Dry-run simulation only -- clearly labeled, never reaches a real publisher.
                 reel_state = ReelState(
                     reel_id=slot.reel_id,
                     week_id=plan.week_id,
                     pipeline_version=3,
                     content_mode="silent_global_step_by_step",
-                    generation_status="COMPLETE" if (video_file.exists() or self.dry_run) else "NOT_STARTED",
+                    generation_status="COMPLETE",
                     qc_status="PASS",
-                    title=f"Architectural Marvel {slot.reel_id}",
-                    caption=f"Building from the ground up in 30 seconds. Would you live here? ✨",
-                    hashtags=["#architecture", "#design", "#satisfying", "#timelapse", "#reels"],
+                    source=ReelProvenance.LEGACY_UNVERIFIED.value,
+                    title=f"[DRY RUN] {slot.reel_id}",
+                    caption="[DRY RUN] No real production metadata attached in simulation mode.",
+                    hashtags=[],
                     scheduled_at_local=slot.scheduled_at_local,
                     scheduled_at_utc=slot.scheduled_at_utc,
-                    youtube_status=ReelPlatformStatus(slot.youtube_status) if slot.youtube_status in ReelPlatformStatus.__members__ else ReelPlatformStatus.NOT_STARTED,
-                    tiktok_status=ReelPlatformStatus(slot.tiktok_status) if slot.tiktok_status in ReelPlatformStatus.__members__ else ReelPlatformStatus.NOT_STARTED,
-                    instagram_status=ReelPlatformStatus(slot.instagram_status) if slot.instagram_status in ReelPlatformStatus.__members__ else ReelPlatformStatus.NOT_STARTED
+                    youtube_status=carried_youtube,
+                    tiktok_status=carried_tiktok,
+                    instagram_status=carried_instagram
                 )
+                slot.qc_status = "PASS"
+            else:
+                # No real inventory for this slot -- must stay unpublishable until real
+                # generation completes. Never fabricate COMPLETE/PASS without a real file.
+                reel_state = ReelState(
+                    reel_id=slot.reel_id,
+                    week_id=plan.week_id,
+                    pipeline_version=3,
+                    content_mode="silent_global_step_by_step",
+                    generation_status="NOT_STARTED",
+                    qc_status="PENDING",
+                    source=ReelProvenance.LEGACY_UNVERIFIED.value,
+                    scheduled_at_local=slot.scheduled_at_local,
+                    scheduled_at_utc=slot.scheduled_at_utc,
+                    youtube_status=carried_youtube,
+                    tiktok_status=carried_tiktok,
+                    instagram_status=carried_instagram
+                )
+                slot.qc_status = "PENDING"
+
             assigned_states.append(reel_state)
 
         return assigned_states
@@ -510,8 +630,11 @@ class WeeklyOrchestrator:
             account_handle=self.pub_config.youtube_expected_handle,
             video_file=video_file,
             video_sha256=file_sha,
-            title=r_state.title or f"Architectural Marvel {slot.reel_id} #Shorts",
-            description=f"{r_state.caption}\n\n{' '.join(r_state.hashtags)}",
+            title=r_state.title or slot.reel_id,
+            # Caption only -- hashtags are appended exactly once, by
+            # YouTubeStudioUIObserver.fill_details(), which is the single layer that
+            # actually writes the final description into the YouTube Studio UI.
+            description=r_state.caption,
             hashtags=r_state.hashtags,
             scheduled_at_local=slot.scheduled_at_local,
             scheduled_at_utc=slot.scheduled_at_utc,
@@ -521,6 +644,21 @@ class WeeklyOrchestrator:
             ai_generated=True,
             synthetic_media_disclosed=True
         )
+
+        already_success = slot.youtube_status in ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED")
+        gate_ok, gate_reason = run_pre_publish_hard_gate(
+            reel_state=r_state,
+            slot=slot,
+            publish_record=rec,
+            video_path=video_file,
+            already_platform_success=already_success
+        )
+        if not gate_ok:
+            logger.error(f"[{slot.reel_id}] YouTube pre-publish hard gate BLOCKED upload: {gate_reason}")
+            slot.youtube_status = "FAILED_FATAL"
+            r_state.youtube_status = ReelPlatformStatus.FAILED_FATAL
+            r_state.youtube_error = gate_reason
+            return False
 
         try:
             res_rec = self.yt_publisher.upload_and_schedule(rec)
@@ -532,7 +670,8 @@ class WeeklyOrchestrator:
             else:
                 slot.youtube_status = res_rec.status.value
                 r_state.youtube_status = ReelPlatformStatus(res_rec.status.value) if res_rec.status.value in ReelPlatformStatus.__members__ else ReelPlatformStatus.FAILED_RETRYABLE
-                logger.error(f"[{slot.reel_id}] YouTube scheduling failed: {res_rec.error_message}")
+                r_state.youtube_error = res_rec.last_error
+                logger.error(f"[{slot.reel_id}] YouTube scheduling failed: {res_rec.last_error}")
                 return False
         except Exception as e:
             logger.error(f"[{slot.reel_id}] YouTube scheduling error: {e}")
@@ -559,7 +698,10 @@ class WeeklyOrchestrator:
             video_file=video_file,
             video_sha256=file_sha,
             title=r_state.title,
-            description=f"{r_state.caption} {' '.join(r_state.hashtags)}",
+            # Caption only -- hashtags are appended exactly once, by
+            # TikTokUIObserver.replace_caption(), which is the single layer that actually
+            # writes the final caption into the TikTok Studio editor.
+            description=r_state.caption,
             hashtags=r_state.hashtags,
             scheduled_at_local=slot.scheduled_at_local,
             scheduled_at_utc=slot.scheduled_at_utc,
@@ -569,6 +711,21 @@ class WeeklyOrchestrator:
             ai_generated=True,
             synthetic_media_disclosed=True
         )
+
+        already_success = slot.tiktok_status in ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED")
+        gate_ok, gate_reason = run_pre_publish_hard_gate(
+            reel_state=r_state,
+            slot=slot,
+            publish_record=rec,
+            video_path=video_file,
+            already_platform_success=already_success
+        )
+        if not gate_ok:
+            logger.error(f"[{slot.reel_id}] TikTok pre-publish hard gate BLOCKED upload: {gate_reason}")
+            slot.tiktok_status = "FAILED_FATAL"
+            r_state.tiktok_status = ReelPlatformStatus.FAILED_FATAL
+            r_state.tiktok_error = gate_reason
+            return False
 
         try:
             res_rec = self.tt_publisher.upload_and_schedule(rec)
@@ -586,7 +743,8 @@ class WeeklyOrchestrator:
             else:
                 slot.tiktok_status = status_val
                 r_state.tiktok_status = ReelPlatformStatus(status_val) if status_val in ReelPlatformStatus.__members__ else ReelPlatformStatus.FAILED_RETRYABLE
-                logger.error(f"[{slot.reel_id}] TikTok scheduling failed: {res_rec.error_message}")
+                r_state.tiktok_error = res_rec.last_error
+                logger.error(f"[{slot.reel_id}] TikTok scheduling failed: {res_rec.last_error}")
                 return False
         except Exception as e:
             logger.error(f"[{slot.reel_id}] TikTok scheduling error: {e}")
@@ -601,6 +759,27 @@ class WeeklyOrchestrator:
             logger.error(f"[{slot.reel_id}] Video file not found: {video_file}")
             slot.instagram_status = "FAILED_FATAL"
             r_state.instagram_status = ReelPlatformStatus.FAILED_FATAL
+            return False
+
+        elig_ok, elig_reason = is_live_production_eligible(r_state, video_file)
+        if not elig_ok:
+            logger.error(f"[{slot.reel_id}] Instagram pre-publish hard gate BLOCKED handoff: {elig_reason}")
+            slot.instagram_status = "FAILED_FATAL"
+            r_state.instagram_status = ReelPlatformStatus.FAILED_FATAL
+            r_state.instagram_error = elig_reason
+            return False
+
+        id_ok, id_reason = verify_reel_id_invariant(
+            slot_reel_id=slot.reel_id,
+            state_reel_id=r_state.reel_id,
+            publish_record_reel_id=slot.reel_id,
+            video_path=video_file
+        )
+        if not id_ok:
+            logger.error(f"[{slot.reel_id}] Instagram pre-publish hard gate BLOCKED handoff: {id_reason}")
+            slot.instagram_status = "FAILED_FATAL"
+            r_state.instagram_status = ReelPlatformStatus.FAILED_FATAL
+            r_state.instagram_error = id_reason
             return False
 
         ok, data, err = handoff_reel_to_cloud(

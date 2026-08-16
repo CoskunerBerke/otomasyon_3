@@ -101,6 +101,30 @@ class FlowPage:
             except Exception:
                 continue
 
+        # Detect the public/logged-out labs.google/fx/tools/flow marketing landing page.
+        # The URL still contains "flow" and matches no sign-in/CAPTCHA pattern above, so
+        # without this check the caller would proceed straight into the "Yeni proje"
+        # button search, fail to find it (it genuinely doesn't exist on this page), and
+        # misreport a UI-change bug when the real problem is that the session never
+        # entered the authenticated app.
+        for landing_sel in FlowSelectors.LANDING_PAGE_INDICATOR_SELECTORS:
+            try:
+                loc = self.page.locator(landing_sel).first
+                if not loc.is_visible(timeout=500):
+                    continue
+                new_project_btn = self.find_first_visible(FlowSelectors.NEW_PROJECT_BUTTON_SELECTORS, timeout_ms=500)
+                if new_project_btn:
+                    continue
+                self.capture_error_snapshot("flow_landing_page_not_authenticated")
+                raise UserActionRequiredError(
+                    "Google Flow herkese açık tanıtım sayfasında (oturum doğrulanamadı). "
+                    "Lütfen açık Chrome penceresinde Google Flow oturumunun aktif olduğunu doğrulayın."
+                )
+            except UserActionRequiredError:
+                raise
+            except Exception:
+                continue
+
     def check_credit_warnings(self) -> None:
         """Check for credit depletion or quota limit messages."""
         for cred_sel in FlowSelectors.CREDIT_WARNING_SELECTORS:

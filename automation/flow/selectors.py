@@ -68,6 +68,16 @@ class FlowSelectors:
         "[aria-label*='New project' i]"
     ]
 
+    # Public/logged-out labs.google/fx/tools/flow marketing landing page (no "Yeni proje"
+    # button exists here at all -- confirmed 2026-08-16 via captured DOM snapshot in
+    # screenshots/errors/error_new_project_btn_missing_20260816_180448.html). Seeing these
+    # CTAs means the session is not actually inside the authenticated Flow app, which is an
+    # auth/session problem, not a selector/UI-change problem.
+    LANDING_PAGE_INDICATOR_SELECTORS: List[str] = [
+        "button:has-text('Try Google Flow')",
+        "button:has-text('Get started')"
+    ]
+
     # Settings / Ayarlar button (tune icon next to prompt composer)
     SETTINGS_BUTTON_SELECTORS: List[str] = [
         "button:has(i.google-symbols:text-is('tune'))",

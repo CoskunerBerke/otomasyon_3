@@ -33,6 +33,20 @@ class ReconciliationStatus(str, Enum):
     NOT_FOUND = "NOT_FOUND"
 
 
+class ReelProvenance(str, Enum):
+    """
+    Where a Reel's video file actually came from. Only FLOW_LIVE_GENERATION is eligible
+    for live weekly inventory/publishing. Everything else must be excluded/quarantined,
+    never deleted. Default for any pre-existing Reel with no recorded provenance is
+    LEGACY_UNVERIFIED (ineligible) -- absence of evidence is not evidence of eligibility.
+    """
+    FLOW_LIVE_GENERATION = "flow_live_generation"
+    MOCK_TEST_PROVIDER = "mock_test_provider"
+    DIAGNOSTIC_TEST = "diagnostic_test"
+    LEGACY_UNVERIFIED = "legacy_unverified"
+    QUARANTINED = "quarantined"
+
+
 @dataclass
 class InstagramScheduledJob:
     """Represents a scheduled Instagram Reel job in the future publishing queue."""
@@ -100,6 +114,8 @@ class ReelState:
     qc_status: str = "PENDING"
     video_path: Optional[str] = None
     video_sha256: Optional[str] = None
+    source: str = ReelProvenance.LEGACY_UNVERIFIED.value
+    quarantine_reason: Optional[str] = None
     title: str = ""
     caption: str = ""
     hashtags: List[str] = field(default_factory=list)
@@ -136,6 +152,8 @@ class ReelState:
             "qc_status": self.qc_status,
             "video_path": self.video_path,
             "video_sha256": self.video_sha256,
+            "source": self.source,
+            "quarantine_reason": self.quarantine_reason,
             "title": self.title,
             "caption": self.caption,
             "hashtags": self.hashtags,
@@ -187,6 +205,8 @@ class ReelState:
             qc_status=data.get("qc_status", "PENDING"),
             video_path=data.get("video_path"),
             video_sha256=data.get("video_sha256"),
+            source=data.get("source", ReelProvenance.LEGACY_UNVERIFIED.value),
+            quarantine_reason=data.get("quarantine_reason"),
             title=data.get("title", ""),
             caption=data.get("caption", ""),
             hashtags=data.get("hashtags", []),

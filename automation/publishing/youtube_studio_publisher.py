@@ -233,6 +233,10 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                     return record
                 expected_date_str, expected_time_str = parse_schedule_datetime(record.scheduled_at_local)
 
+                # Bounded remote verification: eventual consistency on YouTube's side means
+                # a schedule that just succeeded may not be reflected in the content list
+                # instantly. Retry once (max 2 total attempts) before treating it as
+                # inconclusive. Never re-uploads or re-submits the schedule while verifying.
                 is_sched, s_msg = observer.verify_remote_scheduled_status(
                     remote_id=target_vid_id,
                     target_title=record.title,
@@ -241,7 +245,20 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                     channel_id=self.config.youtube_expected_channel_id
                 )
                 if not is_sched:
+                    time.sleep(5.0)
+                    is_sched, s_msg = observer.verify_remote_scheduled_status(
+                        remote_id=target_vid_id,
+                        target_title=record.title,
+                        expected_date_str=expected_date_str,
+                        expected_time_str=expected_time_str,
+                        channel_id=self.config.youtube_expected_channel_id
+                    )
+                if not is_sched:
+                    # Still inconclusive after 2 attempts: preserve remote evidence
+                    # (remote_id/remote_url already captured above) and never falsely
+                    # mark SCHEDULED.
                     record.mark_failed(f"Remote scheduled verification failed ({s_msg})", status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED)
+                    self.repo.save_publish_record(record)
                     return record
 
                 # Extract verified date/time for mark_scheduled

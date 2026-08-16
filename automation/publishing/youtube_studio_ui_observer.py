@@ -965,6 +965,33 @@ class YouTubeStudioUIObserver:
         logger.error(f"[WIZARD_STEP_TRANSITION_FAILED] Expected {target_step}, still on {self.detect_current_wizard_step()}")
         return False
 
+    def dismiss_content_review_info_if_present(self) -> None:
+        """
+        Safely dismisses the informational "we're still checking your content" notice
+        (TR: 'İçeriğinizi kontrol etmeye devam ediyoruz') if visible, by clicking
+        'Anladım'/'Got it'. This is purely informational -- it is never treated as a
+        failure, and dismissing it never advances past schedule mode or clicks any
+        immediate-publish control. Bounded to a single detection+click attempt per call.
+        """
+        try:
+            page_text = self.page.inner_text("ytcp-uploads-dialog").lower()
+        except Exception:
+            return
+
+        if not any(marker in page_text for marker in YouTubeStudioSelectors.CONTENT_REVIEW_INFO_TEXT_MARKERS):
+            return
+
+        for sel in YouTubeStudioSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                if loc.is_visible(timeout=500):
+                    loc.click(timeout=2000)
+                    logger.info("[CONTENT_REVIEW_INFO] Dismissed informational review notice via 'Anladım'/'Got it'.")
+                    time.sleep(0.3)
+                    return
+            except Exception:
+                continue
+
     def _wait_for_checks_complete(self, timeout_seconds: int = 300) -> bool:
         """
         Wait for YouTube processing checks to complete on the CHECKS step.
@@ -982,6 +1009,8 @@ class YouTubeStudioUIObserver:
 
         start = time.time()
         while time.time() - start < timeout_seconds:
+            self.dismiss_content_review_info_if_present()
+
             try:
                 page_text = self.page.inner_text("ytcp-uploads-dialog").lower()
             except Exception:
@@ -1899,6 +1928,7 @@ class YouTubeStudioUIObserver:
         start_wait = time.time()
         submit_btn = None
         while time.time() - start_wait < wait_processing_seconds:
+            self.dismiss_content_review_info_if_present()
             for sel in YouTubeStudioSelectors.FINAL_SCHEDULE_BUTTONS:
                 try:
                     loc = self.page.locator(sel).first
