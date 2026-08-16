@@ -36,7 +36,6 @@ class LocalWorker:
         self.config = CloudConfig(self.base_dir)
         self.storage: MediaStorageInterface = get_media_storage(self.config)
         self.sync = CloudObsidianSync(vault_path=vault_path)
-        self.orchestrator = WeeklyOrchestrator(self.base_dir, vault_path, dry_run=True)
 
         if cloud_client is not None:
             self.client = cloud_client
@@ -46,6 +45,13 @@ class LocalWorker:
                 api_key=self.config.local_worker_api_key,
                 worker_id=self.worker_id
             )
+
+        self.orchestrator = WeeklyOrchestrator(
+            base_dir=self.base_dir,
+            vault_path=vault_path,
+            dry_run=False,
+            cloud_client=self.client
+        )
 
     def send_heartbeat(self, status: str = "IDLE") -> bool:
         """Sends worker heartbeat to Railway Cloud API."""
