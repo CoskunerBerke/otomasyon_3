@@ -58,9 +58,11 @@ screenshots/
 *.lock
 automation.lock
 
-# Obsidian Vault (Local Personal Notes)
-obsidian/
-Obsidian/
+# Obsidian Vault (Local Personal Notes) -- root-level only. Must NOT match
+# automation/obsidian/, which is a real source package (reader/writer/repo)
+# imported by automation/publishing/publisher.py.
+/obsidian/
+/Obsidian/
 
 # IDE & OS Specific
 .vscode/

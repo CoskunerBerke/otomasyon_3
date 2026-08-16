@@ -265,6 +265,7 @@ def test_first_deploy_safe_defaults(tmp_path):
 
 def test_cloud_import_isolation_and_publishing_package():
     """Test: Importing cloud control plane app does not load Playwright, publisher, or browser modules."""
+    removed_modules = {}
     for mod in list(sys.modules.keys()):
         if (
             mod.startswith("automation.publishing")
@@ -272,16 +273,27 @@ def test_cloud_import_isolation_and_publishing_package():
             or "obsidian" in mod
             or mod == "playwright"
         ):
-            del sys.modules[mod]
+            removed_modules[mod] = sys.modules.pop(mod)
 
-    import automation.cloud.app
-    assert "automation.cloud.app" in sys.modules
-    assert "automation.publishing.publisher" not in sys.modules
-    assert "automation.publishing.tiktok_browser" not in sys.modules
-    assert "automation.publishing.tiktok_publisher" not in sys.modules
-    assert "automation.publishing.youtube_publisher" not in sys.modules
-    assert "playwright" not in sys.modules
-    assert not any("obsidian" in m for m in sys.modules)
+    try:
+        import automation.cloud.app
+        assert "automation.cloud.app" in sys.modules
+        assert "automation.publishing.publisher" not in sys.modules
+        assert "automation.publishing.tiktok_browser" not in sys.modules
+        assert "automation.publishing.tiktok_publisher" not in sys.modules
+        assert "automation.publishing.youtube_publisher" not in sys.modules
+        assert "playwright" not in sys.modules
+        assert not any("obsidian" in m for m in sys.modules)
+    finally:
+        for mod in list(sys.modules.keys()):
+            if (
+                mod.startswith("automation.publishing")
+                or mod.startswith("automation.cloud")
+                or "obsidian" in mod
+                or mod == "playwright"
+            ):
+                del sys.modules[mod]
+        sys.modules.update(removed_modules)
 
 
 def test_instagram_models_and_api_independent_imports():
