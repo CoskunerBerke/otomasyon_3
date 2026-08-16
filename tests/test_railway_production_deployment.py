@@ -2,7 +2,7 @@
 Comprehensive Test Suite for Railway Production Deployment Foundation.
 Tests production gates, PostgreSQL driver requirements, real S3 boto3 adapter,
 health diagnostics, safety flags, secret scanning, Railway configuration,
-and strict cloud publishing import isolation.
+cloud publishing import isolation, and LocalWorker ↔ Railway HTTP API integration.
 """
 import os
 import sys
@@ -24,12 +24,17 @@ from automation.cloud.scheduler import CloudScheduler
 from automation.cloud.telegram_webhook import handle_webhook_request
 from automation.cloud.local_worker_api import (
     handle_worker_heartbeat,
-    handle_get_next_command
+    handle_get_next_command,
+    handle_complete_command,
+    handle_sync_cloud_state
 )
 from automation.cloud.app import CloudApp
 from automation.cloud.secret_scan import scan_repository, scan_file_for_secrets
 from automation.cloud.telegram_live_smoke_test import run_smoke_test
 from automation.cloud.setup_telegram_webhook import setup_webhook
+from automation.local_worker_cloud_client import LocalWorkerCloudClient
+from automation.local_worker import LocalWorker, run_heartbeat_only
+from automation.cloud_sync import CloudObsidianSync
 from automation.local_worker_preflight import run_local_worker_preflight
 
 
@@ -388,3 +393,147 @@ def test_telegram_smoke_test_send_with_explicit_config(tmp_path):
         mock_send.assert_called_once()
         called_kwargs = mock_send.call_args[1]
         assert called_kwargs["chat_id"] == 99887766
+
+
+# =============================================================================
+# 8. LOCAL WORKER ↔ RAILWAY HTTP API INTEGRATION
+# =============================================================================
+
+def test_local_worker_cloud_client_endpoints_and_headers():
+    """Test: LocalWorkerCloudClient sends correct headers and targets expected endpoints."""
+    client = LocalWorkerCloudClient(
+        public_base_url="https://reels.up.railway.app",
+        api_key="secret_worker_key_xyz",
+        worker_id="win_test_worker"
+    )
+    assert client.session.headers["X-Worker-Api-Key"] == "secret_worker_key_xyz"
+    assert client.session.headers["X-Worker-Id"] == "win_test_worker"
+
+    # 1. Heartbeat
+    with patch.object(client.session, "post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ok": True, "status": "HEARTBEAT_ACKNOWLEDGED"}
+        mock_post.return_value = mock_resp
+
+        ok, data, err = client.send_heartbeat(status="IDLE")
+        assert ok is True
+        assert err is None
+        mock_post.assert_called_once()
+        args, kwargs = mock_post.call_args
+        assert args[0] == "https://reels.up.railway.app/worker/heartbeat"
+        assert kwargs["json"]["worker_id"] == "win_test_worker"
+
+    # 2. Get next command
+    with patch.object(client.session, "get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ok": True, "command": {"command_id": "cmd_123", "type": "GENERATE_WEEK"}}
+        mock_get.return_value = mock_resp
+
+        ok, cmd, err = client.get_next_command()
+        assert ok is True
+        assert cmd["command_id"] == "cmd_123"
+        args, kwargs = mock_get.call_args
+        assert args[0] == "https://reels.up.railway.app/worker/commands/next"
+
+    # 3. Complete command
+    with patch.object(client.session, "post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ok": True}
+        mock_post.return_value = mock_resp
+
+        ok, resp_data, err = client.complete_command("cmd_123", status="COMPLETE")
+        assert ok is True
+        args, kwargs = mock_post.call_args
+        assert args[0] == "https://reels.up.railway.app/worker/commands/cmd_123/complete"
+
+    # 4. State sync
+    with patch.object(client.session, "get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"ok": True, "weeks": [], "approvals": []}
+        mock_get.return_value = mock_resp
+
+        ok, state_payload, err = client.get_cloud_state()
+        assert ok is True
+        args, kwargs = mock_get.call_args
+        assert args[0] == "https://reels.up.railway.app/worker/state/sync"
+
+
+def test_local_worker_cloud_client_error_translations():
+    """Test: LocalWorkerCloudClient translates 401 to UNAUTHORIZED_WORKER_KEY and connection err to CLOUD_UNREACHABLE."""
+    import requests
+
+    client = LocalWorkerCloudClient(
+        public_base_url="https://reels.up.railway.app",
+        api_key="wrong_key"
+    )
+
+    # 401 Unauthorized
+    with patch.object(client.session, "get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_get.return_value = mock_resp
+
+        ok, data, err = client.get_cloud_state()
+        assert ok is False
+        assert err == "UNAUTHORIZED_WORKER_KEY"
+
+    # Connection error
+    with patch.object(client.session, "get", side_effect=requests.exceptions.ConnectionError("Failed")):
+        ok, data, err = client.get_cloud_state()
+        assert ok is False
+        assert err == "CLOUD_UNREACHABLE"
+
+
+def test_local_worker_heartbeat_only_mode_safety(tmp_path):
+    """Test: --heartbeat-only invokes client.send_heartbeat and does NOT claim commands or run orchestrator."""
+    mock_client = MagicMock()
+    mock_client.send_heartbeat.return_value = (True, {"ok": True}, None)
+
+    worker = LocalWorker(
+        worker_id="win_test_worker",
+        base_dir=tmp_path,
+        cloud_client=mock_client
+    )
+
+    success = run_heartbeat_only(worker)
+    assert success is True
+    mock_client.send_heartbeat.assert_called_once_with(status="IDLE")
+    mock_client.get_next_command.assert_not_called()
+    mock_client.complete_command.assert_not_called()
+
+
+def test_cloud_obsidian_sync_from_payload(tmp_path):
+    """Test: CloudObsidianSync writes approval markdown notes from cloud JSON payload without direct DB."""
+    vault_dir = tmp_path / "ObsidianVault"
+    sync_engine = CloudObsidianSync(db=None, vault_path=vault_dir)
+
+    payload = {
+        "ok": True,
+        "weeks": [{"week_id": "2026-W34", "status": "ACTIVE"}],
+        "approvals": [
+            {
+                "approval_id": "appr_99",
+                "week_id": "2026-W34",
+                "next_week_id": "2026-W35",
+                "status": "PENDING",
+                "telegram_message_id": 555,
+                "telegram_chat_id": 1835798213,
+                "created_at": "2026-08-16 18:00:00"
+            }
+        ],
+        "instagram_jobs": []
+    }
+
+    res = sync_engine.sync_from_cloud_payload(payload)
+    assert res["active_weeks"] == 1
+    assert res["synced_approvals"] == 1
+
+    expected_note = vault_dir / "03_APPROVALS" / "APPROVAL-2026-W35.md"
+    assert expected_note.exists()
+    content = expected_note.read_text(encoding="utf-8")
+    assert "approval_id: appr_99" in content
+    assert "2026-W35" in content
