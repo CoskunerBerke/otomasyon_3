@@ -285,3 +285,39 @@ class LocalWorkerCloudClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"[CLOUD CLIENT] Connection error during media upload: {e}")
             return False, {}, "CLOUD_UNREACHABLE"
+
+    def cleanup_diagnostic_media(self, job_id: str) -> Tuple[bool, Dict[str, Any], Optional[str]]:
+        """
+        Requests deletion of a diagnostic test job (DIAG-HANDOFF-...) and its S3 object.
+        POST to /worker/media/diagnostic-cleanup with X-Worker-Api-Key.
+        Returns (success, response_dict, error_code).
+        """
+        if not self.public_base_url:
+            return False, {}, "PUBLIC_BASE_URL_MISSING"
+        if not self.api_key:
+            return False, {}, "WORKER_API_DISABLED"
+
+        url = self._url("/worker/media/diagnostic-cleanup")
+        payload = {"job_id": job_id}
+
+        try:
+            resp = self.session.post(url, json=payload, timeout=self.timeout)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            if resp.status_code == 200:
+                logger.info(f"[CLOUD CLIENT] Diagnostic cleanup succeeded for {job_id}")
+                return True, data, None
+            elif resp.status_code in (401, 403):
+                err = data.get("error", "UNAUTHORIZED_WORKER_KEY")
+                return False, data, err
+            elif resp.status_code == 404:
+                return False, data, "JOB_NOT_FOUND"
+            else:
+                err = data.get("error", f"HTTP_{resp.status_code}")
+                return False, data, err
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[CLOUD CLIENT] Connection error during diagnostic cleanup: {e}")
+            return False, {}, "CLOUD_UNREACHABLE"

@@ -521,6 +521,13 @@ class Database:
                 updated_at=r["updated_at"]
             )
 
+    def delete_instagram_job(self, job_id: str) -> bool:
+        """Deletes a specific Instagram scheduled job row by job_id."""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            self._execute(cur, "DELETE FROM instagram_scheduled_jobs WHERE job_id = ?", (job_id,))
+            return cur.rowcount > 0
+
     def list_instagram_jobs_for_week(self, week_id: str) -> List[InstagramScheduledJob]:
         with self.get_connection() as conn:
             cur = conn.cursor()

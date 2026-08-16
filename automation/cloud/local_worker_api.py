@@ -2,9 +2,10 @@
 REST Handlers for Local Windows Worker Communication with Cloud Control Plane.
 Protects endpoints with Worker API Key authentication.
 Includes worker heartbeat, command dispatching, state sync, private storage self-test,
-and authenticated MP4 media upload with S3 storage and Instagram job registration.
+bounded multipart streaming MP4 upload, and safe diagnostic cleanup.
 """
 import os
+import re
 import uuid
 import json
 import logging
@@ -27,6 +28,10 @@ from .models import (
 from .security import verify_worker_api_key
 from .media_storage import MediaStorageInterface, compute_file_sha256, get_media_storage
 
+WEEK_REGEX = re.compile(r"^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$")
+REEL_REGEX = re.compile(r"^REEL-\d{4}-\d{4}$")
+JOB_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-]+$")
+
 
 def _authenticate_worker(headers: Dict[str, str], config: CloudConfig) -> Tuple[bool, Optional[str]]:
     """Verifies X-Worker-Api-Key header."""
@@ -42,35 +47,172 @@ def _authenticate_worker(headers: Dict[str, str], config: CloudConfig) -> Tuple[
     return False, "UNAUTHORIZED_WORKER_KEY"
 
 
-def _parse_multipart_form(raw_body: bytes, content_type: str) -> Tuple[Dict[str, str], Optional[Tuple[str, str, bytes]]]:
+def stream_multipart_request(
+    rfile: Any,
+    content_length: int,
+    content_type: str,
+    max_file_size: int = 100 * 1024 * 1024,
+    chunk_size: int = 65536
+) -> Tuple[Dict[str, str], Optional[Path], Optional[str], int, str, Optional[str]]:
     """
-    Parses multipart/form-data into form fields and a file tuple (filename, content_type, file_bytes).
-    Returns (form_fields_dict, file_info_or_None).
+    Streams multipart/form-data from rfile directly to disk in bounded chunks.
+    Calculates SHA256 incrementally and enforces 100 MB max size during streaming.
+    Returns (fields, temp_file_path, filename, file_size, calculated_sha256, error_code).
     """
-    from email.parser import BytesParser
-    from email.policy import default
+    import hashlib
 
-    header_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
-    msg = BytesParser(policy=default).parsebytes(header_bytes + raw_body)
+    match = re.search(r'boundary=([^;]+)', content_type, re.IGNORECASE)
+    if not match:
+        return {}, None, None, 0, "", "INVALID_MULTIPART_BOUNDARY"
 
-    fields = {}
-    file_info = None
+    boundary = match.group(1).strip().strip('"').encode("utf-8")
+    delimiter = b"--" + boundary
 
-    for part in msg.iter_parts():
-        name = part.get_param("name", header="content-disposition")
-        filename = part.get_filename()
-        if filename:
-            file_bytes = part.get_payload(decode=True) or b""
-            part_content_type = part.get_content_type()
-            file_info = (filename, part_content_type, file_bytes)
-        elif name:
-            val_bytes = part.get_payload(decode=True) or b""
+    temp_dir = Path(tempfile.gettempdir()) / "cloud_media_stream"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = temp_dir / f"stream_{uuid.uuid4().hex[:12]}.mp4"
+
+    fields: Dict[str, str] = {}
+    filename: Optional[str] = None
+    file_size: int = 0
+    hasher = hashlib.sha256()
+
+    bytes_remaining = content_length
+    buffer = b""
+
+    def read_more():
+        nonlocal buffer, bytes_remaining
+        if bytes_remaining <= 0:
+            return False
+        read_sz = min(chunk_size, bytes_remaining)
+        chunk = rfile.read(read_sz)
+        if not chunk:
+            return False
+        bytes_remaining -= len(chunk)
+        buffer += chunk
+        return True
+
+    while delimiter not in buffer:
+        if not read_more():
+            break
+
+    idx = buffer.find(delimiter)
+    if idx == -1:
+        return {}, None, None, 0, "", "MULTIPART_DELIMITER_NOT_FOUND"
+
+    buffer = buffer[idx + len(delimiter):]
+    out_file = None
+
+    try:
+        while True:
+            if buffer.startswith(b"\r\n"):
+                buffer = buffer[2:]
+            elif buffer.startswith(b"--"):
+                break
+
+            while b"\r\n\r\n" not in buffer:
+                if not read_more():
+                    break
+
+            if b"\r\n\r\n" not in buffer:
+                break
+
+            hdr_end = buffer.find(b"\r\n\r\n")
+            header_bytes = buffer[:hdr_end]
+            buffer = buffer[hdr_end + 4:]
+
+            header_str = header_bytes.decode("latin-1", errors="replace")
+            is_file = False
+            part_name = ""
+            part_filename = None
+
+            for line in header_str.split("\r\n"):
+                if line.lower().startswith("content-disposition:"):
+                    name_match = re.search(r'name="([^"]+)"', line, re.IGNORECASE)
+                    if name_match:
+                        part_name = name_match.group(1)
+                    fname_match = re.search(r'filename="([^"]+)"', line, re.IGNORECASE)
+                    if fname_match:
+                        part_filename = fname_match.group(1)
+                        is_file = True
+
+            if is_file:
+                filename = part_filename
+                out_file = open(temp_path, "wb")
+                search_boundary = b"\r\n" + delimiter
+
+                while True:
+                    b_idx = buffer.find(search_boundary)
+                    if b_idx != -1:
+                        data_chunk = buffer[:b_idx]
+                        file_size += len(data_chunk)
+                        if file_size > max_file_size:
+                            out_file.close()
+                            if temp_path.exists():
+                                temp_path.unlink()
+                            return {}, None, None, 0, "", "MEDIA_TOO_LARGE"
+                        hasher.update(data_chunk)
+                        out_file.write(data_chunk)
+                        buffer = buffer[b_idx + len(search_boundary):]
+                        break
+                    else:
+                        safe_len = len(buffer) - len(search_boundary)
+                        if safe_len > 0:
+                            data_chunk = buffer[:safe_len]
+                            file_size += len(data_chunk)
+                            if file_size > max_file_size:
+                                out_file.close()
+                                if temp_path.exists():
+                                    temp_path.unlink()
+                                return {}, None, None, 0, "", "MEDIA_TOO_LARGE"
+                            hasher.update(data_chunk)
+                            out_file.write(data_chunk)
+                            buffer = buffer[safe_len:]
+                        if not read_more():
+                            break
+                out_file.close()
+                out_file = None
+            else:
+                search_boundary = b"\r\n" + delimiter
+                field_val_bytes = b""
+                while True:
+                    b_idx = buffer.find(search_boundary)
+                    if b_idx != -1:
+                        field_val_bytes += buffer[:b_idx]
+                        buffer = buffer[b_idx + len(search_boundary):]
+                        break
+                    else:
+                        safe_len = len(buffer) - len(search_boundary)
+                        if safe_len > 0:
+                            field_val_bytes += buffer[:safe_len]
+                            buffer = buffer[safe_len:]
+                        if not read_more():
+                            field_val_bytes += buffer
+                            buffer = b""
+                            break
+                fields[part_name] = field_val_bytes.decode("utf-8", errors="replace")
+
+        while bytes_remaining > 0:
+            chunk = rfile.read(min(chunk_size, bytes_remaining))
+            if not chunk:
+                break
+            bytes_remaining -= len(chunk)
+
+        calculated_sha = hasher.hexdigest().lower() if filename else ""
+        return fields, temp_path, filename, file_size, calculated_sha, None
+
+    except Exception as e:
+        if out_file:
             try:
-                fields[name] = val_bytes.decode("utf-8")
+                out_file.close()
             except Exception:
-                fields[name] = val_bytes.decode("latin-1", errors="replace")
-
-    return fields, file_info
+                pass
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+        return {}, None, None, 0, "", f"STREAM_ERROR: {e}"
 
 
 def handle_worker_heartbeat(
@@ -115,7 +257,6 @@ def handle_get_next_command(
     if not cmd:
         return 200, {"ok": True, "command": None}
 
-    # Atomically claim
     claimed = db.claim_command(cmd.command_id, worker_id)
     if claimed:
         cmd.status = CommandStatus.CLAIMED
@@ -167,7 +308,6 @@ def handle_sync_cloud_state(
     active_weeks = db.list_active_weeks()
     all_weeks_data = [w.to_dict() for w in active_weeks]
 
-    # Collect approvals and Instagram jobs for active weeks
     approvals_data = []
     ig_jobs_data = []
     for w in active_weeks:
@@ -200,7 +340,6 @@ def handle_storage_self_test(
     if not auth_ok:
         return 401, {"ok": False, "error": auth_err}
 
-    # Require explicit confirmation header
     confirm_hdr = (
         headers.get("X-Storage-Smoke-Test") or
         headers.get("x-storage-smoke-test") or
@@ -242,29 +381,18 @@ def handle_storage_self_test(
     meta_size = 0
 
     try:
-        # 1. PUT
         put_res = adapter.put_file(src_file, object_key, content_type="application/octet-stream")
         upload_ok = bool(put_res)
-
-        # 2. HEAD / exists
         exists_after_upload = adapter.exists(object_key)
-
-        # 3. Metadata
         metadata = adapter.get_metadata(object_key)
         meta_size = metadata.get("size_bytes", 0)
-
-        # 4. GET / download
         download_ok = adapter.get_file(object_key, dst_file)
 
-        # 5. SHA256 verify
         if download_ok and dst_file.exists():
             downloaded_sha = compute_file_sha256(dst_file)
             sha_match = (downloaded_sha == initial_sha256)
 
-        # 6. DELETE
         delete_ok = adapter.delete_file(object_key)
-
-        # 7. Final exists
         exists_after_delete = adapter.exists(object_key)
 
         overall_ok = (
@@ -294,7 +422,6 @@ def handle_storage_self_test(
         return 500, {
             "ok": False,
             "error": "STORAGE_SELF_TEST_EXCEPTION",
-            "message": str(e),
             "upload": upload_ok,
             "exists_after_upload": exists_after_upload,
             "download": download_ok,
@@ -304,14 +431,12 @@ def handle_storage_self_test(
         }
 
     finally:
-        # Guarantee remote deletion
         try:
             if exists_after_upload and exists_after_delete:
                 adapter.delete_file(object_key)
         except Exception:
             pass
 
-        # Guarantee local temporary files deletion
         for f in (src_file, dst_file):
             if f.exists():
                 try:
@@ -329,33 +454,47 @@ def handle_media_upload(
 ) -> Tuple[int, Dict[str, Any]]:
     """
     Handles POST /worker/media/upload.
-    Receives finalized MP4 file via multipart/form-data or dict payload,
-    validates size, extension, SHA256 integrity, uploads to private S3 deterministically,
+    Supports bounded streaming temp-files, validates strict identifiers and file size,
+    verifies SHA256 integrity, uploads to private S3 deterministically,
     and registers InstagramScheduledJob with status MEDIA_READY in PostgreSQL.
     """
     auth_ok, auth_err = _authenticate_worker(headers, config)
     if not auth_ok:
         return 401, {"ok": False, "error": auth_err}
 
-    # Extract multipart fields and file
-    file_bytes = b""
-    filename = ""
     fields = {}
+    temp_file: Optional[Path] = None
+    filename = ""
+    file_size = 0
+    server_sha256 = ""
+    is_streamed = False
 
-    if "__raw_multipart__" in payload:
-        raw_mp = payload["__raw_multipart__"]
-        ct = payload.get("__content_type__", "")
-        fields, file_info = _parse_multipart_form(raw_mp, ct)
-        if file_info:
-            filename, _, file_bytes = file_info
+    if "__stream_file_path__" in payload:
+        # Received via bounded streaming
+        fields = payload.get("__fields__", {})
+        temp_file = Path(payload["__stream_file_path__"])
+        filename = payload.get("__filename__", "video.mp4")
+        file_size = payload.get("__file_size__", 0)
+        server_sha256 = payload.get("__calculated_sha256__", "")
+        is_streamed = True
     else:
+        # Direct dictionary payload / unit test mock
         fields = payload
-        file_bytes = payload.get("file", b"")
         filename = payload.get("filename", "video.mp4")
+        raw_file = payload.get("file", b"")
+        if isinstance(raw_file, str):
+            raw_file = raw_file.encode("utf-8")
 
-    # If file_bytes is str (e.g. mock or json), encode to bytes
-    if isinstance(file_bytes, str):
-        file_bytes = file_bytes.encode("utf-8")
+        file_size = len(raw_file)
+        if file_size > 100 * 1024 * 1024:
+            return 413, {"ok": False, "error": "MEDIA_TOO_LARGE"}
+
+        if file_size > 0:
+            temp_dir = Path(tempfile.gettempdir()) / "cloud_media_uploads"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_file = temp_dir / f"upload_{uuid.uuid4().hex[:12]}.mp4"
+            temp_file.write_bytes(raw_file)
+            server_sha256 = compute_file_sha256(temp_file).lower()
 
     week_id = str(fields.get("week_id", "")).strip()
     reel_id = str(fields.get("reel_id", "")).strip()
@@ -366,45 +505,51 @@ def handle_media_upload(
     client_sha256 = str(fields.get("media_sha256", "")).strip().lower()
     job_id = str(fields.get("job_id", "")).strip() or f"JOB-{week_id}-{reel_id}"
 
-    # Validation: week_id and reel_id (no traversal, no slashes)
-    if not week_id or "/" in week_id or "\\" in week_id or ".." in week_id:
-        return 400, {"ok": False, "error": "INVALID_WEEK_ID", "message": "Invalid or unsafe week_id"}
-    if not reel_id or "/" in reel_id or "\\" in reel_id or ".." in reel_id:
-        return 400, {"ok": False, "error": "INVALID_REEL_ID", "message": "Invalid or unsafe reel_id"}
+    # Strict week_id validation: ^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$
+    if not WEEK_REGEX.match(week_id):
+        if temp_file and temp_file.exists():
+            temp_file.unlink()
+        return 400, {"ok": False, "error": "INVALID_WEEK_ID"}
 
-    # Validation: filename must end in .mp4
+    # Strict reel_id validation: ^REEL-\d{4}-\d{4}$
+    if not REEL_REGEX.match(reel_id):
+        if temp_file and temp_file.exists():
+            temp_file.unlink()
+        return 400, {"ok": False, "error": "INVALID_REEL_ID"}
+
+    # Strict job_id validation
+    if not JOB_ID_REGEX.match(job_id) or len(job_id) > 64:
+        if temp_file and temp_file.exists():
+            temp_file.unlink()
+        return 400, {"ok": False, "error": "INVALID_JOB_ID"}
+
+    # Filename validation
     if not filename.lower().endswith(".mp4"):
-        return 400, {"ok": False, "error": "INVALID_MEDIA_FORMAT", "message": "File must end in .mp4"}
+        if temp_file and temp_file.exists():
+            temp_file.unlink()
+        return 400, {"ok": False, "error": "INVALID_MEDIA_FORMAT"}
 
-    # Validation: file size
-    if not file_bytes or len(file_bytes) == 0:
-        return 400, {"ok": False, "error": "MEDIA_EMPTY", "message": "Uploaded media file is empty"}
+    # File size validation
+    if file_size == 0 or not temp_file or not temp_file.exists():
+        if temp_file and temp_file.exists():
+            temp_file.unlink()
+        return 400, {"ok": False, "error": "MEDIA_EMPTY"}
 
-    max_size = 100 * 1024 * 1024  # 100 MB
-    if len(file_bytes) > max_size:
-        return 413, {"ok": False, "error": "MEDIA_TOO_LARGE", "message": "File exceeds maximum 100 MB limit"}
+    if file_size > 100 * 1024 * 1024:
+        if temp_file.exists():
+            temp_file.unlink()
+        return 413, {"ok": False, "error": "MEDIA_TOO_LARGE"}
 
-    # Write to local temp file to compute server SHA256
-    temp_dir = Path(tempfile.gettempdir()) / "cloud_media_uploads"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    temp_file = temp_dir / f"upload_{uuid.uuid4().hex[:12]}.mp4"
-
-    temp_file.write_bytes(file_bytes)
-    server_sha256 = compute_file_sha256(temp_file).lower()
-
+    # SHA256 verification
     if not client_sha256 or client_sha256 != server_sha256:
         if temp_file.exists():
             temp_file.unlink()
-        return 400, {
-            "ok": False,
-            "error": "MEDIA_SHA256_MISMATCH",
-            "message": f"Calculated SHA256 ({server_sha256}) did not match provided SHA256 ({client_sha256})"
-        }
+        return 400, {"ok": False, "error": "MEDIA_SHA256_MISMATCH"}
 
-    # Deterministic object key (strictly without traversal)
+    # Deterministic object key
     object_key = f"media/{week_id}/{reel_id}/{server_sha256}.mp4"
 
-    # Pre-check existing PostgreSQL job for conflicts or advanced state
+    # Pre-check existing PostgreSQL job
     existing_job = db.get_instagram_job(job_id)
     if existing_job:
         adv_statuses = {
@@ -419,30 +564,21 @@ def handle_media_upload(
         if existing_job.status in adv_statuses:
             if temp_file.exists():
                 temp_file.unlink()
-            return 409, {
-                "ok": False,
-                "error": "JOB_ALREADY_ADVANCED",
-                "message": f"Job {job_id} is already in state {existing_job.status.value} and cannot be reset to MEDIA_READY."
-            }
+            return 409, {"ok": False, "error": "JOB_ALREADY_ADVANCED"}
 
         if existing_job.media_sha256 and existing_job.media_sha256.lower() != server_sha256:
             if temp_file.exists():
                 temp_file.unlink()
-            return 409, {
-                "ok": False,
-                "error": "MEDIA_CONFLICT",
-                "message": f"Job {job_id} already exists with different media SHA ({existing_job.media_sha256})."
-            }
+            return 409, {"ok": False, "error": "MEDIA_CONFLICT"}
 
     adapter = storage or get_media_storage(config)
     if not adapter.is_ready():
         if temp_file.exists():
             temp_file.unlink()
-        return 500, {"ok": False, "error": "STORAGE_NOT_READY", "message": "Media storage backend is not ready"}
+        return 500, {"ok": False, "error": "STORAGE_NOT_READY"}
 
     newly_created_s3_object = False
     try:
-        # Check if exact S3 object exists (Idempotency)
         if adapter.exists(object_key):
             is_idempotent = True
         else:
@@ -450,16 +586,14 @@ def handle_media_upload(
             newly_created_s3_object = True
             is_idempotent = False
 
-        # Verify storage
         exists_verified = adapter.exists(object_key)
         if not exists_verified:
-            return 500, {"ok": False, "error": "STORAGE_VERIFICATION_FAILED", "message": "Object not found in storage after upload"}
+            return 500, {"ok": False, "error": "STORAGE_VERIFICATION_FAILED"}
 
         meta = adapter.get_metadata(object_key)
-        if meta and meta.get("size_bytes") and meta.get("size_bytes") != len(file_bytes):
-            return 500, {"ok": False, "error": "STORAGE_VERIFICATION_FAILED", "message": "Storage object size mismatch"}
+        if meta and meta.get("size_bytes") and meta.get("size_bytes") != file_size:
+            return 500, {"ok": False, "error": "STORAGE_VERIFICATION_FAILED"}
 
-        # If existing job is already MEDIA_READY with same sha, return idempotent success
         if existing_job and existing_job.status == InstagramJobStatus.MEDIA_READY and existing_job.media_sha256 == server_sha256:
             return 200, {
                 "ok": True,
@@ -469,12 +603,11 @@ def handle_media_upload(
                 "reel_id": existing_job.reel_id,
                 "media_object_key": existing_job.media_object_key,
                 "media_sha256": existing_job.media_sha256,
-                "size_bytes": len(file_bytes),
+                "size_bytes": file_size,
                 "storage_verified": True,
                 "idempotent": True
             }
 
-        # Create or update InstagramScheduledJob
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         job = InstagramScheduledJob(
             job_id=job_id,
@@ -495,17 +628,12 @@ def handle_media_upload(
             db.save_instagram_job(job)
         except Exception as db_err:
             logger.error(f"[MEDIA UPLOAD] Failed to save Instagram job to database: {db_err}")
-            # Rollback: if we created a new S3 object in this request, delete it
             if newly_created_s3_object:
                 try:
                     adapter.delete_file(object_key)
                 except Exception:
                     pass
-            return 500, {
-                "ok": False,
-                "error": "DATABASE_SAVE_FAILED",
-                "message": f"Failed to persist job to database: {db_err}"
-            }
+            return 500, {"ok": False, "error": "DATABASE_SAVE_FAILED"}
 
         return 200, {
             "ok": True,
@@ -515,14 +643,87 @@ def handle_media_upload(
             "reel_id": job.reel_id,
             "media_object_key": job.media_object_key,
             "media_sha256": job.media_sha256,
-            "size_bytes": len(file_bytes),
+            "size_bytes": file_size,
             "storage_verified": True,
             "idempotent": is_idempotent
         }
 
     finally:
-        if temp_file.exists():
+        if temp_file and temp_file.exists():
             try:
                 temp_file.unlink()
             except Exception:
                 pass
+
+
+def handle_diagnostic_cleanup(
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    config: CloudConfig,
+    db: Database,
+    storage: Optional[MediaStorageInterface] = None
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Handles POST /worker/media/diagnostic-cleanup.
+    Narrowly restricted to deleting ONLY test jobs where:
+    - job_id begins with 'DIAG-HANDOFF-'
+    - status == MEDIA_READY
+    - remote_media_id is empty/null
+    - container_id is empty/null
+    - published_at is empty/null
+    Deletes the exact S3 object and DB row.
+    """
+    auth_ok, auth_err = _authenticate_worker(headers, config)
+    if not auth_ok:
+        return 401, {"ok": False, "error": auth_err}
+
+    job_id = str(payload.get("job_id", "")).strip()
+    if not job_id.startswith("DIAG-HANDOFF-"):
+        return 403, {
+            "ok": False,
+            "error": "DIAGNOSTIC_CLEANUP_NOT_ALLOWED",
+            "message": "Only diagnostic jobs starting with 'DIAG-HANDOFF-' may be cleaned up."
+        }
+
+    job = db.get_instagram_job(job_id)
+    if not job:
+        return 404, {
+            "ok": False,
+            "error": "JOB_NOT_FOUND",
+            "message": f"Job {job_id} not found."
+        }
+
+    if (
+        job.status != InstagramJobStatus.MEDIA_READY
+        or bool(job.remote_media_id)
+        or bool(job.container_id)
+        or bool(job.published_at)
+    ):
+        return 403, {
+            "ok": False,
+            "error": "DIAGNOSTIC_CLEANUP_NOT_ALLOWED",
+            "message": f"Job {job_id} is in status {job.status.value} and cannot be cleaned via diagnostic API."
+        }
+
+    adapter = storage or get_media_storage(config)
+    s3_deleted = False
+
+    if job.media_object_key:
+        try:
+            adapter.delete_file(job.media_object_key)
+            s3_deleted = not adapter.exists(job.media_object_key)
+        except Exception as e:
+            logger.error(f"[DIAG CLEANUP] Error deleting S3 object {job.media_object_key}: {e}")
+            s3_deleted = False
+    else:
+        s3_deleted = True
+
+    db_deleted = db.delete_instagram_job(job_id)
+
+    return 200, {
+        "ok": True,
+        "status": "DIAGNOSTIC_CLEANED",
+        "job_id": job_id,
+        "s3_deleted": s3_deleted,
+        "db_deleted": db_deleted
+    }

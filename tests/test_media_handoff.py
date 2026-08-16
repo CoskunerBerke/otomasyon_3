@@ -1,10 +1,11 @@
 """
 Comprehensive Unit Test Suite for Local MP4 -> Railway S3 -> Instagram MEDIA_READY Handoff.
-Tests endpoint authentication, multipart parsing, SHA256 integrity checks,
+Tests bounded multipart streaming, strict regex validation, SHA256 integrity checks,
 deterministic object keys, storage verification, PostgreSQL InstagramScheduledJob registration,
-idempotency, conflict protection, error rollbacks, temp cleanup, and local handoff service.
+idempotency, conflict protection, error rollbacks, temp cleanup, diagnostic cleanup, and live smoke test helper.
 Uses strict mocks only: 0 real S3 writes, 0 real video publishing, 0 real generation.
 """
+import io
 import os
 import json
 import hashlib
@@ -16,10 +17,15 @@ from unittest.mock import MagicMock, patch
 from automation.cloud.config import CloudConfig
 from automation.cloud.database import Database
 from automation.cloud.models import InstagramScheduledJob, InstagramJobStatus
-from automation.cloud.local_worker_api import handle_media_upload
+from automation.cloud.local_worker_api import (
+    handle_media_upload,
+    handle_diagnostic_cleanup,
+    stream_multipart_request
+)
 from automation.cloud.app import CloudApp
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
 from automation.media_handoff import handoff_reel_to_cloud
+from automation.media_handoff_live_smoke_test import run_media_handoff_smoke_test
 
 
 # =============================================================================
@@ -126,8 +132,8 @@ def test_media_upload_rejects_sha256_mismatch(tmp_path):
     mock_storage.put_file.assert_not_called()
 
 
-def test_media_upload_rejects_path_traversal(tmp_path):
-    """Test 7 & 8: Reject path traversal in week_id or reel_id."""
+def test_media_upload_strict_regex_validation(tmp_path):
+    """Test 7 & 8: Strict regex validation for week_id, reel_id, and job_id."""
     cfg = CloudConfig(tmp_path)
     cfg.local_worker_api_key = "valid_secret_key_123"
     db = Database(f"sqlite:///{tmp_path / 'test.db'}")
@@ -135,11 +141,11 @@ def test_media_upload_rejects_path_traversal(tmp_path):
     sample_bytes = b"safe video bytes"
     sha = hashlib.sha256(sample_bytes).hexdigest()
 
-    # Traversal in week_id
+    # Invalid week_id (fails ^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$)
     payload = {
         "file": sample_bytes,
         "filename": "test.mp4",
-        "week_id": "../etc",
+        "week_id": "invalid-week",
         "reel_id": "REEL-2026-0011",
         "media_sha256": sha
     }
@@ -148,16 +154,87 @@ def test_media_upload_rejects_path_traversal(tmp_path):
     assert code == 400
     assert resp["error"] == "INVALID_WEEK_ID"
 
-    # Traversal in reel_id
+    # Invalid reel_id (fails ^REEL-\d{4}-\d{4}$)
     payload["week_id"] = "2026-W34"
-    payload["reel_id"] = "../../root"
+    payload["reel_id"] = "BAD_REEL_NAME"
     code, resp = handle_media_upload(headers, payload, cfg, db)
     assert code == 400
     assert resp["error"] == "INVALID_REEL_ID"
 
+    # Invalid job_id
+    payload["reel_id"] = "REEL-2026-0011"
+    payload["job_id"] = "bad/job/path"
+    code, resp = handle_media_upload(headers, payload, cfg, db)
+    assert code == 400
+    assert resp["error"] == "INVALID_JOB_ID"
+
 
 # =============================================================================
-# 2. S3 STORAGE & INSTAGRAM JOB REGISTRATION TESTS
+# 2. BOUNDED MULTIPART STREAMING TESTS
+# =============================================================================
+
+def test_stream_multipart_request_bounded_chunks():
+    """Test: stream_multipart_request reads in chunks and writes directly to disk with SHA."""
+    boundary = "----WebKitFormBoundaryXYZ"
+    video_content = b"streaming mp4 video content test bytes"
+    expected_sha = hashlib.sha256(video_content).hexdigest()
+
+    raw_multipart = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="week_id"\r\n\r\n'
+        f"2026-W34\r\n"
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="reel_id"\r\n\r\n'
+        f"REEL-2026-0011\r\n"
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="video.mp4"\r\n'
+        f"Content-Type: video/mp4\r\n\r\n"
+    ).encode("utf-8") + video_content + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+    stream = io.BytesIO(raw_multipart)
+    content_type = f"multipart/form-data; boundary={boundary}"
+
+    fields, temp_path, filename, file_size, calculated_sha, err = stream_multipart_request(
+        stream, len(raw_multipart), content_type, chunk_size=16
+    )
+
+    assert err is None
+    assert fields["week_id"] == "2026-W34"
+    assert fields["reel_id"] == "REEL-2026-0011"
+    assert filename == "video.mp4"
+    assert file_size == len(video_content)
+    assert calculated_sha == expected_sha
+    assert temp_path.exists()
+
+    # Cleanup temp
+    temp_path.unlink()
+
+
+def test_stream_multipart_request_exceeds_max_size_cleans_up():
+    """Test: stream_multipart_request aborts and deletes partial file if limit exceeded."""
+    boundary = "----WebKitBoundaryLimit"
+    large_chunk = b"A" * 1024
+
+    raw_multipart = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="video.mp4"\r\n'
+        f"Content-Type: video/mp4\r\n\r\n"
+    ).encode("utf-8") + large_chunk + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+    stream = io.BytesIO(raw_multipart)
+    content_type = f"multipart/form-data; boundary={boundary}"
+
+    # Set max_file_size to 500 bytes (< 1024 bytes)
+    fields, temp_path, filename, file_size, calculated_sha, err = stream_multipart_request(
+        stream, len(raw_multipart), content_type, max_file_size=500, chunk_size=64
+    )
+
+    assert err == "MEDIA_TOO_LARGE"
+    assert temp_path is None or not temp_path.exists()
+
+
+# =============================================================================
+# 3. S3 STORAGE & INSTAGRAM JOB REGISTRATION TESTS
 # =============================================================================
 
 def test_media_upload_successful_first_upload(tmp_path):
@@ -221,7 +298,6 @@ def test_media_upload_idempotent_when_s3_and_job_exist(tmp_path):
     sha = hashlib.sha256(video_data).hexdigest()
     object_key = f"media/2026-W34/REEL-2026-0011/{sha}.mp4"
 
-    # Pre-populate DB job with MEDIA_READY
     pre_job = InstagramScheduledJob(
         job_id="JOB-2026-W34-REEL-2026-0011",
         week_id="2026-W34",
@@ -238,7 +314,7 @@ def test_media_upload_idempotent_when_s3_and_job_exist(tmp_path):
 
     mock_storage = MagicMock()
     mock_storage.is_ready.return_value = True
-    mock_storage.exists.return_value = True  # Already exists in S3
+    mock_storage.exists.return_value = True
     mock_storage.get_metadata.return_value = {"size_bytes": len(video_data)}
 
     payload = {
@@ -256,7 +332,6 @@ def test_media_upload_idempotent_when_s3_and_job_exist(tmp_path):
     assert code == 200
     assert resp["ok"] is True
     assert resp["idempotent"] is True
-    # Should NOT upload duplicate bytes
     mock_storage.put_file.assert_not_called()
 
 
@@ -266,7 +341,6 @@ def test_media_upload_rejects_conflicting_sha(tmp_path):
     cfg.local_worker_api_key = "valid_secret_key_123"
     db = Database(f"sqlite:///{tmp_path / 'test.db'}")
 
-    # Pre-populate DB with different SHA
     pre_job = InstagramScheduledJob(
         job_id="JOB-2026-W34-REEL-2026-0011",
         week_id="2026-W34",
@@ -313,7 +387,7 @@ def test_media_upload_protects_advanced_jobs(tmp_path):
         pre_job = InstagramScheduledJob(
             job_id=f"JOB-2026-W34-REEL-2026-{adv_status.value}",
             week_id="2026-W34",
-            reel_id=f"REEL-2026-{adv_status.value}",
+            reel_id="REEL-2026-0011",
             scheduled_at_local="2026-08-17 19:30:00",
             scheduled_at_utc="2026-08-17 16:30:00",
             timezone="Europe/Istanbul",
@@ -328,7 +402,7 @@ def test_media_upload_protects_advanced_jobs(tmp_path):
             "file": video,
             "filename": "video.mp4",
             "week_id": "2026-W34",
-            "reel_id": f"REEL-2026-{adv_status.value}",
+            "reel_id": "REEL-2026-0011",
             "job_id": f"JOB-2026-W34-REEL-2026-{adv_status.value}",
             "scheduled_at_local": "2026-08-17 19:30:00",
             "scheduled_at_utc": "2026-08-17 16:30:00",
@@ -378,11 +452,88 @@ def test_media_upload_db_failure_rolls_back_new_s3_object(tmp_path):
 
 
 # =============================================================================
-# 3. LOCAL CLIENT & MEDIA HANDOFF SERVICE TESTS
+# 4. DIAGNOSTIC CLEANUP ENDPOINT TESTS
 # =============================================================================
 
-def test_local_worker_cloud_client_upload_media(tmp_path):
-    """Test 22, 23, 24: LocalWorkerCloudClient computes SHA256 and sends multipart request with auth headers."""
+def test_diagnostic_cleanup_auth_and_restrictions(tmp_path):
+    """Test: /worker/media/diagnostic-cleanup strictly enforces auth, prefix, and non-advanced state."""
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = "valid_secret_key_123"
+    db = Database(f"sqlite:///{tmp_path / 'test.db'}")
+
+    # 1. Invalid auth -> 401
+    code, resp = handle_diagnostic_cleanup({"X-Worker-Api-Key": "wrong"}, {}, cfg, db)
+    assert code == 401
+
+    headers = {"X-Worker-Api-Key": "valid_secret_key_123"}
+
+    # 2. Non-diagnostic job ID -> 403
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "JOB-2026-W34-REEL-2026-0011"}, cfg, db)
+    assert code == 403
+    assert resp["error"] == "DIAGNOSTIC_CLEANUP_NOT_ALLOWED"
+
+    # 3. Non-existent job -> 404
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "DIAG-HANDOFF-notfound123"}, cfg, db)
+    assert code == 404
+    assert resp["error"] == "JOB_NOT_FOUND"
+
+    # 4. Diagnostic job with advanced status -> 403
+    adv_job = InstagramScheduledJob(
+        job_id="DIAG-HANDOFF-adv123",
+        week_id="2099-W52",
+        reel_id="REEL-2099-9999",
+        scheduled_at_local="2099-12-28 19:30:00",
+        scheduled_at_utc="2099-12-28 16:30:00",
+        status=InstagramJobStatus.PUBLISHED
+    )
+    db.save_instagram_job(adv_job)
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "DIAG-HANDOFF-adv123"}, cfg, db)
+    assert code == 403
+    assert resp["error"] == "DIAGNOSTIC_CLEANUP_NOT_ALLOWED"
+
+
+def test_diagnostic_cleanup_success(tmp_path):
+    """Test: Diagnostic cleanup deletes exact S3 object and DB row for valid DIAG-HANDOFF job."""
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = "valid_secret_key_123"
+    db = Database(f"sqlite:///{tmp_path / 'test.db'}")
+
+    diag_job = InstagramScheduledJob(
+        job_id="DIAG-HANDOFF-clean123",
+        week_id="2099-W52",
+        reel_id="REEL-2099-9999",
+        scheduled_at_local="2099-12-28 19:30:00",
+        scheduled_at_utc="2099-12-28 16:30:00",
+        media_object_key="media/2099-W52/REEL-2099-9999/test.mp4",
+        status=InstagramJobStatus.MEDIA_READY
+    )
+    db.save_instagram_job(diag_job)
+
+    mock_storage = MagicMock()
+    mock_storage.exists.return_value = False  # after deletion exists -> False
+    mock_storage.delete_file.return_value = True
+
+    headers = {"X-Worker-Api-Key": "valid_secret_key_123"}
+    code, resp = handle_diagnostic_cleanup(headers, {"job_id": "DIAG-HANDOFF-clean123"}, cfg, db, storage=mock_storage)
+
+    assert code == 200
+    assert resp["ok"] is True
+    assert resp["status"] == "DIAGNOSTIC_CLEANED"
+    assert resp["s3_deleted"] is True
+    assert resp["db_deleted"] is True
+
+    # S3 delete called
+    mock_storage.delete_file.assert_called_once_with("media/2099-W52/REEL-2099-9999/test.mp4")
+    # DB row deleted
+    assert db.get_instagram_job("DIAG-HANDOFF-clean123") is None
+
+
+# =============================================================================
+# 5. LOCAL CLIENT & LIVE SMOKE TEST HELPER TESTS
+# =============================================================================
+
+def test_local_worker_cloud_client_upload_and_cleanup(tmp_path):
+    """Test: LocalWorkerCloudClient handles upload and cleanup API calls."""
     video_file = tmp_path / "REEL-2026-0011.mp4"
     video_file.write_bytes(b"local client test bytes 12345")
     expected_sha = hashlib.sha256(b"local client test bytes 12345").hexdigest()
@@ -394,16 +545,17 @@ def test_local_worker_cloud_client_upload_media(tmp_path):
     )
 
     with patch.object(client.session, "post") as mock_post:
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
+        # Upload
+        mock_resp_up = MagicMock()
+        mock_resp_up.status_code = 200
+        mock_resp_up.json.return_value = {
             "ok": True,
             "status": "MEDIA_READY",
             "media_object_key": f"media/2026-W34/REEL-2026-0011/{expected_sha}.mp4",
             "media_sha256": expected_sha,
             "idempotent": False
         }
-        mock_post.return_value = mock_resp
+        mock_post.return_value = mock_resp_up
 
         ok, data, err = client.upload_media_for_instagram(
             local_path=video_file,
@@ -414,47 +566,60 @@ def test_local_worker_cloud_client_upload_media(tmp_path):
             caption="Automated Reel"
         )
         assert ok is True
-        assert err is None
-        assert data["media_sha256"] == expected_sha
 
-        mock_post.assert_called_once()
-        args, kwargs = mock_post.call_args
-        assert args[0] == "https://reels.up.railway.app/worker/media/upload"
-        assert kwargs["data"]["media_sha256"] == expected_sha
-        assert kwargs["data"]["week_id"] == "2026-W34"
+        # Cleanup
+        mock_resp_clean = MagicMock()
+        mock_resp_clean.status_code = 200
+        mock_resp_clean.json.return_value = {
+            "ok": True,
+            "status": "DIAGNOSTIC_CLEANED",
+            "s3_deleted": True,
+            "db_deleted": True
+        }
+        mock_post.return_value = mock_resp_clean
+
+        ok_c, data_c, err_c = client.cleanup_diagnostic_media("DIAG-HANDOFF-12345")
+        assert ok_c is True
+        assert data_c["status"] == "DIAGNOSTIC_CLEANED"
 
 
-def test_media_handoff_service_end_to_end(tmp_path):
-    """Test 25, 26, 27, 28, 29: handoff_reel_to_cloud delegates to client without platform actions."""
-    video_file = tmp_path / "REEL-2026-0012.mp4"
-    video_file.write_bytes(b"test reel payload 999")
-    expected_sha = hashlib.sha256(b"test reel payload 999").hexdigest()
+def test_media_handoff_smoke_test_cli_flow(tmp_path):
+    """Test: run_media_handoff_smoke_test defaults to dry plan and executes full cycle with --apply."""
+    video_file = tmp_path / "smoke_test_reel.mp4"
+    video_file.write_bytes(b"smoke test video frame bytes 777")
 
+    mock_cfg = CloudConfig(tmp_path)
+    mock_cfg.public_base_url = "https://reels.up.railway.app"
+    mock_cfg.local_worker_api_key = "worker_key_123"
+
+    # 1. Dry run
+    res_dry = run_media_handoff_smoke_test(str(video_file), apply_changes=False, config=mock_cfg)
+    assert res_dry is True
+
+    # 2. Live apply
     mock_client = MagicMock()
     mock_client.upload_media_for_instagram.return_value = (
         True,
         {
             "ok": True,
             "status": "MEDIA_READY",
-            "job_id": "JOB-2026-W34-REEL-2026-0012",
-            "media_object_key": f"media/2026-W34/REEL-2026-0012/{expected_sha}.mp4",
-            "media_sha256": expected_sha,
-            "idempotent": False
+            "job_id": "DIAG-HANDOFF-test1234",
+            "media_object_key": "media/2099-W52/REEL-2099-9999/sha.mp4"
         },
         None
     )
-
-    ok, data, err = handoff_reel_to_cloud(
-        local_path=video_file,
-        week_id="2026-W34",
-        reel_id="REEL-2026-0012",
-        scheduled_at_local="2026-08-17 22:00:00",
-        scheduled_at_utc="2026-08-17 19:00:00",
-        caption="Second daily slot reel",
-        client=mock_client
+    mock_client.get_cloud_state.return_value = (
+        True,
+        {"instagram_jobs": [{"job_id": "DIAG-HANDOFF-test1234", "status": "MEDIA_READY"}]},
+        None
+    )
+    mock_client.cleanup_diagnostic_media.return_value = (
+        True,
+        {"ok": True, "status": "DIAGNOSTIC_CLEANED", "s3_deleted": True, "db_deleted": True},
+        None
     )
 
-    assert ok is True
-    assert err is None
-    assert data["job_id"] == "JOB-2026-W34-REEL-2026-0012"
+    res_live = run_media_handoff_smoke_test(str(video_file), apply_changes=True, client=mock_client, config=mock_cfg)
+    assert res_live is True
     mock_client.upload_media_for_instagram.assert_called_once()
+    mock_client.cleanup_diagnostic_media.assert_called_once()

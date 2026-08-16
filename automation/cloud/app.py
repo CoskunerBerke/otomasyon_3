@@ -30,7 +30,9 @@ from .local_worker_api import (
     handle_complete_command,
     handle_sync_cloud_state,
     handle_storage_self_test,
-    handle_media_upload
+    handle_media_upload,
+    handle_diagnostic_cleanup,
+    stream_multipart_request
 )
 
 
@@ -40,21 +42,28 @@ class CloudApp:
     def __init__(self, config: Optional[CloudConfig] = None):
         self.config = config or CloudConfig()
         self.db = Database(self.config.database_url, is_production=self.config.is_production)
-        self.bot = TelegramBotClient(self.config.telegram_bot_token)
-        self.approval_service = ApprovalService(self.config, self.db, self.bot)
+        self.telegram_bot = TelegramBotClient(self.config.telegram_bot_token)
+        self.approval_service = ApprovalService(self.config, self.db, self.telegram_bot)
         self.storage = get_media_storage(self.config)
         self.instagram_worker = InstagramCloudWorker(self.config, self.db, self.storage)
         self.scheduler = CloudScheduler(self.config, self.db, self.approval_service, self.instagram_worker)
+
         self._scheduler_running = False
         self._scheduler_thread: Optional[threading.Thread] = None
 
-    def route_request(self, method: str, path: str, headers: Dict[str, str], body_json: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
-        """Unified internal router for HTTP / ASGI / WSGI."""
+    def route_request(
+        self,
+        method: str,
+        path: str,
+        headers: Dict[str, str],
+        body_json: Dict[str, Any]
+    ) -> Tuple[int, Dict[str, Any]]:
+        """Main routing dispatch for HTTP requests."""
         clean_path = path.split("?")[0].rstrip("/")
         if not clean_path:
             clean_path = "/"
 
-        if method == "GET" and (clean_path == "/health" or clean_path == "/"):
+        if method == "GET" and clean_path in ("/", "/health"):
             return 200, get_health_status(self.config, self.db)
 
         if method == "POST" and clean_path == "/telegram/webhook":
@@ -81,6 +90,9 @@ class CloudApp:
 
         if method == "POST" and clean_path == "/worker/media/upload":
             return handle_media_upload(headers, body_json, self.config, self.db, self.storage)
+
+        if method == "POST" and clean_path == "/worker/media/diagnostic-cleanup":
+            return handle_diagnostic_cleanup(headers, body_json, self.config, self.db, self.storage)
 
         return 404, {"ok": False, "error": "NOT_FOUND"}
 
@@ -131,20 +143,42 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
         content_len = int(self.headers.get("Content-Length", 0))
         content_type = self.headers.get("Content-Type", "")
 
-        if content_len > 105 * 1024 * 1024:
-            self._send_json(413, {"ok": False, "error": "MEDIA_TOO_LARGE", "message": "Request exceeds maximum 100 MB limit"})
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if not clean_path:
+            clean_path = "/"
+
+        # Bounded streaming multipart upload for /worker/media/upload
+        if clean_path == "/worker/media/upload" and "multipart/form-data" in content_type:
+            fields, temp_path, filename, file_size, calculated_sha, err = stream_multipart_request(
+                self.rfile, content_len, content_type
+            )
+            if err:
+                code = 413 if err == "MEDIA_TOO_LARGE" else 400
+                self._send_json(code, {"ok": False, "error": err})
+                return
+
+            body_data = {
+                "__stream_file_path__": str(temp_path) if temp_path else "",
+                "__fields__": fields,
+                "__filename__": filename or "video.mp4",
+                "__file_size__": file_size,
+                "__calculated_sha256__": calculated_sha
+            }
+            code, resp = self.app.route_request("POST", self.path, headers_dict, body_data)
+            self._send_json(code, resp)
+            return
+
+        if content_len > 10 * 1024 * 1024:
+            self._send_json(413, {"ok": False, "error": "PAYLOAD_TOO_LARGE"})
             return
 
         body_data = {}
         if content_len > 0:
             raw_body = self.rfile.read(content_len)
-            if "multipart/form-data" in content_type:
-                body_data = {"__raw_multipart__": raw_body, "__content_type__": content_type}
-            else:
-                try:
-                    body_data = json.loads(raw_body.decode("utf-8"))
-                except Exception:
-                    body_data = {"__raw_body__": raw_body}
+            try:
+                body_data = json.loads(raw_body.decode("utf-8"))
+            except Exception:
+                body_data = {"__raw_body__": raw_body}
 
         code, resp = self.app.route_request("POST", self.path, headers_dict, body_data)
         self._send_json(code, resp)
