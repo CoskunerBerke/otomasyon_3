@@ -781,76 +781,218 @@ def test_repository_merge_with_existing_preserves_remote_evidence(tmp_path: Path
     assert merged.remote_draft_exists is True
     assert merged.status == PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
 
-def test_youtube_studio_enter_existing_draft_wizard_success():
-    mock_page = MagicMock()
-    mock_banner = MagicMock()
-    mock_banner.is_visible.return_value = True
+# ---------------------------------------------------------------------------
+# enter_existing_draft_wizard -- strict wizard-proof contract.
+#
+# The real upload wizard is proven ONLY by a visible ytcp-uploads-dialog that also
+# contains a stepper. A plain /video/<id>/edit page has its own title input and must
+# never be mistaken for the wizard (that false positive was the production bug).
+# ---------------------------------------------------------------------------
 
-    mock_edit_btn = MagicMock()
-    mock_edit_btn.is_visible.return_value = True
-    mock_edit_btn.is_enabled.return_value = True
+class _DraftLoc:
+    """Minimal Playwright-locator stand-in that supports scoped .locator() lookups."""
 
-    is_wizard_open = [False]
+    def __init__(self, page, kind, visible=True, enabled=True):
+        self._page = page
+        self._kind = kind
+        self._visible = visible
+        self._enabled = enabled
+        self.click_count = 0
 
-    def click_edit():
-        is_wizard_open[0] = True
+    @property
+    def first(self):
+        return self
 
-    mock_edit_btn.click.side_effect = click_edit
+    def is_visible(self, timeout=None):
+        return self._visible() if callable(self._visible) else self._visible
 
-    def loc_side_effect(sel):
-        res = MagicMock()
-        if "Taslağı düzenle" in sel or "Edit draft" in sel:
-            res.first = mock_edit_btn
-        elif any(k in sel for k in ["stepper", "tablist", "Ayrıntılar", "Visibility", "dialog"]):
-            loc = MagicMock()
-            loc.is_visible.return_value = is_wizard_open[0]
-            res.first = loc
-        else:
-            loc = MagicMock()
-            loc.is_visible.return_value = False
-            res.first = loc
-        return res
+    def is_enabled(self, timeout=None):
+        return self._enabled
 
-    mock_page.locator.side_effect = loc_side_effect
+    def scroll_into_view_if_needed(self, timeout=None):
+        return None
 
-    observer = YouTubeStudioUIObserver(mock_page)
-    success = observer.enter_existing_draft_wizard(timeout_seconds=2)
-    assert success is True
-    mock_edit_btn.click.assert_called_once()
+    def click(self, timeout=None):
+        self.click_count += 1
+        self._page.on_edit_click()
 
-def test_youtube_studio_enter_existing_draft_wizard_already_open():
-    mock_page = MagicMock()
-    mock_stepper = MagicMock()
-    mock_stepper.is_visible.return_value = True
+    def locator(self, selector):
+        # Scoped lookup inside this element (used for stepper-inside-dialog).
+        kind = self._page.classify(selector)
+        if self._kind == "dialog" and kind == "stepper":
+            return _DraftLoc(self._page, "stepper", visible=self._page.stepper_visible)
+        return _DraftLoc(self._page, "missing", visible=False)
 
-    mock_edit_btn = MagicMock()
-    mock_edit_btn.is_visible.return_value = False
 
-    def loc_side_effect(sel):
-        res = MagicMock()
-        if "stepper" in sel or "tablist" in sel or "Ayrıntılar" in sel:
-            res.first = mock_stepper
-        else:
-            loc = MagicMock()
-            loc.is_visible.return_value = False
-            res.first = loc
-        return res
+class _DraftPage:
+    """Fake /video/<id>/edit page. Models exactly which elements exist."""
 
-    mock_page.locator.side_effect = loc_side_effect
+    def __init__(self, has_edit_button=True, has_title_input=True,
+                 dialog_after_click=True, stepper_in_dialog=True,
+                 dialog_present_initially=False):
+        self.has_edit_button = has_edit_button
+        self.has_title_input = has_title_input
+        self.dialog_after_click = dialog_after_click
+        self.stepper_in_dialog = stepper_in_dialog
+        self._dialog_open = dialog_present_initially
+        self.edit_clicks = 0
+        self.snapshots = []
 
-    observer = YouTubeStudioUIObserver(mock_page)
-    success = observer.enter_existing_draft_wizard(timeout_seconds=2)
-    assert success is True
-    mock_edit_btn.click.assert_not_called()
+    # -- helpers -------------------------------------------------------
+    def classify(self, selector):
+        s = selector.lower()
+        if "ytcp-uploads-dialog" in s:
+            return "dialog"
+        if "taslağı düzenle" in s or "edit draft" in s:
+            return "edit_button"
+        if "stepper" in s or "tablist" in s or "paper-tab" in s:
+            return "stepper"
+        if "title" in s or "başlık" in s:
+            return "title_input"
+        return "other"
 
-def test_youtube_studio_enter_existing_draft_wizard_fails_safely():
-    mock_page = MagicMock()
-    mock_hidden = MagicMock()
-    mock_hidden.is_visible.return_value = False
-    mock_page.locator.return_value.first = mock_hidden
-    observer = YouTubeStudioUIObserver(mock_page)
-    success = observer.enter_existing_draft_wizard(timeout_seconds=1)
-    assert success is False
+    def dialog_visible(self):
+        return self._dialog_open
+
+    def stepper_visible(self):
+        return self._dialog_open and self.stepper_in_dialog
+
+    def on_edit_click(self):
+        self.edit_clicks += 1
+        if self.dialog_after_click:
+            self._dialog_open = True
+
+    # -- playwright surface --------------------------------------------
+    def locator(self, selector):
+        kind = self.classify(selector)
+        if kind == "dialog":
+            return _DraftLoc(self, "dialog", visible=self.dialog_visible)
+        if kind == "edit_button":
+            return _DraftLoc(self, "edit_button", visible=self.has_edit_button)
+        if kind == "stepper":
+            return _DraftLoc(self, "stepper", visible=self.stepper_visible)
+        if kind == "title_input":
+            return _DraftLoc(self, "title_input", visible=self.has_title_input)
+        return _DraftLoc(self, "missing", visible=False)
+
+    def screenshot(self, path=None, full_page=None):
+        self.snapshots.append(path)
+        Path(path).write_bytes(b"")
+
+    def content(self):
+        return "<html></html>"
+
+
+def _observer_for(page):
+    obs = YouTubeStudioUIObserver(page)
+    obs.capture_error_snapshot = MagicMock()
+    return obs
+
+
+def test_draft_wizard_rejects_plain_edit_page_with_title_input():
+    """Edit page + title input + NO uploads-dialog => must be FALSE.
+    This is the exact production false positive being fixed."""
+    page = _DraftPage(has_edit_button=False, has_title_input=True, dialog_after_click=False)
+    observer = _observer_for(page)
+
+    assert observer.enter_existing_draft_wizard(timeout_seconds=1) is False
+    assert page.edit_clicks == 0
+    observer.capture_error_snapshot.assert_called_once()
+
+
+def test_draft_wizard_success_requires_real_dialog_and_stepper():
+    """'Taslağı düzenle' click that mounts a real ytcp-uploads-dialog + stepper => TRUE."""
+    page = _DraftPage(has_edit_button=True, dialog_after_click=True, stepper_in_dialog=True)
+    observer = _observer_for(page)
+
+    assert observer.enter_existing_draft_wizard(timeout_seconds=3) is True
+    assert page.edit_clicks == 1
+    observer.capture_error_snapshot.assert_not_called()
+
+
+def test_draft_wizard_button_found_but_wizard_never_opens_fails_safely():
+    """Button exists and is clicked, but no real wizard mounts => safe failure + snapshot."""
+    page = _DraftPage(has_edit_button=True, dialog_after_click=False, has_title_input=True)
+    observer = _observer_for(page)
+
+    assert observer.enter_existing_draft_wizard(timeout_seconds=2) is False
+    assert page.edit_clicks == 1
+    observer.capture_error_snapshot.assert_called_once()
+
+
+def test_draft_wizard_dialog_without_stepper_is_not_proof():
+    """A dialog alone (no stepper inside it) must not count as wizard proof."""
+    page = _DraftPage(has_edit_button=True, dialog_after_click=True, stepper_in_dialog=False)
+    observer = _observer_for(page)
+
+    assert observer.enter_existing_draft_wizard(timeout_seconds=2) is False
+    observer.capture_error_snapshot.assert_called_once()
+
+
+def test_draft_wizard_already_open_is_idempotent_and_does_not_click():
+    """Already inside the real wizard => TRUE without clicking anything again."""
+    page = _DraftPage(has_edit_button=True, dialog_present_initially=True, stepper_in_dialog=True)
+    observer = _observer_for(page)
+
+    assert observer.enter_existing_draft_wizard(timeout_seconds=2) is True
+    assert page.edit_clicks == 0
+
+
+def test_draft_wizard_uses_at_most_two_button_strategies():
+    """Kural 31: the Edit-draft action must expose exactly 2 semantic strategies."""
+    from automation.publishing.youtube_studio_selectors import YouTubeStudioSelectors
+    assert len(YouTubeStudioSelectors.EDIT_DRAFT_BUTTON_STRATEGIES) == 2
+    assert len(YouTubeStudioSelectors.WIZARD_STEPPER_IN_DIALOG) == 2
+
+
+def test_draft_wizard_failure_blocks_upload_no_duplicate(tmp_path):
+    """Existing remote_id + wizard failure => publisher must STOP, never upload a duplicate."""
+    from automation.publishing.config import load_publishing_config
+
+    dummy_video = tmp_path / "REEL-2026-0011.mp4"
+    dummy_video.write_bytes(b"x" * 2048)
+
+    record = PublishRecord(
+        publish_id="PUB-REEL-2026-0011-YOUTUBE",
+        batch_id="2026-08-17",
+        reel_id="REEL-2026-0011",
+        platform=Platform.YOUTUBE,
+        account_handle="@BuiIdVerse",
+        video_file=dummy_video,
+        video_sha256="hash123",
+        title="Real Title",
+        description="Real caption",
+        hashtags=["#Shorts"],
+        scheduled_at_local="2026-08-17T19:30:00+03:00",
+        scheduled_at_utc="2026-08-17T16:30:00Z",
+        remote_id="a9RnSvejU2Q",
+        remote_url="https://youtube.com/shorts/a9RnSvejU2Q",
+        status=PlatformPublicationStatus.UPLOADED_DRAFT,
+    )
+
+    cfg = load_publishing_config(base_dir=tmp_path)
+    pub = YouTubeStudioPublisher(config=cfg)
+
+    mock_observer = MagicMock()
+    mock_observer.is_logged_in.return_value = True
+    mock_observer.verify_logged_in_channel.return_value = (True, "@BuiIdVerse", "OK")
+    mock_observer.open_exact_remote_video.return_value = True
+    mock_observer.enter_existing_draft_wizard.return_value = False  # wizard never opens
+
+    pub.browser_mgr = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.pages = [MagicMock()]
+    pub.browser_mgr.connect.return_value.__enter__.return_value = (MagicMock(), mock_ctx)
+
+    import automation.publishing.youtube_studio_publisher as ysp
+    orig = ysp.YouTubeStudioUIObserver
+    ysp.YouTubeStudioUIObserver = lambda p: mock_observer
+    try:
+        res = pub.upload_and_schedule(record)
+        assert mock_observer.upload_file.call_count == 0
+        assert res.status == PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
+    finally:
+        ysp.YouTubeStudioUIObserver = orig
 
 def test_youtube_studio_real_dom_fixture_resolution():
     fixture_path = Path(__file__).resolve().parent / "fixtures" / "youtube_live_controls.html"

@@ -60,6 +60,29 @@ class YouTubeStudioSelectors:
         "ytcp-uploads-dialog"
     ]
 
+    # --- Existing-draft resume (enter_existing_draft_wizard) -------------------
+    # Kural 31: exactly TWO semantic strategies for the 'Taslağı düzenle' action --
+    # (1) visible button text, (2) aria-label. Each strategy carries its own TR+EN
+    # variants as one comma-grouped CSS selector, which Playwright treats as a single
+    # "match any of these" query, so this remains 2 locator attempts, not 8.
+    EDIT_DRAFT_BUTTON_STRATEGIES: List[str] = [
+        "ytcp-button:has-text('Taslağı düzenle'), ytcp-button:has-text('Edit draft'), "
+        "button:has-text('Taslağı düzenle'), button:has-text('Edit draft')",
+        "button[aria-label*='Taslağı düzenle' i], button[aria-label*='Edit draft' i], "
+        "ytcp-button[aria-label*='Taslağı düzenle' i], ytcp-button[aria-label*='Edit draft' i]",
+    ]
+
+    # The ONLY element that proves the real upload wizard is mounted. A normal
+    # /video/<id>/edit page never contains this -- it has its own title/description
+    # inputs, which is exactly why a title input must never be accepted as wizard proof.
+    UPLOAD_WIZARD_DIALOG: str = "ytcp-uploads-dialog"
+
+    # Stepper proof, always resolved SCOPED INSIDE UPLOAD_WIZARD_DIALOG (2 strategies).
+    WIZARD_STEPPER_IN_DIALOG: List[str] = [
+        "ytcp-stepper",
+        "tp-yt-paper-tab, div[role='tablist']",
+    ]
+
     CREATE_BUTTONS: List[str] = [
         "#create-icon",
         "#create-button",

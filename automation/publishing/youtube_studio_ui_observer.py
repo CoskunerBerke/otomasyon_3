@@ -174,57 +174,94 @@ class YouTubeStudioUIObserver:
 
         return video_id, video_url
 
-    def enter_existing_draft_wizard(self, timeout_seconds: int = 15) -> bool:
+    def is_real_upload_wizard_open(self, timeout_ms: int = 800) -> bool:
         """
-        If on https://studio.youtube.com/video/<id>/edit page with 'Bu video taslak durumunda',
-        clicks 'Taslağı düzenle' (Edit draft) to open the stepper upload wizard.
-        Verifies YOUTUBE_DRAFT_WIZARD_READY.
+        Proof that the REAL stepper upload wizard is mounted: a visible
+        ``ytcp-uploads-dialog`` that also contains a visible stepper.
+
+        Both conditions are required, and the stepper is resolved SCOPED INSIDE the
+        dialog. A normal /video/<id>/edit page has its own title/description inputs and
+        (sometimes) tablist-ish chrome, but it never mounts ytcp-uploads-dialog -- which
+        is why a title input alone must never be treated as wizard proof. Accepting it
+        was the bug that let a resume attempt believe it was inside the wizard while it
+        was really still on the plain edit page.
         """
-        # 1. Check if wizard stepper is already open
-        for sel in YouTubeStudioSelectors.WIZARD_STEPPER_SELECTORS:
+        try:
+            dialog = self.page.locator(YouTubeStudioSelectors.UPLOAD_WIZARD_DIALOG).first
+            if not dialog.is_visible(timeout=timeout_ms):
+                return False
+        except Exception:
+            return False
+
+        for sel in YouTubeStudioSelectors.WIZARD_STEPPER_IN_DIALOG:
             try:
-                loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=800):
-                    logger.info("Draft wizard stepper is already open (YOUTUBE_DRAFT_WIZARD_READY).")
+                if dialog.locator(sel).first.is_visible(timeout=timeout_ms):
                     return True
             except Exception:
-                pass
+                continue
+        return False
 
-        # 2. Look for 'Taslağı düzenle' / 'Edit draft' button on /video/<id>/edit
-        for sel in YouTubeStudioSelectors.EDIT_DRAFT_BUTTONS:
+    def enter_existing_draft_wizard(self, timeout_seconds: int = 15) -> bool:
+        """
+        On https://studio.youtube.com/video/<id>/edit, click 'Taslağı düzenle' / 'Edit draft'
+        to open the stepper upload wizard, and return True ONLY when the real
+        ytcp-uploads-dialog + stepper is actually mounted (YOUTUBE_DRAFT_WIZARD_READY).
+
+        This never uploads anything -- it is the resume path for a draft that already
+        exists remotely, so a False return must stop the caller rather than fall back to
+        a fresh upload.
+
+        Kural 31: at most 2 semantic selector strategies for the button; no force=True,
+        no JS click/dispatchEvent, no overlay/CSS hacks. If the button cannot be found or
+        the real wizard does not open, capture DOM evidence and report NEEDS_USER_HTML.
+        """
+        # 1. Already inside the real wizard? (idempotent resume, no click needed)
+        if self.is_real_upload_wizard_open():
+            logger.info("Real upload wizard already open (YOUTUBE_DRAFT_WIZARD_READY).")
+            return True
+
+        # 2. Resolve 'Taslağı düzenle' with at most 2 semantic strategies.
+        clicked_via = None
+        for sel in YouTubeStudioSelectors.EDIT_DRAFT_BUTTON_STRATEGIES:
             try:
                 loc = self.page.locator(sel).first
                 if loc.is_visible(timeout=1500) and loc.is_enabled():
-                    loc.scroll_into_view_if_needed()
-                    loc.click()
-                    logger.info(f"Clicked 'Taslağı düzenle' button: {sel}")
+                    loc.scroll_into_view_if_needed(timeout=2000)
+                    loc.click(timeout=3000)
+                    clicked_via = sel
+                    logger.info("Clicked 'Taslağı düzenle' / 'Edit draft' (strategy matched).")
                     break
             except Exception as e:
-                logger.debug(f"Edit draft button selector {sel} error: {e}")
+                logger.debug(f"Edit draft strategy failed: {e}")
 
-        # 3. Wait for wizard stepper to appear
+        if clicked_via is None:
+            self.capture_error_snapshot("edit_draft_button_not_found")
+            logger.error("=" * 50)
+            logger.error("STATUS: NEEDS_USER_HTML")
+            logger.error("Platform: YouTube Studio")
+            logger.error("Target: 'Taslağı düzenle' / 'Edit draft' button on /video/<id>/edit")
+            logger.error("Needed: outerHTML of the Edit-draft button AND its parent/wrapper element.")
+            logger.error("=" * 50)
+            return False
+
+        # 3. The click only counts if the REAL wizard mounts. Never accept a title input.
         start = time.time()
         while time.time() - start < timeout_seconds:
-            for sel in YouTubeStudioSelectors.WIZARD_STEPPER_SELECTORS:
-                try:
-                    loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=500):
-                        logger.info("Draft wizard stepper confirmed open: YOUTUBE_DRAFT_WIZARD_READY.")
-                        time.sleep(1.0)
-                        return True
-                except Exception:
-                    pass
+            if self.is_real_upload_wizard_open(timeout_ms=500):
+                logger.info("Draft wizard confirmed open: YOUTUBE_DRAFT_WIZARD_READY.")
+                time.sleep(1.0)
+                return True
             time.sleep(1.0)
 
-        # Fallback check if details inputs are visible
-        for sel in YouTubeStudioSelectors.TITLE_INPUTS:
-            try:
-                if self.page.locator(sel).first.is_visible(timeout=500):
-                    return True
-            except Exception:
-                pass
-
-        logger.warning("Could not verify YOUTUBE_DRAFT_WIZARD_READY after opening draft.")
+        self.capture_error_snapshot("draft_wizard_did_not_open")
+        logger.error("=" * 50)
+        logger.error("STATUS: NEEDS_USER_HTML")
+        logger.error("Platform: YouTube Studio")
+        logger.error("Target: upload wizard did not mount after clicking 'Taslağı düzenle'")
+        logger.error(f"Diagnostic: waited {timeout_seconds}s, no visible "
+                     f"{YouTubeStudioSelectors.UPLOAD_WIZARD_DIALOG} containing a stepper.")
+        logger.error("Needed: outerHTML of the dialog/stepper container that appears after the click.")
+        logger.error("=" * 50)
         return False
 
     def open_exact_remote_video(self, remote_id: str) -> bool:
