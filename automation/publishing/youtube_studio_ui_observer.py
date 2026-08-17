@@ -294,41 +294,51 @@ class YouTubeStudioUIObserver:
         r_id_clean = reel_id.lower().strip()
         matches = []
 
-        content_url = f"https://studio.youtube.com/channel/{channel_id or ''}/videos/upload"
-        if not ("videos/upload" in self.page.url or "videos/content" in self.page.url):
+        # Scan the SHORTS tab as well as long-form uploads. These Reels are 30s vertical
+        # Shorts, so scanning only /videos/upload found nothing, the caller concluded "no
+        # existing draft" and uploaded the file again -- which is how a duplicate
+        # raw-filename draft ("clean clean REEL 2026 0011 ...") ended up next to the
+        # correctly scheduled Short on 2026-08-17. Duplicate-upload prevention depends on
+        # looking where Shorts actually live.
+        base = f"https://studio.youtube.com/channel/{channel_id or ''}"
+        for content_url in (f"{base}/videos/short", f"{base}/videos/upload"):
             try:
                 self.page.goto(content_url, wait_until="domcontentloaded", timeout=20000)
                 time.sleep(2.0)
             except Exception as e:
-                logger.debug(f"Navigation to Content list: {e}")
+                logger.debug(f"Navigation to Content list ({content_url}): {e}")
+                continue
 
-        for row_sel in YouTubeStudioSelectors.DRAFT_CONTENT_ROWS:
-            try:
-                rows = self.page.locator(row_sel)
-                count = rows.count()
-                for i in range(min(count, 30)):
-                    row = rows.nth(i)
-                    text = row.inner_text()
-                    text_lower = text.lower()
-                    if clean_title in text_lower or r_id_clean in text_lower:
-                        video_id = None
-                        link_el = row.locator("a[href*='/video/']").first
-                        if link_el.count() > 0:
-                            href = link_el.get_attribute("href") or ""
-                            if "/video/" in href:
-                                video_id = href.split("/video/")[1].split("/")[0]
+            for row_sel in YouTubeStudioSelectors.DRAFT_CONTENT_ROWS:
+                try:
+                    rows = self.page.locator(row_sel)
+                    count = rows.count()
+                    for i in range(min(count, 30)):
+                        row = rows.nth(i)
+                        text = row.inner_text()
+                        text_lower = text.lower()
+                        if clean_title in text_lower or r_id_clean in text_lower:
+                            video_id = None
+                            link_el = row.locator("a[href*='/video/']").first
+                            if link_el.count() > 0:
+                                href = link_el.get_attribute("href") or ""
+                                if "/video/" in href:
+                                    video_id = href.split("/video/")[1].split("/")[0]
 
-                        matches.append({
-                            "index": i,
-                            "title": text.split("\n")[0] if "\n" in text else text[:60],
-                            "video_id": video_id,
-                            "visibility": "Draft / Private" if ("taslak" in text_lower or "draft" in text_lower or "gizli" in text_lower) else "Unknown",
-                            "element": row
-                        })
-                if matches:
-                    break
-            except Exception as e:
-                logger.debug(f"Row scan error: {e}")
+                            matches.append({
+                                "index": i,
+                                "title": text.split("\n")[0] if "\n" in text else text[:60],
+                                "video_id": video_id,
+                                "visibility": "Draft / Private" if ("taslak" in text_lower or "draft" in text_lower or "gizli" in text_lower) else "Unknown",
+                                "element": row
+                            })
+                    if matches:
+                        break
+                except Exception as e:
+                    logger.debug(f"Row scan error: {e}")
+
+            if matches:
+                break
 
         logger.info(f"[DIAGNOSTIC] {reel_id} matching YouTube drafts found: {len(matches)}")
         for idx, m in enumerate(matches, start=1):
@@ -1026,10 +1036,19 @@ class YouTubeStudioUIObserver:
         failure, and dismissing it never advances past schedule mode or clicks any
         immediate-publish control. Bounded to a single detection+click attempt per call.
         """
-        try:
-            page_text = self.page.inner_text("ytcp-uploads-dialog").lower()
-        except Exception:
-            return
+        # Scope PAGE-WIDE, not to ytcp-uploads-dialog. This notice is rendered as its own
+        # standalone dialog and typically appears AFTER the final schedule submit, by which
+        # point the uploads-dialog is already gone -- reading text from ytcp-uploads-dialog
+        # therefore threw/missed it, the function returned early, and 'Anladım' was never
+        # clicked, leaving the run blocked until a human clicked it manually (2026-08-17).
+        page_text = ""
+        for scope in ("ytcp-uploads-dialog", "body"):
+            try:
+                page_text = self.page.inner_text(scope).lower()
+                if page_text:
+                    break
+            except Exception:
+                continue
 
         if not any(marker in page_text for marker in YouTubeStudioSelectors.CONTENT_REVIEW_INFO_TEXT_MARKERS):
             return
@@ -2007,9 +2026,15 @@ class YouTubeStudioUIObserver:
         submit_btn.click()
         logger.info(f"Clicked YouTube Studio Final Schedule button.")
 
-        # Wait for confirmation modal or close button
+        # Wait for confirmation modal or close button.
+        # The informational content-review notice ("İçeriğinizi kontrol etmeye devam
+        # ediyoruz" / 'Anladım') usually appears HERE, right after submit, and blocks the
+        # confirmation UI underneath it. Dismissing it each poll is what keeps the run
+        # unattended -- without this the pipeline stalled until a human clicked 'Anladım'.
+        # This only ever clicks 'Anladım'/'Got it'; it never touches a publish-now control.
         start = time.time()
         while time.time() - start < timeout_seconds:
+            self.dismiss_content_review_info_if_present()
             for sel in YouTubeStudioSelectors.CLOSE_MODAL_BUTTONS:
                 try:
                     loc = self.page.locator(sel).first
@@ -2037,45 +2062,56 @@ class YouTubeStudioUIObserver:
         Navigate to Content list and verify video row shows 'Planlandı' / 'Scheduled'
         with the exact expected date and 19:30 time.
         """
-        content_url = f"https://studio.youtube.com/channel/{channel_id or ''}/videos/upload"
-        try:
-            self.page.goto(content_url, wait_until="domcontentloaded", timeout=20000)
-            time.sleep(2.5)
-        except Exception:
-            pass
-
+        # These Reels are 30s vertical SHORTS, and YouTube Studio lists Shorts under their
+        # own tab (/videos/short) -- the long-form /videos/upload tab shows "İçerik yok" for
+        # this channel. Checking only the uploads tab made verification report
+        # REMOTE_SCHEDULE_NOT_VERIFIED for a video that was in fact correctly scheduled
+        # (2026-08-17: "Planlandı 17 Ağu 2026" was visible in the Shorts tab the whole time),
+        # which then halted the pipeline on a false negative. Check Shorts first, then
+        # long-form, and only report failure after BOTH tabs come up empty.
         clean_title = target_title.lower().strip()
         r_id = (remote_id or "").lower().strip()
+        base = f"https://studio.youtube.com/channel/{channel_id or ''}"
 
-        for row_sel in YouTubeStudioSelectors.DRAFT_CONTENT_ROWS:
+        for tab_label, content_url in (
+            ("SHORTS", f"{base}/videos/short"),
+            ("UPLOADS", f"{base}/videos/upload"),
+        ):
             try:
-                rows = self.page.locator(row_sel)
-                for i in range(min(rows.count(), 20)):
-                    row = rows.nth(i)
-                    txt = row.inner_text().lower()
-                    is_target = bool((r_id and r_id in txt) or (clean_title and clean_title in txt))
-                    if not is_target:
-                        continue
-
-                    if "planlandı" in txt or "scheduled" in txt:
-                        if "gizli" in txt or "taslak" in txt or "draft" in txt:
-                            return False, "REMOTE_STILL_DRAFT"
-                        # Verify requested date/time when those values are visible in the row.
-                        if expected_time_str and expected_time_str not in txt:
-                            logger.warning("Remote row is scheduled but expected time '%s' was not found in row text.", expected_time_str)
-                            return False, "REMOTE_SCHEDULE_TIME_NOT_VERIFIED"
-                        logger.info(f"True Remote Verification PASS: '{target_title}' is SCHEDULED.")
-                        return True, "SCHEDULED"
-
-                    if "taslak" in txt or "draft" in txt or "gizli" in txt:
-                        logger.warning("Remote verification FAIL: target video is still in draft/private state.")
-                        return False, "DRAFT_PRIVATE"
-
-                    return False, "REMOTE_TARGET_FOUND_BUT_NOT_SCHEDULED"
+                self.page.goto(content_url, wait_until="domcontentloaded", timeout=20000)
+                time.sleep(2.5)
             except Exception:
-                pass
+                continue
 
-        logger.error("Remote schedule verification failed: target video row was not found or scheduled state was not confirmed.")
+            for row_sel in YouTubeStudioSelectors.DRAFT_CONTENT_ROWS:
+                try:
+                    rows = self.page.locator(row_sel)
+                    for i in range(min(rows.count(), 20)):
+                        row = rows.nth(i)
+                        txt = row.inner_text().lower()
+                        is_target = bool((r_id and r_id in txt) or (clean_title and clean_title in txt))
+                        if not is_target:
+                            continue
+
+                        if "planlandı" in txt or "scheduled" in txt:
+                            if "gizli" in txt or "taslak" in txt or "draft" in txt:
+                                return False, "REMOTE_STILL_DRAFT"
+                            # Verify requested date/time when those values are visible in the row.
+                            if expected_time_str and expected_time_str not in txt:
+                                logger.warning("Remote row is scheduled but expected time '%s' was not found in row text.", expected_time_str)
+                                return False, "REMOTE_SCHEDULE_TIME_NOT_VERIFIED"
+                            logger.info(f"True Remote Verification PASS ({tab_label}): '{target_title}' is SCHEDULED.")
+                            return True, "SCHEDULED"
+
+                        if "taslak" in txt or "draft" in txt or "gizli" in txt:
+                            logger.warning("Remote verification FAIL: target video is still in draft/private state.")
+                            return False, "DRAFT_PRIVATE"
+
+                        return False, "REMOTE_TARGET_FOUND_BUT_NOT_SCHEDULED"
+                except Exception:
+                    pass
+
+        logger.error("Remote schedule verification failed: target video row was not found in the Shorts or uploads tab.")
         return False, "REMOTE_SCHEDULE_NOT_VERIFIED"
 
     def prepare_youtube_schedule_preflight(

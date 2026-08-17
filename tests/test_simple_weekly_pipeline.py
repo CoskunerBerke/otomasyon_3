@@ -235,7 +235,9 @@ def test_youtube_resume_carries_remote_id_from_progress(tmp_path):
     assert captured["upload_started"] is True
 
 
-def test_youtube_failure_stops_before_next_reel(tmp_path):
+def test_youtube_hard_failure_stops_remaining_youtube_reels(tmp_path):
+    """A broken session (ACCOUNT_MISMATCH) must stop the rest of the YouTube queue,
+    because continuing would cascade the same failure into every remaining Reel."""
     pipeline, dl_dir = _make_pipeline(tmp_path)
     n = {"i": 0}
 
@@ -255,11 +257,14 @@ def test_youtube_failure_stops_before_next_reel(tmp_path):
 
     assert success is False
     assert pipeline.yt_publisher.upload_and_schedule.call_count == 3
-    assert results[-1].phase == "YOUTUBE"
-    assert results[-1].detail["failed_reel"] == manifest.reels[2].reel_id
+    yt = next(r for r in results if r.phase == "YOUTUBE")
+    assert yt.detail["failed_reel"] == manifest.reels[2].reel_id
+    assert yt.detail.get("hard_stop") is True
 
 
-def test_youtube_failure_blocks_tiktok_entirely(tmp_path):
+def test_youtube_failure_does_not_block_other_platforms(tmp_path):
+    """Platforms are independent once the manifest is LOCKED -- the same 14 videos go to
+    the same slots everywhere, so a YouTube problem is no reason to skip TikTok/Instagram."""
     pipeline, dl_dir = _make_pipeline(tmp_path)
     pipeline.yt_publisher.upload_and_schedule.side_effect = lambda rec: (
         setattr(rec, "status", PlatformPublicationStatus.ACCOUNT_MISMATCH),
@@ -271,19 +276,20 @@ def test_youtube_failure_blocks_tiktok_entirely(tmp_path):
         success, results, manifest = pipeline.run()
 
     assert success is False
-    pipeline.tt_publisher.upload_and_schedule.assert_not_called()
-    pipeline.cloud_client.upload_media_for_instagram.assert_not_called()
+    assert pipeline.tt_publisher.upload_and_schedule.call_count == 14
+    assert pipeline.cloud_client.upload_media_for_instagram.call_count == 14
 
 
 # ---------------------------------------------------------------------------
-# 13-17: TikTok gating / sequential / fail-fast / Instagram gating
+# 13-17: TikTok sequencing and platform independence
 # ---------------------------------------------------------------------------
 
-def test_tiktok_never_starts_before_youtube_14_of_14(tmp_path):
+def test_tiktok_runs_even_if_youtube_not_fully_verified(tmp_path):
+    """An unverified (soft) YouTube result must not hold TikTok back."""
     pipeline, dl_dir = _make_pipeline(tmp_path)
     n = {"i": 0}
 
-    def fail_last(rec):
+    def soft_on_last(rec):
         n["i"] += 1
         if n["i"] == 14:
             rec.status = PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
@@ -292,14 +298,13 @@ def test_tiktok_never_starts_before_youtube_14_of_14(tmp_path):
         rec.status = PlatformPublicationStatus.SCHEDULED
         rec.remote_id = f"remote_{rec.reel_id}"
         return rec
-    pipeline.yt_publisher.upload_and_schedule.side_effect = fail_last
+    pipeline.yt_publisher.upload_and_schedule.side_effect = soft_on_last
 
     with _patched_validator():
         success, results, manifest = pipeline.run()
 
-    assert success is False
     assert pipeline.yt_publisher.upload_and_schedule.call_count == 14
-    pipeline.tt_publisher.upload_and_schedule.assert_not_called()
+    assert pipeline.tt_publisher.upload_and_schedule.call_count == 14
 
 
 def test_tiktok_processes_reels_in_manifest_order(tmp_path):
@@ -308,7 +313,7 @@ def test_tiktok_processes_reels_in_manifest_order(tmp_path):
     assert called_ids == [r.reel_id for r in manifest.reels]
 
 
-def test_tiktok_failure_stops_before_next_reel_and_blocks_instagram(tmp_path):
+def test_tiktok_hard_failure_stops_tiktok_but_instagram_still_runs(tmp_path):
     pipeline, dl_dir = _make_pipeline(tmp_path)
     n = {"i": 0}
 
@@ -327,24 +332,31 @@ def test_tiktok_failure_stops_before_next_reel_and_blocks_instagram(tmp_path):
 
     assert success is False
     assert pipeline.tt_publisher.upload_and_schedule.call_count == 5
-    assert results[-1].phase == "TIKTOK"
-    pipeline.cloud_client.upload_media_for_instagram.assert_not_called()
+    tt = next(r for r in results if r.phase == "TIKTOK")
+    assert tt.detail.get("hard_stop") is True
+    assert pipeline.cloud_client.upload_media_for_instagram.call_count == 14
 
 
-def test_instagram_never_starts_before_tiktok_14_of_14(tmp_path):
+def test_generation_gate_still_blocks_all_publishing(tmp_path):
+    """The ONE gate that must never loosen: nothing publishes until 14/14 real videos
+    exist and the manifest is LOCKED."""
     pipeline, dl_dir = _make_pipeline(tmp_path)
-    n = {"i": 0}
 
-    def fail_last(rec):
-        n["i"] += 1
-        rec.status = PlatformPublicationStatus.SCHEDULED if n["i"] < 14 else "NEEDS_USER_HTML"
-        return rec
-    pipeline.tt_publisher.upload_and_schedule.side_effect = fail_last
+    def flaky(plan, reel_id, target_filename, **kwargs):
+        if reel_id.endswith("0015"):
+            raise RuntimeError("Flow failed")
+        p = dl_dir / target_filename
+        p.write_bytes(b"x" * 500)
+        return p
+    pipeline.flow_provider.generate_single_video.side_effect = flaky
 
     with _patched_validator():
         success, results, manifest = pipeline.run()
 
     assert success is False
+    assert manifest.status == "DRAFT"
+    pipeline.yt_publisher.upload_and_schedule.assert_not_called()
+    pipeline.tt_publisher.upload_and_schedule.assert_not_called()
     pipeline.cloud_client.upload_media_for_instagram.assert_not_called()
 
 
@@ -588,3 +600,119 @@ def test_pipeline_resumes_from_correct_phase_across_runs(tmp_path):
     assert success is True
     assert results[0].phase == "LOCK"
     pipeline2.flow_provider.generate_single_video.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Order independence, soft-failure tolerance, and Telegram completion notice
+# (2026-08-17: a correctly-scheduled Short was reported unverified because the
+# check looked at the wrong Studio tab, and that single false negative halted
+# all three platforms for the whole week.)
+# ---------------------------------------------------------------------------
+
+def _status_publisher(status, last_error=None):
+    mock = MagicMock()
+
+    def side_effect(rec):
+        rec.status = status
+        rec.last_error = last_error
+        rec.remote_id = f"remote_{rec.reel_id}"
+        return rec
+
+    mock.upload_and_schedule.side_effect = side_effect
+    return mock
+
+
+def test_soft_failure_does_not_stop_remaining_reels(tmp_path):
+    """An inconclusive verification (submit went through) must keep processing the rest."""
+    pipeline, dl_dir = _make_pipeline(tmp_path)
+    n = {"i": 0}
+
+    def soft_on_third(rec):
+        n["i"] += 1
+        if n["i"] == 3:
+            rec.status = PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
+            rec.last_error = "REMOTE_SCHEDULE_NOT_VERIFIED"
+            return rec
+        rec.status = PlatformPublicationStatus.SCHEDULED
+        rec.remote_id = f"remote_{rec.reel_id}"
+        return rec
+
+    pipeline.yt_publisher.upload_and_schedule.side_effect = soft_on_third
+
+    with _patched_validator():
+        success, results, manifest = pipeline.run()
+
+    # All 14 were still attempted despite the soft failure on #3.
+    assert pipeline.yt_publisher.upload_and_schedule.call_count == 14
+    yt = next(r for r in results if r.phase == "YOUTUBE")
+    assert yt.detail.get("hard_stop") is False
+    assert manifest.reels[2].reel_id in yt.detail["soft_failures"]
+
+
+def test_soft_failure_still_runs_other_platforms(tmp_path):
+    """YouTube being unverified must not block TikTok or the Instagram handoff."""
+    pipeline, dl_dir = _make_pipeline(tmp_path)
+    pipeline.yt_publisher = _status_publisher(
+        PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED, "REMOTE_SCHEDULE_NOT_VERIFIED"
+    )
+
+    with _patched_validator():
+        success, results, manifest = pipeline.run()
+
+    assert pipeline.tt_publisher.upload_and_schedule.call_count == 14
+    assert pipeline.cloud_client.upload_media_for_instagram.call_count == 14
+
+
+def test_hard_failure_stops_its_platform_but_not_the_others(tmp_path):
+    """A broken session (ACCOUNT_MISMATCH) stops that platform only."""
+    pipeline, dl_dir = _make_pipeline(tmp_path)
+    pipeline.yt_publisher = _status_publisher(PlatformPublicationStatus.ACCOUNT_MISMATCH, "wrong channel")
+
+    with _patched_validator():
+        success, results, manifest = pipeline.run()
+
+    assert success is False
+    assert pipeline.yt_publisher.upload_and_schedule.call_count == 1  # stopped immediately
+    yt = next(r for r in results if r.phase == "YOUTUBE")
+    assert yt.detail.get("hard_stop") is True
+    # Other platforms still ran.
+    assert pipeline.tt_publisher.upload_and_schedule.call_count == 14
+    assert pipeline.cloud_client.upload_media_for_instagram.call_count == 14
+
+
+def test_telegram_completion_message_sent_on_success(tmp_path):
+    pipeline, dl_dir = _make_pipeline(tmp_path)
+    sent = {}
+
+    class _FakeBot:
+        def __init__(self, token):
+            sent["token_used"] = bool(token)
+
+        def send_message(self, chat_id, text):
+            sent["chat_id"] = chat_id
+            sent["text"] = text
+            return True, 1, None
+
+    fake_cfg = MagicMock()
+    fake_cfg.telegram_bot_token = "dummy-token"
+    fake_cfg.telegram_chat_id = 12345
+
+    with _patched_validator(), \
+         patch("automation.cloud.config.CloudConfig", return_value=fake_cfg), \
+         patch("automation.cloud.telegram_bot.TelegramBotClient", _FakeBot):
+        success, results, manifest = pipeline.run()
+
+    assert success is True
+    assert sent["chat_id"] == 12345
+    assert "TAMAMLANDI" in sent["text"]
+    assert "YouTube : 14/14" in sent["text"]
+
+
+def test_telegram_failure_never_breaks_pipeline(tmp_path):
+    pipeline, dl_dir = _make_pipeline(tmp_path)
+
+    with _patched_validator(), \
+         patch("automation.cloud.config.CloudConfig", side_effect=Exception("no config")):
+        success, results, manifest = pipeline.run()
+
+    assert success is True

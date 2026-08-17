@@ -64,6 +64,17 @@ from automation.orchestration.obsidian_mirror import ObsidianControlCenter, DEFA
 
 PLATFORM_SUCCESS_STATUSES = ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED")
 
+# The submit went through but the confirmation read-back was inconclusive. The video is
+# very likely correctly scheduled on the platform, so halting the whole week here does
+# more harm than good -- record it, keep going, and let the end-of-run summary flag it
+# for a human look. (2026-08-17: a Short WAS scheduled correctly but verification looked
+# at the wrong Studio tab and stopped all 14 Reels on a false negative.)
+SOFT_FAILURE_STATUSES = ("SCHEDULE_RESUME_REQUIRED", "UPLOADED_DRAFT", "REVIEW_REQUIRED")
+
+# The browser/session itself is broken. Continuing would cascade the same failure into
+# every remaining Reel, so this stops the current platform.
+HARD_FAILURE_STATUSES = ("ACCOUNT_MISMATCH", "AUTH_REQUIRED", "NEEDS_USER_HTML")
+
 
 class PhaseResult:
     """Outcome of running one phase. `success=True` means the phase is fully (14/14) done."""
@@ -471,12 +482,13 @@ class SimpleWeeklyPipeline:
 
         reel_ids = manifest.reel_ids()
         self.batch_repo.ensure_progress_entries(manifest.week_id, reel_ids)
+        soft_failures: List[str] = []
 
         for reel in manifest.reels:
             video_file = Path(reel.video_path)
             if not video_file.exists():
                 self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_FATAL", error="Video file missing on disk")
-                return PhaseResult(False, platform.upper(), f"{reel.reel_id}: video dosyası bulunamadı", {"failed_reel": reel.reel_id})
+                return PhaseResult(False, platform.upper(), f"{reel.reel_id}: video dosyası bulunamadı", {"failed_reel": reel.reel_id, "hard_stop": True})
 
             progress = self.batch_repo.load_progress(manifest.week_id)
             entry = progress.get(reel.reel_id, {}).get(platform, {})
@@ -494,7 +506,7 @@ class SimpleWeeklyPipeline:
             if not gate_ok:
                 self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_FATAL", error=gate_reason)
                 logger.error(f"[{platform.upper()}] {reel.reel_id} ön-yayın kapısı tarafından ENGELLENDİ: {gate_reason}")
-                return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {gate_reason}", {"failed_reel": reel.reel_id, "reason": gate_reason})
+                return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {gate_reason}", {"failed_reel": reel.reel_id, "reason": gate_reason, "hard_stop": True})
 
             logger.info(f"[{platform.upper()}] {reel.reel_id} sıraya alındı ({reel.index}/14)...")
             try:
@@ -502,7 +514,7 @@ class SimpleWeeklyPipeline:
             except Exception as e:
                 logger.error(f"[{platform.upper()}] {reel.reel_id} beklenmeyen hata: {e}")
                 self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_RETRYABLE", error=str(e))
-                return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {e}", {"failed_reel": reel.reel_id})
+                return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {e}", {"failed_reel": reel.reel_id, "hard_stop": True})
 
             status_val = str(res_rec.status.value if hasattr(res_rec.status, "value") else res_rec.status)
             if status_val in PLATFORM_SUCCESS_STATUSES:
@@ -517,10 +529,28 @@ class SimpleWeeklyPipeline:
                 manifest.week_id, reel.reel_id, platform, status_val,
                 remote_id=res_rec.remote_id, url=res_rec.remote_url, error=res_rec.last_error,
             )
-            logger.error(f"[{platform.upper()}] {reel.reel_id} basarisiz ({status_val}): {res_rec.last_error}. Pipeline durduruluyor.")
-            return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {status_val} ({res_rec.last_error})", {"failed_reel": reel.reel_id, "status": status_val})
 
-        return PhaseResult(True, platform.upper(), f"14/14 {platform} tamamlandı", {})
+            if status_val in SOFT_FAILURE_STATUSES:
+                soft_failures.append(reel.reel_id)
+                logger.warning(
+                    f"[{platform.upper()}] {reel.reel_id} dogrulanamadi ({status_val}): {res_rec.last_error}. "
+                    f"Gonderim yapildi, sonraki Reel'e devam ediliyor."
+                )
+                continue
+
+            logger.error(f"[{platform.upper()}] {reel.reel_id} basarisiz ({status_val}): {res_rec.last_error}. {platform} durduruluyor.")
+            return PhaseResult(
+                False, platform.upper(), f"{reel.reel_id}: {status_val} ({res_rec.last_error})",
+                {"failed_reel": reel.reel_id, "status": status_val, "hard_stop": True, "soft_failures": soft_failures},
+            )
+
+        if soft_failures:
+            return PhaseResult(
+                False, platform.upper(),
+                f"{len(soft_failures)} Reel gonderildi ama uzaktan dogrulanamadi (manuel kontrol onerilir)",
+                {"hard_stop": False, "soft_failures": soft_failures},
+            )
+        return PhaseResult(True, platform.upper(), f"14/14 {platform} tamamlandı", {"soft_failures": []})
 
     def _run_youtube_phase(self, manifest: BatchManifest) -> PhaseResult:
         return self._run_platform_phase(manifest, "youtube")
@@ -642,37 +672,78 @@ class SimpleWeeklyPipeline:
 
         reel_ids = manifest.reel_ids()
 
-        # PHASE 3: YOUTUBE
-        if not self.all_platform_done(manifest.week_id, reel_ids, "youtube"):
-            result = self._run_youtube_phase(manifest)
+        # PHASES 3-5: YOUTUBE / TIKTOK / INSTAGRAM.
+        # Once the content is LOCKED the three platforms are independent of each other --
+        # they publish the same 14 videos at the same slots, so a problem on one is no
+        # reason to skip the other two. Only a hard failure (broken session/browser) stops
+        # the platform it happened on; the remaining platforms still run.
+        for platform, phase_fn in (
+            ("youtube", self._run_youtube_phase),
+            ("tiktok", self._run_tiktok_phase),
+            ("instagram", self._run_instagram_phase),
+        ):
+            if self.all_platform_done(manifest.week_id, reel_ids, platform):
+                continue
+            result = phase_fn(manifest)
             results.append(result)
-            if not result.success:
-                self._sync_obsidian(manifest)
-                self._print_status(manifest, results)
-                return False, results, manifest
 
-        # PHASE 4: TIKTOK
-        if not self.all_platform_done(manifest.week_id, reel_ids, "tiktok"):
-            result = self._run_tiktok_phase(manifest)
-            results.append(result)
-            if not result.success:
-                self._sync_obsidian(manifest)
-                self._print_status(manifest, results)
-                return False, results, manifest
+        all_ok = all(r.success for r in results)
+        if all_ok:
+            results.append(PhaseResult(True, "DONE", "Tüm fazlar tamamlandı.", {}))
 
-        # PHASE 5: INSTAGRAM HANDOFF
-        if not self.all_platform_done(manifest.week_id, reel_ids, "instagram"):
-            result = self._run_instagram_phase(manifest)
-            results.append(result)
-            if not result.success:
-                self._sync_obsidian(manifest)
-                self._print_status(manifest, results)
-                return False, results, manifest
-
-        results.append(PhaseResult(True, "DONE", "Tüm fazlar tamamlandı.", {}))
         self._sync_obsidian(manifest)
+        self._notify_telegram(manifest, results)
         self._print_status(manifest, results)
-        return True, results, manifest
+        return all_ok, results, manifest
+
+    def _notify_telegram(self, manifest: BatchManifest, results: List[PhaseResult]) -> None:
+        """
+        Send the end-of-run summary to Telegram. Best-effort only: a notification problem
+        must never change the pipeline's outcome, and the bot token is never logged.
+        """
+        try:
+            from automation.cloud.config import CloudConfig
+            from automation.cloud.telegram_bot import TelegramBotClient
+
+            cfg = CloudConfig(self.base_dir)
+            if not cfg.telegram_bot_token or not cfg.telegram_chat_id:
+                logger.info("[TELEGRAM] Token/chat_id yok, bildirim atlandi.")
+                return
+
+            progress = self.batch_repo.load_progress(manifest.week_id)
+            total = len(manifest.reels)
+
+            def _done(platform: str) -> int:
+                ok = PLATFORM_SUCCESS_STATUSES + (("MEDIA_READY",) if platform == "instagram" else ())
+                return sum(
+                    1 for r in manifest.reels
+                    if progress.get(r.reel_id, {}).get(platform, {}).get("status") in ok
+                )
+
+            lines = [
+                f"Reels AI Factory — {manifest.week_id}",
+                "",
+                f"Uretim : {sum(1 for r in manifest.reels if r.generation_status == 'COMPLETE')}/{total}",
+                f"YouTube : {_done('youtube')}/{total}",
+                f"TikTok  : {_done('tiktok')}/{total}",
+                f"Instagram (MEDIA_READY): {_done('instagram')}/{total}",
+                "",
+            ]
+
+            failed = [r for r in results if not r.success]
+            if not failed:
+                lines.append("Durum: TAMAMLANDI")
+            else:
+                lines.append("Durum: DIKKAT GEREKIYOR")
+                for r in failed:
+                    lines.append(f"- {r.phase}: {r.message}")
+
+            ok, _msg_id, err = TelegramBotClient(cfg.telegram_bot_token).send_message(
+                chat_id=cfg.telegram_chat_id, text="\n".join(lines)
+            )
+            logger.info("[TELEGRAM] Bildirim gonderildi." if ok else f"[TELEGRAM] Gonderilemedi: {err}")
+        except Exception as e:
+            logger.warning(f"[TELEGRAM] Bildirim hatasi (pipeline etkilenmedi): {e}")
 
     def _sync_obsidian(self, manifest: BatchManifest) -> None:
         """Obsidian is a mirror only -- a failure here must never break the pipeline."""
