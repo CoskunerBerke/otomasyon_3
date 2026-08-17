@@ -254,3 +254,42 @@ def test_forbidden_share_labels_cover_both_languages():
     labels = InstagramWebSelectors.FORBIDDEN_IMMEDIATE_SHARE_LABELS
     assert "paylaş" in labels
     assert "share" in labels
+
+
+# ---------------------------------------------------------------------------
+# Instagram's 20-minute minimum lead time
+# (captured warning: "Şu andan en az 20 dakika sonra olan bir zaman seç")
+# ---------------------------------------------------------------------------
+
+def test_slot_less_than_20_minutes_away_is_rejected():
+    now = datetime.datetime(2026, 8, 17, 19, 20)
+    assert InstagramWebObserver.is_slot_too_soon(datetime.datetime(2026, 8, 17, 19, 30), now) is True
+    assert InstagramWebObserver.is_slot_too_soon(datetime.datetime(2026, 8, 17, 19, 39), now) is True
+
+
+def test_slot_at_least_20_minutes_away_is_accepted():
+    now = datetime.datetime(2026, 8, 17, 19, 0)
+    assert InstagramWebObserver.is_slot_too_soon(datetime.datetime(2026, 8, 17, 19, 30), now) is False
+    assert InstagramWebObserver.is_slot_too_soon(datetime.datetime(2026, 8, 17, 22, 0), now) is False
+
+
+def test_inline_too_soon_warning_blocks_submit():
+    """The composer shows the warning inline; submitting anyway would silently fail."""
+    page = _Page(schedule_on=True, body="Şu andan en az 20 dakika sonra olan bir zaman seç")
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.click_schedule_and_verify(timeout_seconds=1)
+
+    assert ok is False
+    assert reason == "TIME_TOO_SOON"
+    assert page.primary.clicks == 0
+
+
+def test_no_warning_means_submit_proceeds():
+    page = _Page(schedule_on=True, body="Gönderin planlandı")
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.click_schedule_and_verify(timeout_seconds=3)
+
+    assert ok is True
+    assert page.primary.clicks == 1

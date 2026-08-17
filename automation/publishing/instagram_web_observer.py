@@ -246,6 +246,21 @@ class InstagramWebObserver:
         """'17 Ağu 2026' -- the form Instagram shows on the date button."""
         return f"{dt.day} {TR_MONTHS.get(dt.month, '')} {dt.year}"
 
+    @staticmethod
+    def is_slot_too_soon(target: datetime.datetime, now: Optional[datetime.datetime] = None) -> bool:
+        """Instagram rejects any slot less than MIN_LEAD_MINUTES from now."""
+        now = now or datetime.datetime.now()
+        lead = (target - now).total_seconds() / 60.0
+        return lead < InstagramWebSelectors.MIN_LEAD_MINUTES
+
+    def has_time_too_soon_warning(self) -> bool:
+        """True when the composer is showing the 'at least 20 minutes from now' notice."""
+        try:
+            body = (self.page.inner_text("body") or "").lower()
+        except Exception:
+            return False
+        return any(m in body for m in InstagramWebSelectors.TIME_TOO_SOON_MARKERS)
+
     def set_time(self, hour: int, minute: int) -> bool:
         """Fill the Hours/Minutes spinbuttons and read them back."""
         ok = True
@@ -324,6 +339,13 @@ class InstagramWebObserver:
             logger.error("[IG WEB] SCHEDULE_MODE_NOT_ACTIVE -- 'Planla' tiklanmayacak.")
             self.capture_error_snapshot("schedule_toggle_off")
             return False, "SCHEDULE_MODE_NOT_ACTIVE"
+
+        # Instagram will not accept a slot under 20 minutes away and says so inline.
+        # Submitting anyway just fails to schedule, so stop while the reason is still clear.
+        if self.has_time_too_soon_warning():
+            logger.error("[IG WEB] TIME_TOO_SOON -- Instagram en az 20 dk sonrasini istiyor.")
+            self.capture_error_snapshot("time_too_soon")
+            return False, "TIME_TOO_SOON"
 
         btn = self._first_visible(InstagramWebSelectors.SCHEDULE_SUBMIT_BUTTONS)
         if btn is None:

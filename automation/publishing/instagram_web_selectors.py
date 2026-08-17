@@ -102,3 +102,19 @@ class InstagramWebSelectors:
         "scheduled",
         "gönderin planlandı",
     ]
+
+    # Instagram refuses a slot that is too close to now, showing
+    # "Şu andan en az 20 dakika sonra olan bir zaman seç" under the time field
+    # (captured 2026-08-17 with the time set to 15:30 while the clock read ~15:11).
+    # Attempting such a slot silently fails to schedule, so it is pre-checked.
+    MIN_LEAD_MINUTES: int = 20
+
+    TIME_TOO_SOON_MARKERS: List[str] = [
+        "en az 20 dakika",
+        "at least 20 minutes",
+    ]
+
+    # The date row is <span>Tarih</span> next to the aria-haspopup button; scoping through
+    # the label avoids matching other popup buttons in the composer.
+    DATE_ROW_LABELS: List[str] = ["Tarih", "Date"]
+    TIME_ROW_LABELS: List[str] = ["Saat", "Time"]
