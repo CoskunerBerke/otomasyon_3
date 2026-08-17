@@ -251,6 +251,11 @@ class InstagramAPIClient:
             "caption": request.full_caption(),
             "share_to_feed": request.share_to_feed,
         }
+        # Declare synthetic media to Meta, matching the AI disclosure already made on
+        # YouTube and TikTok. Without it Instagram was the only platform posting
+        # AI-generated Reels undisclosed.
+        if request.is_ai_generated:
+            payload["is_ai_generated"] = True
         if request.thumb_offset is not None:
             payload["thumb_offset"] = request.thumb_offset
 

@@ -92,6 +92,12 @@ class InstagramPublishRequest:
     hashtags: List[str] = field(default_factory=list)
     share_to_feed: bool = True
     thumb_offset: Optional[int] = None
+    # Every Reel this factory produces is fully AI-generated (Google Flow), and Meta
+    # supports declaring that on the container. YouTube ("Altered content") and TikTok
+    # (AIGC toggle) were already disclosing it; Instagram was the one platform publishing
+    # synthetic media with no disclosure at all. Defaults to True because there is no
+    # non-AI path in this pipeline.
+    is_ai_generated: bool = True
     dry_run: bool = True
     allow_upload: bool = False
     allow_publish: bool = False

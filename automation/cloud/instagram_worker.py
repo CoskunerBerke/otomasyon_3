@@ -130,6 +130,7 @@ class InstagramCloudWorker:
                 video_path=temp_video_path,
                 caption=job.caption,
                 share_to_feed=True,
+                is_ai_generated=True,   # every Reel here is Google Flow output
                 dry_run=self.config.instagram_dry_run,
                 allow_upload=self.config.instagram_allow_upload,
                 allow_publish=self.config.instagram_allow_publish
