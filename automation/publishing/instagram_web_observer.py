@@ -303,6 +303,66 @@ class InstagramWebObserver:
         logger.info(f"[IG WEB] Saat dogrulandi: {hour:02d}:{minute:02d}")
         return True
 
+    def select_date(self, target: datetime.datetime, max_month_hops: int = 14) -> Tuple[bool, str]:
+        """
+        Pick `target`'s day from the date picker, for ANY month/year.
+
+        Instagram opens on the current month, so reaching a later slot may need one or
+        more "next month" hops. Written generically because this pipeline runs
+        indefinitely -- nothing here assumes a particular month or year.
+
+        If the date already reads correctly (same-day slots), nothing is clicked. If the
+        day cell cannot be resolved, DOM evidence is captured and NEEDS_USER_HTML is
+        reported rather than clicking a guessed cell and scheduling the wrong day.
+        """
+        if self.verify_date(target):
+            return True, "DATE_ALREADY_CORRECT"
+
+        btn = self._first_visible(InstagramWebSelectors.DATE_PICKER_BUTTONS, timeout_ms=2000)
+        if btn is None:
+            self.capture_error_snapshot("date_button_not_found")
+            return False, "DATE_BUTTON_NOT_FOUND"
+
+        try:
+            if str(btn.get_attribute("aria-expanded") or "").lower() != "true":
+                btn.click(timeout=3000)
+                time.sleep(1.0)
+        except Exception as e:
+            return False, f"DATE_PICKER_OPEN_FAILED: {e}"
+
+        for _hop in range(max_month_hops + 1):
+            if self._click_day_cell(target.day):
+                time.sleep(0.8)
+                if self.verify_date(target):
+                    logger.info(f"[IG WEB] Tarih secildi: {self.format_tr_date(target)}")
+                    return True, "DATE_SELECTED"
+                # Right number, wrong month -- keep advancing.
+            if not self._click(InstagramWebSelectors.NEXT_MONTH_BUTTONS, "sonraki ay", timeout_ms=1200):
+                break
+            time.sleep(0.8)
+
+        self.capture_error_snapshot("date_cell_not_resolved")
+        logger.error("=" * 50)
+        logger.error("STATUS: NEEDS_USER_HTML")
+        logger.error("Platform: Instagram Web")
+        logger.error(f"Target: date picker day cell for {self.format_tr_date(target)}")
+        logger.error("Needed: outerHTML of the OPEN calendar dialog (one day cell + the")
+        logger.error("        month header + the next-month arrow).")
+        logger.error("=" * 50)
+        return False, "DATE_CELL_NOT_RESOLVED"
+
+    def _click_day_cell(self, day: int) -> bool:
+        for template in InstagramWebSelectors.DAY_CELL_TEMPLATES:
+            sel = template.format(day=day)
+            try:
+                loc = self.page.locator(sel).first
+                if loc.is_visible(timeout=1000) and loc.is_enabled():
+                    loc.click(timeout=2500)
+                    return True
+            except Exception:
+                continue
+        return False
+
     def verify_date(self, target: datetime.datetime) -> bool:
         """Confirm the date button already shows the target day.
 

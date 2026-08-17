@@ -118,3 +118,39 @@ class InstagramWebSelectors:
     # the label avoids matching other popup buttons in the composer.
     DATE_ROW_LABELS: List[str] = ["Tarih", "Date"]
     TIME_ROW_LABELS: List[str] = ["Saat", "Time"]
+
+    # --- Date picker dialog ------------------------------------------------
+    # Opened by clicking the date button (its aria-expanded flips to "true").
+    # Written generically on purpose: this project runs indefinitely, so day selection
+    # must work for any month and year, including rolling into the next month, rather
+    # than assuming the current one.
+    #
+    # The day-cell shape has NOT been confirmed against the real DOM yet, so these are
+    # candidate strategies only; when none resolve, the flow reports NEEDS_USER_HTML with
+    # the exact element needed instead of guessing and mis-clicking a date.
+    DATE_PICKER_DIALOGS: List[str] = [
+        "div[role='dialog']:has(div[role='button']):below(:text('Tarih'))",
+        "div[role='dialog']",
+    ]
+
+    # Candidate day-cell shapes, tried in order. A confirmed capture should collapse this
+    # to the two that actually match (Kural 31).
+    DAY_CELL_TEMPLATES: List[str] = [
+        "div[role='dialog'] div[role='button']:text-is('{day}')",
+        "div[role='dialog'] [aria-label*='{day}']",
+    ]
+
+    # Month navigation, for slots that fall past the end of the displayed month.
+    NEXT_MONTH_BUTTONS: List[str] = [
+        "div[role='dialog'] div[role='button'][aria-label*='sonraki' i], "
+        "div[role='dialog'] div[role='button'][aria-label*='next' i]",
+        "div[role='dialog'] button[aria-label*='sonraki' i], "
+        "div[role='dialog'] button[aria-label*='next' i]",
+    ]
+
+    PREV_MONTH_BUTTONS: List[str] = [
+        "div[role='dialog'] div[role='button'][aria-label*='önceki' i], "
+        "div[role='dialog'] div[role='button'][aria-label*='previous' i]",
+        "div[role='dialog'] button[aria-label*='önceki' i], "
+        "div[role='dialog'] button[aria-label*='previous' i]",
+    ]

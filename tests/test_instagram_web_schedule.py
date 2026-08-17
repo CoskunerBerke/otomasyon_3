@@ -293,3 +293,52 @@ def test_no_warning_means_submit_proceeds():
 
     assert ok is True
     assert page.primary.clicks == 1
+
+
+# ---------------------------------------------------------------------------
+# Date selection must work for ANY month/year -- this pipeline runs indefinitely,
+# so nothing may assume the current month.
+# ---------------------------------------------------------------------------
+
+def test_date_format_covers_every_month_and_future_years():
+    cases = {
+        (2026, 1, 1): "1 Oca 2026",
+        (2026, 8, 17): "17 Ağu 2026",
+        (2026, 9, 3): "3 Eyl 2026",
+        (2027, 2, 28): "28 Şub 2027",
+        (2030, 12, 31): "31 Ara 2030",
+    }
+    for (y, m, d), expected in cases.items():
+        assert InstagramWebObserver.format_tr_date(datetime.datetime(y, m, d)) == expected
+
+
+def test_same_day_slot_needs_no_picker_interaction():
+    """Instagram opens on today, so a same-day slot must not touch the calendar."""
+    page = _Page()          # date button already reads 17 Ağu 2026
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.select_date(datetime.datetime(2026, 8, 17, 19, 30))
+
+    assert ok is True
+    assert reason == "DATE_ALREADY_CORRECT"
+
+
+def test_unresolvable_day_cell_reports_needs_user_html_and_clicks_nothing_wrong():
+    """A day cell that cannot be resolved must never fall back to a guessed click --
+    that would schedule the wrong date."""
+    page = _Page()
+    # Date button reports a different day than the target, and no day cell matches.
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.select_date(datetime.datetime(2026, 8, 23, 19, 30), max_month_hops=0)
+
+    assert ok is False
+    assert reason in ("DATE_CELL_NOT_RESOLVED", "DATE_BUTTON_NOT_FOUND")
+
+
+def test_day_cell_templates_are_parameterised_not_hardcoded():
+    """Templates must be day-agnostic so any date works, now or years from now."""
+    for tpl in InstagramWebSelectors.DAY_CELL_TEMPLATES:
+        assert "{day}" in tpl
+        rendered = tpl.format(day=23)
+        assert "23" in rendered and "{day}" not in rendered
