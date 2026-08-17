@@ -2091,16 +2091,32 @@ class YouTubeStudioUIObserver:
                         if "planlandı" in txt or "scheduled" in txt:
                             if "gizli" in txt or "taslak" in txt or "draft" in txt:
                                 return False, "REMOTE_STILL_DRAFT"
-                            # Verify requested date/time when those values are visible in the row.
-                            if expected_time_str and expected_time_str not in txt:
-                                logger.warning("Remote row is scheduled but expected time '%s' was not found in row text.", expected_time_str)
-                                return False, "REMOTE_SCHEDULE_TIME_NOT_VERIFIED"
+                            # Deliberately NOT checking the time here. YouTube Studio's
+                            # content list renders the scheduled DATE only ("23 Ağu 2026 /
+                            # Planlandı") -- the time is never in the row, so requiring
+                            # "22:00" in the row text failed 100% of the time and reported
+                            # correctly-scheduled videos as REMOTE_SCHEDULE_TIME_NOT_VERIFIED
+                            # (2026-08-17: 13 of 14 Reels flagged this way while all 14 were
+                            # in fact scheduled). The time was already verified in the
+                            # wizard via set_schedule_datetime's read-back before submitting.
                             logger.info(f"True Remote Verification PASS ({tab_label}): '{target_title}' is SCHEDULED.")
                             return True, "SCHEDULED"
 
                         if "taslak" in txt or "draft" in txt or "gizli" in txt:
                             logger.warning("Remote verification FAIL: target video is still in draft/private state.")
                             return False, "DRAFT_PRIVATE"
+
+                        # Row matched by title but its visibility cell has not rendered yet
+                        # (the list lazy-loads). Give the row one short settle before
+                        # calling it unscheduled, rather than failing on a rendering race.
+                        try:
+                            time.sleep(2.0)
+                            txt = row.inner_text().lower()
+                            if "planlandı" in txt or "scheduled" in txt:
+                                logger.info(f"True Remote Verification PASS ({tab_label}, after settle): '{target_title}'.")
+                                return True, "SCHEDULED"
+                        except Exception:
+                            pass
 
                         return False, "REMOTE_TARGET_FOUND_BUT_NOT_SCHEDULED"
                 except Exception:
