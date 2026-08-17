@@ -47,6 +47,7 @@ from automation.flow.generator import GoogleFlowWebProvider, MockVideoProvider, 
 from automation.content.concepts import CATEGORIES
 from automation.content.engine import ContentEngine
 from automation.content.prompt_engine import PromptEngine, ReelConceptPlan
+from automation.content.segment_planner import SegmentPlanner
 from automation.quality.validator import VideoValidator
 from automation.media_handoff import handoff_reel_to_cloud
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
@@ -76,6 +77,13 @@ SOFT_FAILURE_STATUSES = ("SCHEDULE_RESUME_REQUIRED", "UPLOADED_DRAFT", "REVIEW_R
 # The browser/session itself is broken. Continuing would cascade the same failure into
 # every remaining Reel, so this stops the current platform.
 HARD_FAILURE_STATUSES = ("ACCOUNT_MISMATCH", "AUTH_REQUIRED", "NEEDS_USER_HTML")
+
+# Ongoing episodic series framing (title/caption only -- see SegmentPlanner for the
+# recurring companion character woven into the actual Flow prompts). Numbering is
+# derived from total historical reel count, not a separate persisted counter, so a
+# season/episode never desyncs from what has actually been generated.
+SERIES_NAME = "Nova's Builds"
+EPISODES_PER_SEASON = 20
 
 
 class PhaseResult:
@@ -250,14 +258,33 @@ class SimpleWeeklyPipeline:
                 transformation=plan.transformation,
                 reveal=plan.reveal,
             )
+
+            episode_number = len(past_history) + i
+            season_number = ((episode_number - 1) // EPISODES_PER_SEASON) + 1
+            episode_in_season = ((episode_number - 1) % EPISODES_PER_SEASON) + 1
+            series_tag = f"S{season_number}E{episode_in_season}"
+            has_companion = plan.concept_def.id_slug.lower() not in SegmentPlanner.NO_COMPANION_SLUGS
+
+            # Plain ASCII only: this text can flow through logger.info()/print() on a
+            # Windows console using a non-UTF-8 codepage (e.g. cp1254), which raises
+            # UnicodeEncodeError on emoji and crashes the run mid-batch.
+            episode_title = f"{series_tag}: {yt_title}"
+            if has_companion:
+                episode_caption = (
+                    f"{SERIES_NAME} {series_tag}\n\n"
+                    f"{SegmentPlanner.COMPANION_NAME} discovers: {plan.topic_description}"
+                )
+            else:
+                episode_caption = f"{SERIES_NAME} {series_tag}\n\n{plan.topic_description}"
+
             reels.append(BatchReel(
                 index=i,
                 reel_id=reel_id,
                 scheduled_at_local=slot.scheduled_at_local,
                 scheduled_at_utc=slot.scheduled_at_utc,
                 topic_key=plan.topic_key,
-                title=yt_title,
-                caption=plan.topic_description,
+                title=episode_title,
+                caption=episode_caption,
                 hashtags=yt_tags,
                 concept_id_slug=plan.concept_def.id_slug,
                 environment=plan.environment,

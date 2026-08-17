@@ -53,6 +53,19 @@ class SegmentPlan:
 class SegmentPlanner:
     """Generates 3 logical, non-magic step-by-step construction segments for any concept."""
 
+    # Recurring silent companion character for the ongoing episodic series (see
+    # simple_weekly_pipeline.py for season/episode numbering). Kept as a fixed,
+    # identically-worded description across every episode so independent Flow
+    # generations stay as visually consistent as a pure text prompt allows.
+    COMPANION_NAME = "Nova"
+    COMPANION_DESCRIPTION = "a small, curious red fox with a fluffy white-tipped tail and bright amber eyes"
+
+    # Environments where a physical fox cannot plausibly appear (vacuum, deep space,
+    # underwater, open ocean). These episodes run without the companion character.
+    NO_COMPANION_SLUGS = {
+        "mars-colony", "moon-base", "underwater-city", "floating-city", "space-station"
+    }
+
     NEGATIVE_EXCLUSIONS = [
         "people",
         "human faces",
@@ -245,6 +258,7 @@ class SegmentPlanner:
         )
 
         negative_str = ", ".join(f"no {item}" for item in cls.NEGATIVE_EXCLUSIONS)
+        has_companion = concept.id_slug.lower() not in cls.NO_COMPANION_SLUGS
 
         # -------------------------------------------------------------
         # SEGMENT 1: Initial State + Foundation & Early Construction
@@ -275,9 +289,15 @@ class SegmentPlanner:
             f"",
             f"Visual identity: {continuity.to_prompt_clause()}",
             f"",
+        ] + ([
+            f"Recurring character: {cls.COMPANION_NAME}, {cls.COMPANION_DESCRIPTION}, wanders into frame and watches the site with curious head-tilts as the first construction begins. {cls.COMPANION_NAME} is a silent animal companion -- no human characters, no dialogue, no anthropomorphic behavior.",
+            f"",
+        ] if has_companion else []) + [
             f"Visual style: premium cinematic 3D realism, high-end architectural visualization, physically believable step-by-step construction, smooth continuous transformation, precise geometry, realistic materials.",
             f"",
-            f"Audio: natural ambient environmental sound for {env} (wind, birds, distant water, or site ambience as fitting), layered with satisfying tactile early-construction sound effects (earth moving, foundation pouring, first structural pieces settling into place) precisely synchronized to the on-screen action. No dialogue, no voiceover, no spoken words, no lyrics.",
+            f"Audio: natural ambient environmental sound for {env} (wind, birds, distant water, or site ambience as fitting), layered with satisfying tactile early-construction sound effects (earth moving, foundation pouring, first structural pieces settling into place) precisely synchronized to the on-screen action."
+            + (f" Include {cls.COMPANION_NAME}'s soft, curious fox chirps and yips as she investigates the site -- animal vocalizations only, no words." if has_companion else "")
+            + " No dialogue, no voiceover, no spoken words, no lyrics.",
             f"",
             f"Negative prompt / Exclusions: {negative_str}.",
             f"",
@@ -325,9 +345,15 @@ class SegmentPlanner:
             f"",
             f"The final frame must clearly preserve the advanced partial state so Segment 3 can add final details and reveal.",
             f"",
+        ] + ([
+            f"Recurring character: {cls.COMPANION_NAME} ({cls.COMPANION_DESCRIPTION}) is still present, continuing to watch from a safe vantage point and occasionally moving to a new perch to keep observing as the structure grows. Same fox as before -- do not change her appearance.",
+            f"",
+        ] if has_companion else []) + [
             f"Visual style: premium cinematic 3D realism, high-end architectural visualization, physically believable step-by-step construction, smooth continuous transformation, precise geometry, realistic materials.",
             f"",
-            f"Audio: continuation of the same ambient soundscape from before, now layered with heavier, satisfying mechanical and structural sound effects (steel assembly, glass panels, concrete, cranes or lifts as fitting) precisely synchronized to the on-screen construction. No dialogue, no voiceover, no spoken words, no lyrics.",
+            f"Audio: continuation of the same ambient soundscape from before, now layered with heavier, satisfying mechanical and structural sound effects (steel assembly, glass panels, concrete, cranes or lifts as fitting) precisely synchronized to the on-screen construction."
+            + (f" Include {cls.COMPANION_NAME}'s occasional soft, interested yips as she watches -- animal vocalizations only, no words." if has_companion else "")
+            + " No dialogue, no voiceover, no spoken words, no lyrics.",
             f"",
             f"Negative prompt / Exclusions: {negative_str}.",
             f"",
@@ -371,9 +397,15 @@ class SegmentPlanner:
             f"",
             f"Do not spend the full segment showing a static finished building.",
             f"",
+        ] + ([
+            f"Recurring character: as the structure nears completion, {cls.COMPANION_NAME} ({cls.COMPANION_DESCRIPTION}) approaches and explores the finished space, settling contentedly in frame during the final reveal -- the emotional payoff of her watching the whole build. Same fox as before, no appearance changes.",
+            f"",
+        ] if has_companion else []) + [
             f"Visual style: premium cinematic 3D realism, high-end architectural visualization, smooth continuous transformation, majestic cinematic conclusion.",
             f"",
-            f"Audio: satisfying finishing sound effects (water filling, lighting activating, final materials settling into place) synchronized to the on-screen action for the first 6-7 seconds, building into a subtle, non-lyrical cinematic orchestral swell that peaks precisely with the final reveal. No dialogue, no voiceover, no spoken words, no lyrics.",
+            f"Audio: satisfying finishing sound effects (water filling, lighting activating, final materials settling into place) synchronized to the on-screen action for the first 6-7 seconds, building into a subtle, non-lyrical cinematic orchestral swell that peaks precisely with the final reveal."
+            + (f" {cls.COMPANION_NAME} gives a couple of soft, happy, satisfied yips right at the reveal moment -- animal vocalizations only, no words." if has_companion else "")
+            + " No dialogue, no voiceover, no spoken words, no lyrics.",
             f"",
             f"Negative prompt / Exclusions: {negative_str}.",
             f"",
