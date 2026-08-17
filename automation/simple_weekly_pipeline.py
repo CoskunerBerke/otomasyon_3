@@ -478,10 +478,24 @@ class SimpleWeeklyPipeline:
                 return False
         return True
 
+    def _cross_promo_line(self, posting_to: str) -> str:
+        """
+        Builds a line pointing to the OTHER two channels, for the description/caption of
+        the platform given in posting_to ('youtube', 'tiktok', or 'instagram').
+        """
+        channels = {
+            "youtube": ("YouTube", self.pub_config.youtube_expected_handle),
+            "tiktok": ("TikTok", self.pub_config.tiktok_expected_username),
+            "instagram": ("Instagram", self.pub_config.instagram_expected_username),
+        }
+        others = [f"{name} {handle}" for key, (name, handle) in channels.items() if key != posting_to]
+        return f"Also on {' | '.join(others)}"
+
     def _build_publish_record(self, reel: BatchReel, platform: Platform, progress_entry: Dict[str, Any]) -> PublishRecord:
         video_file = Path(reel.video_path)
         file_sha = reel.video_sha256 or hashlib.sha256(video_file.read_bytes()).hexdigest()
         account_handle = self.pub_config.youtube_expected_handle if platform == Platform.YOUTUBE else self.pub_config.tiktok_expected_username
+        promo_key = "youtube" if platform == Platform.YOUTUBE else "tiktok"
 
         return PublishRecord(
             publish_id=f"PUB-{reel.reel_id}-{platform.value.upper()}",
@@ -492,9 +506,10 @@ class SimpleWeeklyPipeline:
             video_file=video_file,
             video_sha256=file_sha,
             title=reel.title or reel.reel_id,
-            # Caption only -- hashtags are appended exactly once, by the UI observer
-            # layer (fill_details / replace_caption). See reel-metadata-director skill.
-            description=reel.caption,
+            # Caption + cross-promo line only -- hashtags are appended exactly once, by
+            # the UI observer layer (fill_details / replace_caption). See
+            # reel-metadata-director skill.
+            description=f"{reel.caption}\n\n{self._cross_promo_line(promo_key)}",
             hashtags=reel.hashtags,
             scheduled_at_local=reel.scheduled_at_local,
             scheduled_at_utc=reel.scheduled_at_utc,
@@ -651,7 +666,7 @@ class SimpleWeeklyPipeline:
                 scheduled_at_local=reel.scheduled_at_local,
                 scheduled_at_utc=reel.scheduled_at_utc,
                 timezone="Europe/Istanbul",
-                caption=f"{reel.caption}\n\n{' '.join(reel.hashtags)}",
+                caption=f"{reel.caption}\n\n{self._cross_promo_line('instagram')}\n\n{' '.join(reel.hashtags)}",
                 job_id=f"JOB-{manifest.week_id}-{reel.reel_id}",
                 client=self.cloud_client,
             )

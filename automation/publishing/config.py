@@ -57,6 +57,11 @@ class PublishingConfig:
     tiktok_url: str = "https://www.tiktok.com/tiktokstudio/upload"
     tiktok_headless: bool = False
 
+    # Instagram Specific (handle only -- Instagram itself publishes via the
+    # separate Cloud Control Plane, not this local orchestrator; kept here so
+    # YouTube/TikTok descriptions can cross-promote the Instagram channel)
+    instagram_expected_username: str = "@builddverse"
+
     def validate(self) -> None:
         if not self.daily_slots:
             raise ValueError("daily_slots cannot be empty.")
@@ -134,7 +139,8 @@ def load_publishing_config(
         tiktok_debug_port=int(data.get("tiktok_debug_port", 9223)),
         tiktok_profile_dir=tt_prof_path,
         tiktok_url=data.get("tiktok_url", "https://www.tiktok.com/creator-center/upload"),
-        tiktok_headless=data.get("tiktok_headless", False)
+        tiktok_headless=data.get("tiktok_headless", False),
+        instagram_expected_username=data.get("instagram_expected_username", "@builddverse")
     )
 
     # Ensure profile directories exist

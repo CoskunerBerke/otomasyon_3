@@ -397,7 +397,9 @@ def test_metadata_unchanged_between_generate_and_publish(tmp_path):
     first_reel = manifest.reels[0]
     sent_rec = pipeline.yt_publisher.upload_and_schedule.call_args_list[0].args[0]
     assert sent_rec.title == first_reel.title
-    assert sent_rec.description == first_reel.caption
+    # description = caption + cross-promo line; the underlying caption text itself
+    # must still be unchanged from generation time.
+    assert sent_rec.description.startswith(first_reel.caption)
     assert sent_rec.hashtags == first_reel.hashtags
 
 
