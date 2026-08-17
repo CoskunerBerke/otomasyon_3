@@ -683,31 +683,29 @@ def test_hard_failure_stops_its_platform_but_not_the_others(tmp_path):
 
 
 def test_telegram_completion_message_sent_on_success(tmp_path):
-    pipeline, dl_dir = _make_pipeline(tmp_path)
-    sent = {}
+    """Summary wording is built without touching the network. The transport itself is
+    hard-blocked under pytest -- a test run once sent a real '2026-W99 TAMAMLANDI'
+    message to the operator's live Telegram chat, so the guard must stay absolute."""
+    pipeline, success, results, manifest = _run_full_happy_path(tmp_path)
+    text = pipeline.build_summary_text(manifest, results)
 
-    class _FakeBot:
-        def __init__(self, token):
-            sent["token_used"] = bool(token)
+    assert "TAMAMLANDI" in text
+    assert "YouTube : 14/14" in text
+    # Must never read as "already live on Instagram".
+    assert "henuz yayinlanmadi" in text
 
-        def send_message(self, chat_id, text):
-            sent["chat_id"] = chat_id
-            sent["text"] = text
-            return True, 1, None
 
-    fake_cfg = MagicMock()
-    fake_cfg.telegram_bot_token = "dummy-token"
-    fake_cfg.telegram_chat_id = 12345
-
-    with _patched_validator(), \
-         patch("automation.cloud.config.CloudConfig", return_value=fake_cfg), \
-         patch("automation.cloud.telegram_bot.TelegramBotClient", _FakeBot):
-        success, results, manifest = pipeline.run()
-
-    assert success is True
-    assert sent["chat_id"] == 12345
-    assert "TAMAMLANDI" in sent["text"]
-    assert "YouTube : 14/14" in sent["text"]
+def test_telegram_transport_blocked_under_pytest(tmp_path):
+    pipeline, _dl = _make_pipeline(tmp_path)
+    sent = []
+    import automation.cloud.telegram_bot as tb
+    original = tb.TelegramBotClient
+    tb.TelegramBotClient = lambda token: sent.append(token)
+    try:
+        pipeline._send_telegram("should never leave the test process")
+    finally:
+        tb.TelegramBotClient = original
+    assert sent == []
 
 
 def test_telegram_failure_never_breaks_pipeline(tmp_path):

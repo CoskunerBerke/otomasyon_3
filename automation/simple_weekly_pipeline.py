@@ -17,6 +17,7 @@ pipeline depends on -- it does not re-derive them.
 import argparse
 import datetime
 import hashlib
+import os
 import logging
 import re
 import sys
@@ -807,6 +808,15 @@ class SimpleWeeklyPipeline:
 
     def _send_telegram(self, text: str) -> None:
         """Best-effort Telegram send. Never raises, never logs the bot token."""
+        # Under pytest, refuse outright. Tests run the full pipeline against tmp_path but
+        # CloudConfig still reads the real environment, so a test run happily sent live
+        # messages to the operator's actual Telegram chat (a "2026-W99 TAMAMLANDI" notice
+        # from a test batch landed there on 2026-08-17). Test doubles are the only way a
+        # test should ever reach this method.
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            logger.debug("[TELEGRAM] pytest ortami -- gercek bildirim gonderilmiyor.")
+            return
+
         try:
             from automation.cloud.config import CloudConfig
             from automation.cloud.telegram_bot import TelegramBotClient
@@ -827,49 +837,45 @@ class SimpleWeeklyPipeline:
         Send the end-of-run summary to Telegram. Best-effort only: a notification problem
         must never change the pipeline's outcome, and the bot token is never logged.
         """
-        try:
-            from automation.cloud.config import CloudConfig
-            from automation.cloud.telegram_bot import TelegramBotClient
+        self._send_telegram(self.build_summary_text(manifest, results))
 
-            cfg = CloudConfig(self.base_dir)
-            if not cfg.telegram_bot_token or not cfg.telegram_chat_id:
-                logger.info("[TELEGRAM] Token/chat_id yok, bildirim atlandi.")
-                return
+    def build_summary_text(self, manifest: BatchManifest, results: List[PhaseResult]) -> str:
+        """
+        Compose the end-of-run summary. Pure string building, no I/O, so the wording can
+        be tested without any risk of reaching the real Telegram API.
+        """
+        progress = self.batch_repo.load_progress(manifest.week_id)
+        total = len(manifest.reels)
 
-            progress = self.batch_repo.load_progress(manifest.week_id)
-            total = len(manifest.reels)
-
-            def _done(platform: str) -> int:
-                ok = PLATFORM_SUCCESS_STATUSES + (("MEDIA_READY",) if platform == "instagram" else ())
-                return sum(
-                    1 for r in manifest.reels
-                    if progress.get(r.reel_id, {}).get(platform, {}).get("status") in ok
-                )
-
-            lines = [
-                f"Reels AI Factory — {manifest.week_id}",
-                "",
-                f"Uretim : {sum(1 for r in manifest.reels if r.generation_status == 'COMPLETE')}/{total}",
-                f"YouTube : {_done('youtube')}/{total}",
-                f"TikTok  : {_done('tiktok')}/{total}",
-                f"Instagram (MEDIA_READY): {_done('instagram')}/{total}",
-                "",
-            ]
-
-            failed = [r for r in results if not r.success]
-            if not failed:
-                lines.append("Durum: TAMAMLANDI")
-            else:
-                lines.append("Durum: DIKKAT GEREKIYOR")
-                for r in failed:
-                    lines.append(f"- {r.phase}: {r.message}")
-
-            ok, _msg_id, err = TelegramBotClient(cfg.telegram_bot_token).send_message(
-                chat_id=cfg.telegram_chat_id, text="\n".join(lines)
+        def _done(platform: str) -> int:
+            ok = PLATFORM_SUCCESS_STATUSES + (("MEDIA_READY",) if platform == "instagram" else ())
+            return sum(
+                1 for r in manifest.reels
+                if progress.get(r.reel_id, {}).get(platform, {}).get("status") in ok
             )
-            logger.info("[TELEGRAM] Bildirim gonderildi." if ok else f"[TELEGRAM] Gonderilemedi: {err}")
-        except Exception as e:
-            logger.warning(f"[TELEGRAM] Bildirim hatasi (pipeline etkilenmedi): {e}")
+
+        lines = [
+            f"Reels AI Factory — {manifest.week_id}",
+            "",
+            f"Uretim : {sum(1 for r in manifest.reels if r.generation_status == 'COMPLETE')}/{total}",
+            f"YouTube : {_done('youtube')}/{total}",
+            f"TikTok  : {_done('tiktok')}/{total}",
+            # MEDIA_READY means the file reached Railway/S3 and is queued for the cloud
+            # Instagram worker -- it is NOT "published on Instagram". Spelled out so the
+            # summary cannot be misread as the Reels already being live.
+            f"Instagram (MEDIA_READY, henuz yayinlanmadi): {_done('instagram')}/{total}",
+            "",
+        ]
+
+        failed = [r for r in results if not r.success]
+        if not failed:
+            lines.append("Durum: TAMAMLANDI")
+        else:
+            lines.append("Durum: DIKKAT GEREKIYOR")
+            for r in failed:
+                lines.append(f"- {r.phase}: {r.message}")
+
+        return "\n".join(lines)
 
     def _sync_obsidian(self, manifest: BatchManifest) -> None:
         """Obsidian is a mirror only -- a failure here must never break the pipeline."""
