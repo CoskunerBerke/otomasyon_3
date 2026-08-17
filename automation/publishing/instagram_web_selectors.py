@@ -133,11 +133,19 @@ class InstagramWebSelectors:
         "div[role='dialog']",
     ]
 
-    # Candidate day-cell shapes, tried in order. A confirmed capture should collapse this
-    # to the two that actually match (Kural 31).
+    # Day cells are resolved by CONTENT rather than by a captured shape: inside the open
+    # calendar, find the element whose visible text is exactly the day number. This avoids
+    # needing a DOM capture of Instagram's calendar (asking the operator to paste script
+    # into their own Instagram console is the exact pattern Instagram's self-XSS warning
+    # exists to prevent, so it is not something to teach them to do).
+    #
+    # Clicking by text alone could in principle hit the wrong element, so correctness does
+    # not rest on the selector: select_date() re-reads the date button afterwards and only
+    # reports success if it actually shows the target date. A wrong or missed click fails
+    # loudly instead of silently scheduling the wrong day.
     DAY_CELL_TEMPLATES: List[str] = [
         "div[role='dialog'] div[role='button']:text-is('{day}')",
-        "div[role='dialog'] [aria-label*='{day}']",
+        "div[role='dialog'] :text-is('{day}')",
     ]
 
     # Month navigation, for slots that fall past the end of the displayed month.

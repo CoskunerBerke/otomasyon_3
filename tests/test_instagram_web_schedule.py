@@ -342,3 +342,59 @@ def test_day_cell_templates_are_parameterised_not_hardcoded():
         assert "{day}" in tpl
         rendered = tpl.format(day=23)
         assert "23" in rendered and "{day}" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# Day cells are resolved by content, so correctness rests on verifying the date
+# AFTER the click -- never on the selector having guessed right.
+# ---------------------------------------------------------------------------
+
+class _CalendarPage(_Page):
+    """Calendar whose day cells are plain text elements, and whose date button only
+    updates when the *correct* day is clicked."""
+
+    def __init__(self, shown="17 Ağu 2026 Pzt", correct_day=23, **kw):
+        super().__init__(**kw)
+        self.shown = shown
+        self.correct_day = correct_day
+        self.clicked_days = []
+
+    def locator(self, selector):
+        if "aria-haspopup='dialog'" in selector.lower():
+            return _Loc(text=self.shown, attrs={"aria-expanded": "true"})
+
+        if "text-is('" in selector and "role='dialog'" in selector:
+            day = selector.split("text-is('")[1].split("')")[0]
+            cell = _Loc(text=day)
+
+            def on_click(d=day):
+                self.clicked_days.append(d)
+                if int(d) == self.correct_day:
+                    self.shown = f"{d} Ağu 2026 Paz"
+            cell.on_click = on_click
+            return cell
+
+        return super().locator(selector)
+
+
+def test_correct_day_click_is_confirmed_by_reading_the_date_back():
+    page = _CalendarPage(correct_day=23)
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.select_date(datetime.datetime(2026, 8, 23, 19, 30))
+
+    assert ok is True
+    assert reason == "DATE_SELECTED"
+    assert "23" in page.clicked_days
+
+
+def test_click_that_does_not_change_the_date_fails_loudly():
+    """If the text match hit the wrong element, the date button never updates -- that must
+    fail, not proceed to schedule the wrong day."""
+    page = _CalendarPage(correct_day=99)   # nothing the observer clicks will take effect
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.select_date(datetime.datetime(2026, 8, 23, 19, 30), max_month_hops=0)
+
+    assert ok is False
+    assert reason == "DATE_CELL_NOT_RESOLVED"

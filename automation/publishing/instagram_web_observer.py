@@ -352,13 +352,25 @@ class InstagramWebObserver:
         return False, "DATE_CELL_NOT_RESOLVED"
 
     def _click_day_cell(self, day: int) -> bool:
+        """Click the calendar cell whose visible text is exactly `day`.
+
+        Resolved by content instead of a captured DOM shape. Safety does not depend on
+        picking the right element: select_date() verifies the date button afterwards, so a
+        wrong click surfaces as a failure rather than a wrong scheduled date.
+        """
         for template in InstagramWebSelectors.DAY_CELL_TEMPLATES:
             sel = template.format(day=day)
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1000) and loc.is_enabled():
-                    loc.click(timeout=2500)
-                    return True
+                if not loc.is_visible(timeout=1000):
+                    continue
+                try:
+                    if not loc.is_enabled():
+                        continue
+                except Exception:
+                    pass   # plain spans have no enabled state
+                loc.click(timeout=2500)
+                return True
             except Exception:
                 continue
         return False
