@@ -80,6 +80,12 @@ class TikTokPublisher(BaseTikTokPublisher):
 
                 logger.info(f"[{record.reel_id}] TikTok Target Account Verified: {detected_user}")
 
+                # Clear any leftover "unsaved editing session" banner BEFORE deciding
+                # whether an editor is already open -- otherwise a stale session from a
+                # previous Reel can be mistaken for this Reel's editor, and the upload
+                # area stays inert for the rest of the run.
+                observer.dismiss_unsaved_draft_banner_if_present()
+
                 # 3. Check if existing editor session is already open (PREVENTS RE-UPLOAD)
                 is_editor_open = observer.is_editor_open_for_reel(record.reel_id, record.video_file.name)
                 if is_editor_open:

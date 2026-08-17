@@ -144,12 +144,90 @@ class TikTokUIObserver:
 
         return False
 
+    def cancel_content_check_modal(self) -> bool:
+        """
+        Close the "Paylaşmaya devam edilsin mi?" modal by pressing İptal (Cancel).
+
+        This modal offers only İptal and "Hemen paylaş". "Hemen paylaş" publishes the Reel
+        IMMEDIATELY instead of at its scheduled slot -- clicking it would dump the whole
+        week's videos out at once and destroy the schedule, so it is never touched. The
+        correct flow is: cancel, let TikTok's content check finish, then schedule again.
+
+        Every candidate is checked against FORBIDDEN_IMMEDIATE_PUBLISH_LABELS before it is
+        clicked, so even a mis-written selector cannot reach the publish button.
+        Returns True if the modal was cancelled.
+        """
+        for sel in TikTokSelectors.CONTENT_CHECK_MODAL_CANCEL_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                if not loc.is_visible(timeout=800):
+                    continue
+
+                label = ""
+                try:
+                    label = (loc.inner_text() or "").strip().lower()
+                except Exception:
+                    label = ""
+                if any(bad in label for bad in TikTokSelectors.FORBIDDEN_IMMEDIATE_PUBLISH_LABELS):
+                    logger.error(
+                        f"[TIKTOK SAFETY] Selector resolved to an immediate-publish control "
+                        f"('{label}') -- refusing to click."
+                    )
+                    continue
+
+                loc.click(timeout=2500)
+                logger.info("[TIKTOK CHECK] 'Iptal' tiklandi, icerik kontrolu beklenecek.")
+                time.sleep(1.0)
+                return True
+            except Exception:
+                continue
+
+        logger.warning("[TIKTOK CHECK] 'Iptal' butonu bulunamadi.")
+        return False
+
+    def dismiss_unsaved_draft_banner_if_present(self) -> bool:
+        """
+        Clear TikTok's "Düzenlemekte olduğunuz bir video kaydedilmedi" resume banner by
+        discarding the stale editing session, so the upload area becomes usable again.
+
+        Only fires when the banner text is actually on the page, and only clicks
+        'Sil'/'Discard' -- never 'Devam', which would reopen a previous video's editor and
+        risk scheduling the wrong Reel. What it discards is an UNSAVED editor session, not
+        a published or scheduled post; the worst case is re-uploading the file.
+        Returns True if a banner was dismissed.
+        """
+        try:
+            page_text = self.page.inner_text("body").lower()
+        except Exception:
+            return False
+
+        if not any(m in page_text for m in TikTokSelectors.UNSAVED_DRAFT_BANNER_MARKERS):
+            return False
+
+        for sel in TikTokSelectors.UNSAVED_DRAFT_DISCARD_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                if loc.is_visible(timeout=800) and loc.is_enabled():
+                    loc.click(timeout=2500)
+                    logger.info("[TIKTOK] Kaydedilmemis duzenleme bandi 'Sil' ile temizlendi.")
+                    time.sleep(1.5)
+                    return True
+            except Exception:
+                continue
+
+        logger.warning("[TIKTOK] Kaydedilmemis duzenleme bandi goruldu ama temizlenemedi.")
+        return False
+
     def upload_file(self, video_path: Path) -> bool:
         """
         Locate file input and upload video.
         Supports both Method A (direct set_input_files) and Method B (expect_file_chooser fallback).
         """
         video_path = Path(video_path).resolve()
+
+        # A leftover unsaved-editing banner makes the whole upload area inert, so both
+        # methods below would fail with "file input not found" until it is cleared.
+        self.dismiss_unsaved_draft_banner_if_present()
 
         # Method A: Try direct input[type='file']
         for sel in TikTokSelectors.FILE_INPUT_SELECTORS:
@@ -1669,10 +1747,9 @@ class TikTokUIObserver:
 
                 try:
                     check_modal_loc = self.page.locator(
-                        "div:has-text('Paylaşmaya devam edilsin mi?'), "
-                        "div:has-text('Continue posting?'), "
-                        "div:has-text('Continue to post?'), "
-                        "div[role='dialog']:has-text('kontrol ediyoruz')"
+                        ", ".join(TikTokSelectors.CONTENT_CHECK_CONFIRM_MODAL)
+                        + ", div[role='dialog']:has-text('Continue posting?')"
+                        + ", div[role='dialog']:has-text('kontrol ediyoruz')"
                     ).first
                     if hasattr(check_modal_loc, "is_visible") and check_modal_loc.is_visible(timeout=300):
                         check_modal_detected = True
@@ -1693,11 +1770,13 @@ class TikTokUIObserver:
                     logger.error("=" * 50)
                     return False, "CONTENT_CHECK_MODAL_RETRY_FAILED"
 
-                logger.info("[TIKTOK CHECK] Safely dismissing modal via Escape...")
-                try:
-                    self.page.keyboard.press("Escape")
-                except Exception:
-                    pass
+                logger.info("[TIKTOK CHECK] Modal 'Iptal' ile guvenle kapatiliyor...")
+                if not self.cancel_content_check_modal():
+                    # Escape only as a fallback if the real Cancel button was unreachable.
+                    try:
+                        self.page.keyboard.press("Escape")
+                    except Exception:
+                        pass
                 time.sleep(0.5)
 
                 checks_done = self.wait_for_content_checks(max_wait_seconds=720, poll_interval=2.0)

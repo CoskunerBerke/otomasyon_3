@@ -211,6 +211,54 @@ class TikTokSelectors:
         "button:has-text('İzin ver')"
     ]
 
+    # "Paylaşmaya devam edilsin mi?" -- shown when Planla is pressed while TikTok is still
+    # running its content check. Real DOM (user-supplied 2026-08-17):
+    #   <div class="TUXModal common-modal-confirm-modal" role="dialog"
+    #        title="Paylaşmaya devam edilsin mi?">
+    #     ... <button class="TUXButton--secondary"><div class="TUXButton-label">İptal</div></button>
+    #         <button class="TUXButton--primary"><div class="TUXButton-label">Hemen paylaş</div></button>
+    #
+    # The ONLY safe exit is İptal. "Hemen paylaş" publishes IMMEDIATELY instead of at the
+    # scheduled slot -- it would dump the whole week's Reels out at once and destroy the
+    # schedule. It is never clicked, under any circumstance (CLAUDE.md, Kural 31).
+    CONTENT_CHECK_CONFIRM_MODAL: List[str] = [
+        "div[role='dialog']:has-text('Paylaşmaya devam edilsin mi?')",
+        "div.TUXModal:has-text('Paylaşmaya devam edilsin mi?')",
+    ]
+
+    CONTENT_CHECK_MODAL_CANCEL_BUTTONS: List[str] = [
+        "div[role='dialog'] button:has-text('İptal')",
+        "div.TUXModal button:has-text('İptal'), div.common-modal-confirm-modal button:has-text('İptal')",
+    ]
+
+    # Guard list: if a selector would ever resolve to one of these, it must be discarded.
+    FORBIDDEN_IMMEDIATE_PUBLISH_LABELS: List[str] = [
+        "hemen paylaş",
+        "post now",
+        "şimdi paylaş",
+    ]
+
+    # TikTok Studio shows a resume banner when a previous editing session was left
+    # unsaved: "Düzenlemekte olduğunuz bir video kaydedilmedi. Düzenlemeye devam
+    # edilsin mi?" with [Sil] [Devam]. While it is up, the upload area is inert and both
+    # the file input and the 'Video seçin' button are unreachable -- which surfaced as
+    # "TikTok file input not found on page" and stalled the whole TikTok phase.
+    UNSAVED_DRAFT_BANNER_MARKERS: List[str] = [
+        "kaydedilmedi",
+        "düzenlemeye devam",
+        "unsaved",
+        "continue editing",
+    ]
+
+    # Discards the UNSAVED editing session only. This is not published content and not a
+    # scheduled post -- worst case the Reel is uploaded again, which the idempotency
+    # checks already handle. 'Devam' is deliberately NOT used: it would reopen the old
+    # video's editor and risk operating on the wrong Reel.
+    UNSAVED_DRAFT_DISCARD_BUTTONS: List[str] = [
+        "button:has-text('Sil'), button:has-text('Discard')",
+        "div[class*='banner'] button:has-text('Sil'), div[role='alert'] button:has-text('Sil')",
+    ]
+
     # Purely informational "we're still reviewing your content" notice, same class of
     # blocker as YouTube's 'Anladım' overlay. Dismissing it is never a publish action --
     # these labels only ever acknowledge a notice. Kural 31: 2 semantic strategies.

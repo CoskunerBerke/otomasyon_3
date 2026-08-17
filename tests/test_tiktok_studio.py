@@ -1801,3 +1801,85 @@ def test_tiktok_checks_success_retry_final_submit_redirect():
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# "Paylaşmaya devam edilsin mi?" — the only exits are İptal and "Hemen paylaş".
+# "Hemen paylaş" publishes immediately instead of at the scheduled slot, which would
+# dump the whole week out at once. It must never be clicked. (Real DOM 2026-08-17.)
+# ---------------------------------------------------------------------------
+
+class _ModalBtn:
+    def __init__(self, label, visible=True):
+        self._label = label
+        self._visible = visible
+        self.clicked = False
+
+    @property
+    def first(self):
+        return self
+
+    def is_visible(self, timeout=None):
+        return self._visible
+
+    def is_enabled(self, timeout=None):
+        return True
+
+    def inner_text(self):
+        return self._label
+
+    def click(self, timeout=None):
+        self.clicked = True
+
+
+class _ModalPage:
+    """TikTok content-check modal with both real buttons present."""
+
+    def __init__(self):
+        self.cancel = _ModalBtn("İptal")
+        self.publish_now = _ModalBtn("Hemen paylaş")
+
+    def locator(self, selector):
+        s = selector.lower()
+        if "i̇ptal" in s or "iptal" in s or "İptal" in selector:
+            return self.cancel
+        if "hemen payla" in s:
+            return self.publish_now
+        return _ModalBtn("", visible=False)
+
+
+def test_content_check_modal_cancelled_via_iptal_never_publish_now():
+    from automation.publishing.tiktok_ui_observer import TikTokUIObserver
+
+    page = _ModalPage()
+    observer = TikTokUIObserver(page)
+
+    assert observer.cancel_content_check_modal() is True
+    assert page.cancel.clicked is True
+    assert page.publish_now.clicked is False, "ASLA 'Hemen paylas' tiklanmamali"
+
+
+def test_publish_now_is_refused_even_if_a_selector_resolves_to_it():
+    """Defense in depth: if a selector ever resolved to the publish button, the label
+    guard must refuse to click it rather than posting the video immediately."""
+    from automation.publishing.tiktok_ui_observer import TikTokUIObserver
+
+    class _MisroutedPage:
+        def __init__(self):
+            self.publish_now = _ModalBtn("Hemen paylaş")
+
+        def locator(self, selector):
+            return self.publish_now   # every selector wrongly resolves here
+
+    page = _MisroutedPage()
+    observer = TikTokUIObserver(page)
+
+    assert observer.cancel_content_check_modal() is False
+    assert page.publish_now.clicked is False
+
+
+def test_forbidden_labels_cover_both_languages():
+    from automation.publishing.tiktok_selectors import TikTokSelectors
+    labels = TikTokSelectors.FORBIDDEN_IMMEDIATE_PUBLISH_LABELS
+    assert "hemen paylaş" in labels
+    assert "post now" in labels
