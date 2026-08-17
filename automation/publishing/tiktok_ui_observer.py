@@ -33,6 +33,23 @@ class TikTokUIObserver:
         except Exception as e:
             logger.debug(f"[SNAPSHOT] Failed to capture error snapshot for '{tag}': {e}")
 
+    def dismiss_content_review_info_if_present(self) -> None:
+        """
+        Dismiss TikTok's informational content-review notice ('Anladım'/'Got it'), the
+        same class of blocker as YouTube's. Never a failure, and never a publish action --
+        only acknowledgement labels are matched, never 'Hemen paylaş'/'Post now'.
+        """
+        for sel in TikTokSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                if loc.is_visible(timeout=600):
+                    loc.click(timeout=2500)
+                    logger.info("[TIKTOK] Bilgilendirme penceresi 'Anladım' ile kapatildi.")
+                    time.sleep(0.5)
+                    return
+            except Exception:
+                continue
+
     def is_logged_in(self) -> bool:
         """Check if user has an active logged-in session on TikTok Studio."""
         curr_url = self.page.url
@@ -1630,6 +1647,9 @@ class TikTokUIObserver:
             start = time.time()
             wait_limit = 5 if attempt < max_attempts else timeout_seconds
             while time.time() - start < wait_limit:
+                # An informational notice sitting on top hides the success indicator
+                # underneath it, which would otherwise read as a failed schedule.
+                self.dismiss_content_review_info_if_present()
                 for sel in TikTokSelectors.SCHEDULE_SUCCESS_INDICATORS:
                     try:
                         loc = self.page.locator(sel).first

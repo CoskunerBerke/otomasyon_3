@@ -355,7 +355,17 @@ class YouTubeStudioSelectors:
         "we recommend you review"
     ]
 
+    # Real DOM (user-supplied 2026-08-17):
+    #   <ytcp-button><ytcp-button-shape>
+    #     <button aria-label="Anladım" aria-disabled="false" tabindex="0">
+    #       <div class="ytcpButtonShapeImpl__button-text-content">Anladım</div>
+    #   </button></ytcp-button-shape></ytcp-button>
+    # Kural 31: exactly 2 semantic strategies -- aria-label, then visible text.
+    # aria-label is unambiguous here ("Anladım"/"Got it" is only ever the dismiss
+    # button), so this is safe to click without a surrounding text precondition.
     CONTENT_REVIEW_INFO_DISMISS_BUTTONS: List[str] = [
-        "button:has-text('Anladım')",
-        "button:has-text('Got it')"
+        "button[aria-label='Anladım'], button[aria-label='Got it'], "
+        "button[aria-label='Anladim'], ytcp-button[aria-label='Anladım']",
+        "button:has-text('Anladım'), button:has-text('Got it'), "
+        "ytcp-button:has-text('Anladım'), ytcp-button:has-text('Got it')",
     ]

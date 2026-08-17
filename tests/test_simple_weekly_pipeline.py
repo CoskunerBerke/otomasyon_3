@@ -86,6 +86,8 @@ def _make_pipeline(tmp_path, dry_run=False, week_id="2026-W99", **kwargs):
         yt_publisher=_ok_publisher(),
         tt_publisher=_ok_publisher(),
         cloud_client=_ok_cloud_client(),
+        stuck_wait_minutes=0,
+        stuck_retry_seconds=0,
     )
     defaults.update(kwargs)
     return SimpleWeeklyPipeline(**defaults), dl_dir
@@ -756,3 +758,87 @@ def test_finished_batch_is_not_resumed(tmp_path):
     fresh, _dl = _make_pipeline(tmp_path, week_id=None)
     assert fresh._is_batch_finished(manifest) is True
     assert fresh._find_unfinished_week_id() is None
+
+
+def test_platforms_run_sequentially_one_fully_before_next(tmp_path):
+    """Operator's rule: finish all 14 on one platform before touching the next."""
+    order = []
+    pipeline, dl_dir = _make_pipeline(tmp_path)
+
+    def track(name, mock):
+        def se(rec):
+            order.append(name)
+            rec.status = PlatformPublicationStatus.SCHEDULED
+            rec.remote_id = f"r_{rec.reel_id}"
+            return rec
+        mock.upload_and_schedule.side_effect = se
+    track("yt", pipeline.yt_publisher)
+    track("tt", pipeline.tt_publisher)
+
+    def ig(**kw):
+        order.append("ig")
+        return (True, {"ok": True, "status": "MEDIA_READY", "media_object_key": "k"}, None)
+    pipeline.cloud_client.upload_media_for_instagram.side_effect = ig
+
+    with _patched_validator():
+        pipeline.run()
+
+    # No interleaving: all 14 yt, then all 14 tt, then all 14 ig.
+    assert order == ["yt"] * 14 + ["tt"] * 14 + ["ig"] * 14
+
+
+def test_stuck_platform_alerts_then_moves_on(tmp_path):
+    """A platform that cannot finish must alert and then hand off to the next one,
+    instead of costing the whole week."""
+    pipeline, dl_dir = _make_pipeline(tmp_path)
+    pipeline.yt_publisher.upload_and_schedule.side_effect = lambda rec: (
+        setattr(rec, "status", PlatformPublicationStatus.ACCOUNT_MISMATCH),
+        setattr(rec, "last_error", "session broken"),
+        rec,
+    )[2]
+
+    sent = []
+    pipeline._send_telegram = lambda text: sent.append(text)
+
+    with _patched_validator():
+        success, results, manifest = pipeline.run()
+
+    assert success is False
+    assert any("YOUTUBE TAKILDI" in t for t in sent)
+    # Handed off despite YouTube being stuck.
+    assert pipeline.tt_publisher.upload_and_schedule.call_count == 14
+    assert pipeline.cloud_client.upload_media_for_instagram.call_count == 14
+
+
+def test_stuck_platform_recovers_within_window(tmp_path):
+    """If the manual fix lands during the hold window, the platform completes normally."""
+    pipeline, dl_dir = _make_pipeline(tmp_path, stuck_wait_minutes=1, stuck_retry_seconds=0)
+    phase_calls = {"n": 0}
+
+    def broken_first_phase_then_fixed(rec):
+        # First pass through the whole platform fails at once (broken session);
+        # by the time the hold window retries, the "operator fix" has landed.
+        if phase_calls["n"] == 0:
+            rec.status = PlatformPublicationStatus.ACCOUNT_MISMATCH
+            rec.last_error = "session broken"
+            return rec
+        rec.status = PlatformPublicationStatus.SCHEDULED
+        rec.remote_id = f"r_{rec.reel_id}"
+        return rec
+    pipeline.yt_publisher.upload_and_schedule.side_effect = broken_first_phase_then_fixed
+
+    original_phase = pipeline._run_youtube_phase
+
+    def counting_phase(manifest):
+        result = original_phase(manifest)
+        phase_calls["n"] += 1   # the fix "arrives" after the first failed pass
+        return result
+    pipeline._run_youtube_phase = counting_phase
+    pipeline._send_telegram = lambda text: None
+
+    with _patched_validator():
+        success, results, manifest = pipeline.run()
+
+    yt = next(r for r in results if r.phase == "YOUTUBE")
+    assert yt.success is True
+    assert phase_calls["n"] >= 2   # failed once, retried inside the hold window

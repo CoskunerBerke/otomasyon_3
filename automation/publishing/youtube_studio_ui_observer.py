@@ -1036,30 +1036,25 @@ class YouTubeStudioUIObserver:
         failure, and dismissing it never advances past schedule mode or clicks any
         immediate-publish control. Bounded to a single detection+click attempt per call.
         """
-        # Scope PAGE-WIDE, not to ytcp-uploads-dialog. This notice is rendered as its own
-        # standalone dialog and typically appears AFTER the final schedule submit, by which
-        # point the uploads-dialog is already gone -- reading text from ytcp-uploads-dialog
-        # therefore threw/missed it, the function returned early, and 'Anladım' was never
-        # clicked, leaving the run blocked until a human clicked it manually (2026-08-17).
-        page_text = ""
-        for scope in ("ytcp-uploads-dialog", "body"):
-            try:
-                page_text = self.page.inner_text(scope).lower()
-                if page_text:
-                    break
-            except Exception:
-                continue
-
-        if not any(marker in page_text for marker in YouTubeStudioSelectors.CONTENT_REVIEW_INFO_TEXT_MARKERS):
-            return
-
+        # Look for the dismiss BUTTON directly instead of gating on surrounding text.
+        #
+        # The previous text-gated version never fired in production: it read
+        # inner_text("ytcp-uploads-dialog") first, that scope was non-empty (the wizard
+        # behind the overlay), so it broke out of the scope loop and never looked at the
+        # body -- and the notice is a separate overlay whose text is NOT inside the
+        # uploads-dialog. The marker was therefore never found and 'Anladım' was never
+        # clicked, blocking every run until a human clicked it by hand.
+        #
+        # aria-label="Anladım"/"Got it" (confirmed against the real DOM) is unambiguous:
+        # it is only ever this dismiss button, never a publish/schedule control, so
+        # clicking it on sight is safe and far more robust than text matching.
         for sel in YouTubeStudioSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=500):
-                    loc.click(timeout=2000)
+                if loc.is_visible(timeout=600):
+                    loc.click(timeout=2500)
                     logger.info("[CONTENT_REVIEW_INFO] Dismissed informational review notice via 'Anladım'/'Got it'.")
-                    time.sleep(0.3)
+                    time.sleep(0.5)
                     return
             except Exception:
                 continue

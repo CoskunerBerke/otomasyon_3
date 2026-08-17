@@ -20,6 +20,7 @@ import hashlib
 import logging
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -103,11 +104,17 @@ class SimpleWeeklyPipeline:
         yt_publisher: Optional[BaseYouTubePublisher] = None,
         tt_publisher: Optional[BaseTikTokPublisher] = None,
         cloud_client: Optional[LocalWorkerCloudClient] = None,
+        stuck_wait_minutes: int = 30,
+        stuck_retry_seconds: int = 300,
     ):
         self.base_dir = (base_dir or Path(".").resolve())
         self.dry_run = dry_run
         self.week_id = week_id
         self.start_date = start_date
+        # How long to hold a stuck platform for a manual fix before moving on, and how
+        # often to retry inside that window. Tests set these to 0 to skip the wait.
+        self.stuck_wait_minutes = stuck_wait_minutes
+        self.stuck_retry_seconds = stuck_retry_seconds
 
         self.batch_repo = BatchRepository(self.base_dir)
         self.state_repo = StateRepository(self.base_dir)
@@ -707,11 +714,12 @@ class SimpleWeeklyPipeline:
 
         reel_ids = manifest.reel_ids()
 
-        # PHASES 3-5: YOUTUBE / TIKTOK / INSTAGRAM.
-        # Once the content is LOCKED the three platforms are independent of each other --
-        # they publish the same 14 videos at the same slots, so a problem on one is no
-        # reason to skip the other two. Only a hard failure (broken session/browser) stops
-        # the platform it happened on; the remaining platforms still run.
+        # PHASES 3-5: one platform fully finished before the next one starts.
+        # If a platform cannot reach 14/14, alert on Telegram and hold for
+        # self.stuck_wait_minutes so the operator can fix it by hand; retry periodically
+        # to pick that fix up, and only move on to the next platform once the window
+        # expires. This is deliberately sequential -- the operator wants to deal with one
+        # platform at a time rather than chase three broken ones at once.
         for platform, phase_fn in (
             ("youtube", self._run_youtube_phase),
             ("tiktok", self._run_tiktok_phase),
@@ -719,7 +727,10 @@ class SimpleWeeklyPipeline:
         ):
             if self.all_platform_done(manifest.week_id, reel_ids, platform):
                 continue
+
             result = phase_fn(manifest)
+            if not self.all_platform_done(manifest.week_id, reel_ids, platform):
+                result = self._hold_for_manual_fix(manifest, platform, phase_fn, result)
             results.append(result)
 
         all_ok = all(r.success for r in results)
@@ -730,6 +741,86 @@ class SimpleWeeklyPipeline:
         self._notify_telegram(manifest, results)
         self._print_status(manifest, results)
         return all_ok, results, manifest
+
+    def _hold_for_manual_fix(
+        self,
+        manifest: BatchManifest,
+        platform: str,
+        phase_fn: Any,
+        last_result: PhaseResult,
+    ) -> PhaseResult:
+        """
+        A platform did not reach 14/14. Alert on Telegram, then hold for
+        stuck_wait_minutes, retrying periodically so a manual fix is picked up as soon as
+        it lands. After the window expires, give up on this platform and let the caller
+        continue to the next one -- a stuck platform must not cost the whole week.
+        """
+        reel_ids = manifest.reel_ids()
+        done = self._platform_done_count(manifest, platform)
+        self._send_telegram(
+            f"Reels AI Factory — {manifest.week_id}\n\n"
+            f"{platform.upper()} TAKILDI: {done}/{len(reel_ids)}\n"
+            f"Sebep: {last_result.message}\n\n"
+            f"{self.stuck_wait_minutes} dk icinde duzeltirsen kaldigi yerden devam eder.\n"
+            f"Duzeltilmezse otomatik olarak diger platforma gecilir."
+        )
+
+        if self.stuck_wait_minutes <= 0:
+            return last_result
+
+        deadline = time.time() + (self.stuck_wait_minutes * 60)
+        logger.warning(
+            f"[{platform.upper()}] {done}/{len(reel_ids)} -- manuel duzeltme icin "
+            f"{self.stuck_wait_minutes} dk bekleniyor. Duzeltilirse otomatik devam eder."
+        )
+
+        while time.time() < deadline:
+            time.sleep(min(self.stuck_retry_seconds, max(1, deadline - time.time())))
+            if self.all_platform_done(manifest.week_id, reel_ids, platform):
+                break
+            logger.info(f"[{platform.upper()}] Yeniden deneniyor...")
+            last_result = phase_fn(manifest)
+            if self.all_platform_done(manifest.week_id, reel_ids, platform):
+                break
+
+        if self.all_platform_done(manifest.week_id, reel_ids, platform):
+            logger.info(f"[{platform.upper()}] Duzeldi, 14/14 tamamlandi.")
+            self._send_telegram(f"Reels AI Factory — {manifest.week_id}\n\n{platform.upper()} duzeldi: 14/14 tamam.")
+            return PhaseResult(True, platform.upper(), f"14/14 {platform} tamamlandı", {"soft_failures": []})
+
+        done = self._platform_done_count(manifest, platform)
+        logger.warning(f"[{platform.upper()}] {done}/{len(reel_ids)} -- sure doldu, sonraki platforma geciliyor.")
+        self._send_telegram(
+            f"Reels AI Factory — {manifest.week_id}\n\n"
+            f"{platform.upper()} {done}/{len(reel_ids)} kaldi, sure doldu.\n"
+            f"Sonraki platforma geciliyor."
+        )
+        return last_result
+
+    def _platform_done_count(self, manifest: BatchManifest, platform: str) -> int:
+        progress = self.batch_repo.load_progress(manifest.week_id)
+        ok = PLATFORM_SUCCESS_STATUSES + (("MEDIA_READY",) if platform == "instagram" else ())
+        return sum(
+            1 for r in manifest.reels
+            if progress.get(r.reel_id, {}).get(platform, {}).get("status") in ok
+        )
+
+    def _send_telegram(self, text: str) -> None:
+        """Best-effort Telegram send. Never raises, never logs the bot token."""
+        try:
+            from automation.cloud.config import CloudConfig
+            from automation.cloud.telegram_bot import TelegramBotClient
+
+            cfg = CloudConfig(self.base_dir)
+            if not cfg.telegram_bot_token or not cfg.telegram_chat_id:
+                logger.info("[TELEGRAM] Token/chat_id yok, bildirim atlandi.")
+                return
+            ok, _mid, err = TelegramBotClient(cfg.telegram_bot_token).send_message(
+                chat_id=cfg.telegram_chat_id, text=text
+            )
+            logger.info("[TELEGRAM] Bildirim gonderildi." if ok else f"[TELEGRAM] Gonderilemedi: {err}")
+        except Exception as e:
+            logger.warning(f"[TELEGRAM] Bildirim hatasi (pipeline etkilenmedi): {e}")
 
     def _notify_telegram(self, manifest: BatchManifest, results: List[PhaseResult]) -> None:
         """
@@ -790,25 +881,68 @@ class SimpleWeeklyPipeline:
         except Exception as e:
             logger.warning(f"[OBSIDIAN] Mirror sync failed (non-fatal): {e}")
 
+    @staticmethod
+    def _ascii_safe(text: str) -> str:
+        """
+        Transliterate Turkish characters for the terminal summary. The Windows console
+        runs cp1254 here, so 'tamamlandı' printed as 'tamamland?' -- unreadable in the one
+        place the operator actually looks. Log files keep the original Turkish.
+        """
+        table = str.maketrans({
+            "ı": "i", "İ": "I", "ş": "s", "Ş": "S", "ğ": "g", "Ğ": "G",
+            "ü": "u", "Ü": "U", "ö": "o", "Ö": "O", "ç": "c", "Ç": "C",
+        })
+        return str(text).translate(table)
+
     def _print_status(self, manifest: BatchManifest, results: List[PhaseResult]) -> None:
-        print("=" * 60)
-        print(f"REELS AI FACTORY -- {manifest.week_id}")
-        print("=" * 60)
+        p = lambda s="": print(self._ascii_safe(s))
+        total = len(manifest.reels)
         gen_complete = sum(1 for r in manifest.reels if r.generation_status == "COMPLETE")
-        print(f"PHASE 1 -- GENERATION")
-        print(f"Videos: {gen_complete}/{len(manifest.reels)}" + (" [OK]" if gen_complete == len(manifest.reels) else ""))
-        print(f"Manifest status: {manifest.status}")
-        print()
-        for r in results:
-            marker = "[OK]" if r.success else "[STOPPED]"
-            print(f"{r.phase}: {r.message} {marker}")
-            if not r.success and r.detail.get("failed_reel"):
-                print(f"Current: {r.detail['failed_reel']}")
-        print()
-        if any(not r.success for r in results):
-            print("Pipeline stopped safely.")
-            print("Resume command: HAFTALIK_14_REEL_URET_VE_PLANLA.bat")
-        print("=" * 60)
+        progress = self.batch_repo.load_progress(manifest.week_id)
+
+        def _done(platform: str) -> int:
+            ok = PLATFORM_SUCCESS_STATUSES + (("MEDIA_READY",) if platform == "instagram" else ())
+            return sum(
+                1 for r in manifest.reels
+                if progress.get(r.reel_id, {}).get(platform, {}).get("status") in ok
+            )
+
+        p("=" * 60)
+        p(f"REELS AI FACTORY -- {manifest.week_id}")
+        p("=" * 60)
+        p(f"Uretim    : {gen_complete}/{total}" + ("  [OK]" if gen_complete == total else ""))
+        p(f"Manifest  : {manifest.status}")
+        p()
+        platform_counts = {}
+        for label, key in (("YouTube  ", "youtube"), ("TikTok   ", "tiktok"), ("Instagram", "instagram")):
+            n = _done(key)
+            platform_counts[key] = n
+            p(f"{label} : {n}/{total}" + ("  [OK]" if n == total else ""))
+        p()
+
+        failed = [r for r in results if not r.success]
+        for r in failed:
+            p(f"{r.phase}: {r.message}")
+            if r.detail.get("failed_reel"):
+                p(f"   -> {r.detail['failed_reel']}")
+            for soft in r.detail.get("soft_failures", []):
+                p(f"   -> {soft} (gonderildi, uzaktan dogrulanamadi)")
+
+        # The closing line is driven by the real per-platform counts, not just by whether
+        # the phases that happened to run reported success -- otherwise a run that skipped
+        # work, or a status preview, would claim TAMAMLANDI while platforms sit at 1/14.
+        everything_done = (
+            gen_complete == total
+            and manifest.status == "LOCKED"
+            and all(c == total for c in platform_counts.values())
+        )
+        p()
+        if everything_done:
+            p("TAMAMLANDI - tum platformlar hazir.")
+        else:
+            p("Devam etmek icin ayni komutu tekrar calistir:")
+            p("  BASLAT.bat")
+        p("=" * 60)
 
 
 def main():

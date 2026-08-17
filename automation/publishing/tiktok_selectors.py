@@ -211,6 +211,16 @@ class TikTokSelectors:
         "button:has-text('İzin ver')"
     ]
 
+    # Purely informational "we're still reviewing your content" notice, same class of
+    # blocker as YouTube's 'Anladım' overlay. Dismissing it is never a publish action --
+    # these labels only ever acknowledge a notice. Kural 31: 2 semantic strategies.
+    # NOTE: deliberately excludes anything resembling "Hemen paylaş"/"Post now".
+    CONTENT_REVIEW_INFO_DISMISS_BUTTONS: List[str] = [
+        "button[aria-label='Anladım'], button[aria-label='Got it'], "
+        "button[aria-label='OK'], button[aria-label='Tamam']",
+        "div[role='dialog'] button:has-text('Anladım'), div[role='dialog'] button:has-text('Got it')",
+    ]
+
     # 8. Success Indicators & Remote Posts Management
     SCHEDULE_SUCCESS_INDICATORS: List[str] = [
         "div:has-text('Your video has been scheduled')",
