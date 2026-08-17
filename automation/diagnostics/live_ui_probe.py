@@ -91,12 +91,12 @@ def probe_youtube():
             for sel in edit_btn_cands:
                 loc = page.locator(sel).first
                 try:
-                    if loc.is_visible(timeout=800):
-                        edit_btn = loc
-                        results["edit_draft_button_found"] = True
-                        results["edit_draft_button_text"] = loc.inner_text().strip()
-                        print(f"[PASS] Found 'Taslağı düzenle' button via '{sel}': '{results['edit_draft_button_text']}'")
-                        break
+                    loc.wait_for(state="visible", timeout=800)
+                    edit_btn = loc
+                    results["edit_draft_button_found"] = True
+                    results["edit_draft_button_text"] = loc.inner_text().strip()
+                    print(f"[PASS] Found 'Taslağı düzenle' button via '{sel}': '{results['edit_draft_button_text']}'")
+                    break
                 except Exception:
                     pass
 
