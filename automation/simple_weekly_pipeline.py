@@ -176,8 +176,43 @@ class SimpleWeeklyPipeline:
                 used.add(candidate)
         return allocated
 
+    def _is_batch_finished(self, manifest: BatchManifest) -> bool:
+        """A batch is done only when it is LOCKED and all three platforms are complete."""
+        if manifest.status != "LOCKED" or not self.all_generated(manifest):
+            return False
+        reel_ids = manifest.reel_ids()
+        return all(
+            self.all_platform_done(manifest.week_id, reel_ids, p)
+            for p in ("youtube", "tiktok", "instagram")
+        )
+
+    def _find_unfinished_week_id(self) -> Optional[str]:
+        """
+        Most recent batch that still has work left, or None if everything is finished.
+
+        Without this, running the BAT with no --week-id would compute *next* week and
+        open a brand new DRAFT, abandoning an in-flight batch and re-spending real Flow
+        credits generating 14 fresh videos. Resuming where the work actually stopped is
+        the whole point of the single-command design.
+        """
+        if not self.batch_repo.batches_dir.exists():
+            return None
+        for week_dir in sorted(self.batch_repo.batches_dir.iterdir(), reverse=True):
+            if not week_dir.is_dir():
+                continue
+            manifest = self.batch_repo.load_manifest(week_dir.name)
+            if manifest and not self._is_batch_finished(manifest):
+                return manifest.week_id
+        return None
+
     def _get_or_create_manifest(self) -> BatchManifest:
         """Loads the existing manifest for this week, or creates a fresh DRAFT one."""
+        if not self.week_id:
+            resumable = self._find_unfinished_week_id()
+            if resumable:
+                logger.info(f"[PLAN] Yarim kalmis batch bulundu, devam ediliyor: {resumable}")
+                self.week_id = resumable
+
         start_date = self.start_date or calculate_next_safe_week_start()
         week_id = self.week_id or generate_week_id(start_date)
         self.week_id = week_id

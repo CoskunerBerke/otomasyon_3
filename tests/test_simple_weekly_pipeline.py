@@ -716,3 +716,43 @@ def test_telegram_failure_never_breaks_pipeline(tmp_path):
         success, results, manifest = pipeline.run()
 
     assert success is True
+
+
+def test_parameterless_run_resumes_unfinished_batch(tmp_path):
+    """No --week-id must resume an in-flight batch, never open a new week and
+    re-spend Flow credits on 14 fresh videos."""
+    pipeline, dl_dir = _make_pipeline(tmp_path, week_id="2026-W34")
+    n = {"i": 0}
+
+    def stop_after_two(rec):
+        n["i"] += 1
+        if n["i"] > 2:
+            rec.status = PlatformPublicationStatus.ACCOUNT_MISMATCH
+            rec.last_error = "session broken"
+            return rec
+        rec.status = PlatformPublicationStatus.SCHEDULED
+        rec.remote_id = f"remote_{rec.reel_id}"
+        return rec
+    pipeline.yt_publisher.upload_and_schedule.side_effect = stop_after_two
+
+    with _patched_validator():
+        pipeline.run()
+
+    # Fresh, parameterless pipeline (exactly what the .bat launches).
+    resumed, _dl = _make_pipeline(tmp_path, week_id=None)
+    assert resumed._find_unfinished_week_id() == "2026-W34"
+
+    manifest = resumed._get_or_create_manifest()
+    assert manifest.week_id == "2026-W34"
+    assert manifest.status == "LOCKED"
+    resumed.flow_provider.generate_single_video.assert_not_called()
+
+
+def test_finished_batch_is_not_resumed(tmp_path):
+    """A fully completed week must not be picked up again as 'unfinished'."""
+    pipeline, success, results, manifest = _run_full_happy_path(tmp_path, week_id="2026-W34")
+    assert success is True
+
+    fresh, _dl = _make_pipeline(tmp_path, week_id=None)
+    assert fresh._is_batch_finished(manifest) is True
+    assert fresh._find_unfinished_week_id() is None
