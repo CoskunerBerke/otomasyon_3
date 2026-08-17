@@ -330,16 +330,35 @@ class InstagramWebObserver:
         except Exception as e:
             return False, f"DATE_PICKER_OPEN_FAILED: {e}"
 
+        # Navigate by reading the month header rather than clicking hopefully: the header
+        # states exactly which month is displayed, so the number of hops is known instead
+        # of guessed, and a stuck header is detected immediately.
         for _hop in range(max_month_hops + 1):
-            if self._click_day_cell(target.day):
-                time.sleep(0.8)
-                if self.verify_date(target):
-                    logger.info(f"[IG WEB] Tarih secildi: {self.format_tr_date(target)}")
-                    return True, "DATE_SELECTED"
-                # Right number, wrong month -- keep advancing.
-            if not self._click(InstagramWebSelectors.NEXT_MONTH_BUTTONS, "sonraki ay", timeout_ms=1200):
+            shown = self.read_displayed_month()
+            if shown is None:
+                logger.warning("[IG WEB] Ay basligi okunamadi.")
                 break
+
+            if shown == (target.year, target.month):
+                if self._click_day_cell(target.day):
+                    time.sleep(0.8)
+                    if self.verify_date(target):
+                        logger.info(f"[IG WEB] Tarih secildi: {self.format_tr_date(target)}")
+                        return True, "DATE_SELECTED"
+                logger.warning(f"[IG WEB] {target.day} gunu secilemedi (dolu/gecmis olabilir).")
+                break
+
+            if (target.year, target.month) < shown:
+                if not self._click(InstagramWebSelectors.PREV_MONTH_BUTTONS, "onceki ay", timeout_ms=1200):
+                    break
+            else:
+                if not self._click(InstagramWebSelectors.NEXT_MONTH_BUTTONS, "sonraki ay", timeout_ms=1200):
+                    break
             time.sleep(0.8)
+
+            if self.read_displayed_month() == shown:
+                logger.warning("[IG WEB] Ay degismedi, navigasyon durdu.")
+                break
 
         self.capture_error_snapshot("date_cell_not_resolved")
         logger.error("=" * 50)
@@ -351,12 +370,31 @@ class InstagramWebObserver:
         logger.error("=" * 50)
         return False, "DATE_CELL_NOT_RESOLVED"
 
-    def _click_day_cell(self, day: int) -> bool:
-        """Click the calendar cell whose visible text is exactly `day`.
+    def read_displayed_month(self) -> Optional[Tuple[int, int]]:
+        """Parse the calendar header ("Ağustos 2026") into (year, month)."""
+        for sel in InstagramWebSelectors.MONTH_HEADER:
+            try:
+                loc = self.page.locator(sel).first
+                if not loc.is_visible(timeout=1200):
+                    continue
+                text = (loc.inner_text() or "").strip()
+            except Exception:
+                continue
 
-        Resolved by content instead of a captured DOM shape. Safety does not depend on
-        picking the right element: select_date() verifies the date button afterwards, so a
-        wrong click surfaces as a failure rather than a wrong scheduled date.
+            for num, name in InstagramWebSelectors.TR_MONTHS_FULL.items():
+                if name.lower() in text.lower():
+                    for token in text.replace(name, " ").split():
+                        if token.isdigit() and len(token) == 4:
+                            return int(token), num
+        return None
+
+    def _click_day_cell(self, day: int) -> bool:
+        """Click the selectable grid cell for `day` in the displayed month.
+
+        aria-disabled='false' is essential, not cosmetic: the grid also renders trailing
+        days of the previous month and leading days of the next one (all disabled), so a
+        text-only match for "1" would land on the following month's 1st. Past days of the
+        current month are disabled the same way, so an unbookable day simply won't match.
         """
         for template in InstagramWebSelectors.DAY_CELL_TEMPLATES:
             sel = template.format(day=day)
@@ -364,11 +402,6 @@ class InstagramWebObserver:
                 loc = self.page.locator(sel).first
                 if not loc.is_visible(timeout=1000):
                     continue
-                try:
-                    if not loc.is_enabled():
-                        continue
-                except Exception:
-                    pass   # plain spans have no enabled state
                 loc.click(timeout=2500)
                 return True
             except Exception:

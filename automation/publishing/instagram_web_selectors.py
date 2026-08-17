@@ -119,46 +119,48 @@ class InstagramWebSelectors:
     DATE_ROW_LABELS: List[str] = ["Tarih", "Date"]
     TIME_ROW_LABELS: List[str] = ["Saat", "Time"]
 
-    # --- Date picker dialog ------------------------------------------------
-    # Opened by clicking the date button (its aria-expanded flips to "true").
-    # Written generically on purpose: this project runs indefinitely, so day selection
-    # must work for any month and year, including rolling into the next month, rather
-    # than assuming the current one.
+    # --- Date picker dialog (confirmed against the real DOM, 2026-08-17) ---------
+    # Structure:
+    #   <button aria-label="Previous month" disabled>   (disabled at the current month)
+    #   <span>Ağustos 2026</span>                        (month header)
+    #   <button aria-label="Next month">
+    #   <div role="grid">
+    #     <button role="gridcell" aria-disabled="true"  tabindex="-1"><span>26</span>  <- prev month
+    #     <button role="gridcell" aria-disabled="false" aria-selected="true"><span>17</span>  <- today
+    #     <button role="gridcell" aria-disabled="false"><span>18</span>
+    #     <button role="gridcell" aria-disabled="true"><span>1</span>   <- NEXT month
     #
-    # The day-cell shape has NOT been confirmed against the real DOM yet, so these are
-    # candidate strategies only; when none resolve, the flow reports NEEDS_USER_HTML with
-    # the exact element needed instead of guessing and mis-clicking a date.
-    DATE_PICKER_DIALOGS: List[str] = [
-        "div[role='dialog']:has(div[role='button']):below(:text('Tarih'))",
-        "div[role='dialog']",
+    # The grid deliberately includes trailing days of the previous month and leading days
+    # of the next one, all aria-disabled. Matching a day by text alone would therefore hit
+    # September 1st when asked for "1", so aria-disabled='false' is part of the selector,
+    # not an optimisation. Past days of the current month are disabled the same way.
+    MONTH_HEADER: List[str] = [
+        "div[role='grid'] >> xpath=preceding-sibling::div[1]//span",
+        "span:right-of(button[aria-label='Previous month'])",
     ]
 
-    # Day cells are resolved by CONTENT rather than by a captured shape: inside the open
-    # calendar, find the element whose visible text is exactly the day number. This avoids
-    # needing a DOM capture of Instagram's calendar (asking the operator to paste script
-    # into their own Instagram console is the exact pattern Instagram's self-XSS warning
-    # exists to prevent, so it is not something to teach them to do).
-    #
-    # Clicking by text alone could in principle hit the wrong element, so correctness does
-    # not rest on the selector: select_date() re-reads the date button afterwards and only
-    # reports success if it actually shows the target date. A wrong or missed click fails
-    # loudly instead of silently scheduling the wrong day.
+    # Only selectable cells: excludes past days and adjacent-month spillover.
     DAY_CELL_TEMPLATES: List[str] = [
-        "div[role='dialog'] div[role='button']:text-is('{day}')",
-        "div[role='dialog'] :text-is('{day}')",
+        "button[role='gridcell'][aria-disabled='false']:has(span:text-is('{day}'))",
+        "button[role='gridcell'][aria-disabled='false']:text-is('{day}')",
     ]
 
-    # Month navigation, for slots that fall past the end of the displayed month.
+    SELECTED_DAY_CELL: str = "button[role='gridcell'][aria-selected='true']"
+
+    # aria-label stays English even in the Turkish UI.
     NEXT_MONTH_BUTTONS: List[str] = [
-        "div[role='dialog'] div[role='button'][aria-label*='sonraki' i], "
-        "div[role='dialog'] div[role='button'][aria-label*='next' i]",
-        "div[role='dialog'] button[aria-label*='sonraki' i], "
-        "div[role='dialog'] button[aria-label*='next' i]",
+        "button[aria-label='Next month']",
+        "button[aria-label*='next month' i], button[aria-label*='sonraki ay' i]",
     ]
 
     PREV_MONTH_BUTTONS: List[str] = [
-        "div[role='dialog'] div[role='button'][aria-label*='önceki' i], "
-        "div[role='dialog'] div[role='button'][aria-label*='previous' i]",
-        "div[role='dialog'] button[aria-label*='önceki' i], "
-        "div[role='dialog'] button[aria-label*='previous' i]",
+        "button[aria-label='Previous month']",
+        "button[aria-label*='previous month' i], button[aria-label*='önceki ay' i]",
     ]
+
+    # Header renders the FULL month name ("Ağustos 2026"), unlike the date button's
+    # abbreviation ("17 Ağu 2026 Pzt").
+    TR_MONTHS_FULL = {
+        1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran",
+        7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık",
+    }
