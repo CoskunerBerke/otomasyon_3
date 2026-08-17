@@ -277,6 +277,8 @@ class SegmentPlanner:
             f"",
             f"Visual style: premium cinematic 3D realism, high-end architectural visualization, physically believable step-by-step construction, smooth continuous transformation, precise geometry, realistic materials.",
             f"",
+            f"Audio: natural ambient environmental sound for {env} (wind, birds, distant water, or site ambience as fitting), layered with satisfying tactile early-construction sound effects (earth moving, foundation pouring, first structural pieces settling into place) precisely synchronized to the on-screen action. No dialogue, no voiceover, no spoken words, no lyrics.",
+            f"",
             f"Negative prompt / Exclusions: {negative_str}.",
             f"",
             f"Aspect ratio: 9:16 vertical. Duration: {duration_per_segment} seconds. Optimized for Instagram Reels, TikTok and YouTube Shorts."
@@ -325,6 +327,8 @@ class SegmentPlanner:
             f"",
             f"Visual style: premium cinematic 3D realism, high-end architectural visualization, physically believable step-by-step construction, smooth continuous transformation, precise geometry, realistic materials.",
             f"",
+            f"Audio: continuation of the same ambient soundscape from before, now layered with heavier, satisfying mechanical and structural sound effects (steel assembly, glass panels, concrete, cranes or lifts as fitting) precisely synchronized to the on-screen construction. No dialogue, no voiceover, no spoken words, no lyrics.",
+            f"",
             f"Negative prompt / Exclusions: {negative_str}.",
             f"",
             f"Aspect ratio: 9:16 vertical. Duration: {duration_per_segment} seconds. Optimized for Instagram Reels, TikTok and YouTube Shorts."
@@ -368,6 +372,8 @@ class SegmentPlanner:
             f"Do not spend the full segment showing a static finished building.",
             f"",
             f"Visual style: premium cinematic 3D realism, high-end architectural visualization, smooth continuous transformation, majestic cinematic conclusion.",
+            f"",
+            f"Audio: satisfying finishing sound effects (water filling, lighting activating, final materials settling into place) synchronized to the on-screen action for the first 6-7 seconds, building into a subtle, non-lyrical cinematic orchestral swell that peaks precisely with the final reveal. No dialogue, no voiceover, no spoken words, no lyrics.",
             f"",
             f"Negative prompt / Exclusions: {negative_str}.",
             f"",

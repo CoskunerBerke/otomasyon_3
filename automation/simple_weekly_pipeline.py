@@ -319,7 +319,7 @@ class SimpleWeeklyPipeline:
 
     def _run_generate_phase(self, manifest: BatchManifest) -> PhaseResult:
         self._init_flow_provider_if_needed()
-        validator = VideoValidator(reject_wrong_ratio=True, audio_enabled=False)
+        validator = VideoValidator(reject_wrong_ratio=True, audio_enabled=self.app_config.audio_enabled)
 
         for reel in manifest.reels:
             if reel.generation_status == "COMPLETE":

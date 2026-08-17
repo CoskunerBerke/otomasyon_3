@@ -1,5 +1,6 @@
 """
-Comprehensive Quality Control Validator and Audio Stripper.
+Comprehensive Quality Control Validator. Optionally strips audio tracks
+(controlled by audio_enabled) and always applies +faststart.
 """
 import subprocess
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ class QCResult:
     metadata: Optional[VideoMetadata] = None
 
 class VideoValidator:
-    """Validates video format, aspect ratio, motion, and strips audio."""
+    """Validates video format, aspect ratio, and motion; strips audio unless audio_enabled."""
 
     def __init__(self, reject_wrong_ratio: bool = True, audio_enabled: bool = False):
         self.reject_wrong_ratio = reject_wrong_ratio
@@ -97,25 +98,26 @@ class VideoValidator:
                 metadata=meta
             )
 
-        # 4. Post-processing: Audio Stripping & Faststart
+        # 4. Post-processing: Audio Handling & Faststart
         target_dir = output_dir or input_video.parent
         target_dir.mkdir(parents=True, exist_ok=True)
         clean_video_path = target_dir / f"clean_{input_video.name}"
 
-        # FFmpeg command: copy video codec, strip audio (-an), add faststart for instant streaming
+        should_strip_audio = not self.audio_enabled
+        # FFmpeg command: copy video/audio codecs, add faststart for instant streaming.
+        # Audio is stripped with -an only when audio_enabled is False.
         cmd = [
             "ffmpeg",
             "-y",
             "-i", str(input_video),
             "-c:v", "copy",
-            "-an",
-            "-movflags", "+faststart",
-            str(clean_video_path)
         ]
+        cmd += ["-an"] if should_strip_audio else ["-c:a", "copy"]
+        cmd += ["-movflags", "+faststart", str(clean_video_path)]
 
         try:
             subprocess.run(cmd, capture_output=True, check=True)
-            audio_stripped = meta.has_audio
+            audio_stripped = meta.has_audio and should_strip_audio
         except Exception as e:
             # Fallback if faststart/copy failed: keep original
             clean_video_path = input_video

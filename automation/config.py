@@ -103,7 +103,7 @@ class AppConfig:
     image_model: str = "Nano Banana 2"
     approval_before_generation: str = "never"
     notifications_enabled: bool = True
-    audio_enabled: bool = False
+    audio_enabled: bool = True
     generation_timeout_minutes: int = 20
     max_retries_per_video: int = 1
     browser_headless: bool = False
@@ -271,7 +271,7 @@ def load_config(
         image_model=data.get("image_model", "Nano Banana 2"),
         approval_before_generation=data.get("approval_before_generation", "never"),
         notifications_enabled=data.get("notifications_enabled", True),
-        audio_enabled=data.get("audio_enabled", False),
+        audio_enabled=data.get("audio_enabled", True),
         generation_timeout_minutes=data.get("generation_timeout_minutes", 20),
         max_retries_per_video=min(data.get("max_retries_per_video", 1), MAX_RETRIES_PER_VIDEO_LIMIT),
         browser_headless=data.get("browser_headless", False),

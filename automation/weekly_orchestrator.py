@@ -411,7 +411,7 @@ class WeeklyOrchestrator:
             past_history.append({"id": r.reel_id, "title": r.title, "category": r.content_mode})
 
         plans = content_engine.generate_next_reels(count=needed, past_records=past_history, duration_seconds=30)
-        validator = VideoValidator(reject_wrong_ratio=True, audio_enabled=False)
+        validator = VideoValidator(reject_wrong_ratio=True, audio_enabled=self.app_config.audio_enabled)
 
         provenance_source = (
             ReelProvenance.MOCK_TEST_PROVIDER.value

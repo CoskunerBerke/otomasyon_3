@@ -132,8 +132,6 @@ def is_v3_publishing_eligible(reel_meta: Dict[str, Any], check_ffprobe: bool = T
                     return False, f"Actual video duration is {meta.duration_seconds:.1f}s (Expected 29.0-31.5s)"
                 if not meta.is_vertical_9_16:
                     return False, f"Video is not 9:16 vertical (Aspect ratio: {meta.aspect_ratio})"
-                if meta.has_audio:
-                    return False, f"Video contains audio stream (Silent video required)"
             else:
                 # If ffprobe returns 0s (e.g. non-media raw bytes in tests), check note metadata
                 note_dur = float(reel_meta.get("duration", reel_meta.get("duration_seconds", reel_meta.get("final_duration_seconds", 30))))

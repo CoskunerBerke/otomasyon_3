@@ -19,7 +19,7 @@
   "image_outputs": 2,
   "image_model": "Nano Banana 2",
   "approval_before_generation": "never",
-  "audio_enabled": false,
+  "audio_enabled": true,
   "generation_timeout_minutes": 20,
   "max_retries_per_video": 1,
   "browser_headless": false,

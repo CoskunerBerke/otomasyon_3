@@ -1,7 +1,8 @@
 """
 Video Concatenator for assembling 3x10s segments into a single 30s final Reel.
-Uses FFmpeg concat demuxer with fallback to filter_complex concat, stripping audio
-and normalizing resolution & framerate for seamless playback.
+Uses FFmpeg concat demuxer with fallback to filter_complex concat, preserving each
+segment's audio track when every segment has one, and normalizing resolution &
+framerate for seamless playback.
 """
 import subprocess
 import shutil
@@ -15,6 +16,19 @@ class VideoConcatenator:
         self.workspace_dir = Path(workspace_dir).resolve() if workspace_dir else Path("workspace/segments").resolve()
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
+    def _all_segments_have_audio(self, segment_paths: List[Path]) -> bool:
+        """
+        Probes each segment for an audio stream. Audio is only preserved through
+        concatenation when EVERY segment has one -- the concat demuxer requires
+        uniform stream layouts across inputs, and a mixed silent/audio set would
+        desync or corrupt the output.
+        """
+        try:
+            from .ffprobe import inspect_video
+            return all(inspect_video(Path(p)).has_audio for p in segment_paths)
+        except Exception:
+            return False
+
     def concatenate_segments(
         self,
         segment_paths: List[Path],
@@ -23,7 +37,7 @@ class VideoConcatenator:
     ) -> Path:
         """
         Concatenate segment files in given order (segment 1 -> 2 -> 3).
-        Produces clean, silent 30s H.264 MP4.
+        Produces a clean 30s H.264 MP4, with audio preserved when every segment has it.
         """
         if not segment_paths:
             raise ValueError("No segment paths provided for concatenation.")
@@ -36,21 +50,23 @@ class VideoConcatenator:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+        preserve_audio = self._all_segments_have_audio(segment_paths)
 
         # Prepare concat list file
         concat_txt = output_path.parent / f"concat_{reel_id or output_path.stem}.txt"
         lines = [f"file '{Path(p).resolve().as_posix()}'" for p in segment_paths]
         concat_txt.write_text("\n".join(lines), encoding="utf-8")
 
-        # Method 1: Concat demuxer with re-encode to guarantee sync and strip audio
+        # Method 1: Concat demuxer with re-encode to guarantee sync
+        audio_args = ["-c:a", "aac", "-b:a", "128k"] if preserve_audio else ["-an"]
         cmd = [
             ffmpeg_bin,
             "-y",
             "-f", "concat",
             "-safe", "0",
             "-i", str(concat_txt),
-            "-an",
             "-c:v", "libx264",
+            *audio_args,
             "-pix_fmt", "yuv420p",
             "-r", "30",
             str(output_path)
@@ -61,20 +77,28 @@ class VideoConcatenator:
             if not output_path.exists() or output_path.stat().st_size < 10000:
                 # Method 2: Filter complex fallback
                 inputs = []
-                filter_ins = ""
-                for idx, p in enumerate(segment_paths):
+                for p in segment_paths:
                     inputs.extend(["-i", str(Path(p).resolve())])
-                    filter_ins += f"[{idx}:v]"
 
-                filter_complex = f"{filter_ins}concat=n={len(segment_paths)}:v=1:a=0[outv]"
+                if preserve_audio:
+                    filter_ins = "".join(f"[{idx}:v][{idx}:a]" for idx in range(len(segment_paths)))
+                    filter_complex = f"{filter_ins}concat=n={len(segment_paths)}:v=1:a=1[outv][outa]"
+                    map_args = ["-map", "[outv]", "-map", "[outa]"]
+                    fallback_audio_args = ["-c:a", "aac", "-b:a", "128k"]
+                else:
+                    filter_ins = "".join(f"[{idx}:v]" for idx in range(len(segment_paths)))
+                    filter_complex = f"{filter_ins}concat=n={len(segment_paths)}:v=1:a=0[outv]"
+                    map_args = ["-map", "[outv]"]
+                    fallback_audio_args = ["-an"]
+
                 fallback_cmd = [
                     ffmpeg_bin,
                     "-y",
                     *inputs,
                     "-filter_complex", filter_complex,
-                    "-map", "[outv]",
-                    "-an",
+                    *map_args,
                     "-c:v", "libx264",
+                    *fallback_audio_args,
                     "-pix_fmt", "yuv420p",
                     "-r", "30",
                     str(output_path)
