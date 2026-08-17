@@ -1799,7 +1799,8 @@ class TikTokUIObserver:
     def verify_remote_scheduled_status(
         self,
         expected_title: str = "",
-        expected_date_str: str = ""
+        expected_date_str: str = "",
+        expected_time_str: str = ""
     ) -> Tuple[bool, str]:
         """
         Conservative remote verification.
@@ -1835,6 +1836,14 @@ class TikTokUIObserver:
                 "zamanlandı",
             )
         )
+
+        # TikTok Studio's content list does not print the word "Planlandı" at all -- a
+        # scheduled post is shown as a clock badge with its slot, e.g. "17 Ağu, 19:30"
+        # (confirmed against the operator's Gönderiler screenshot). Requiring the word
+        # therefore failed for every correctly scheduled Reel, so the slot time counts as
+        # a scheduled-state marker in its own right.
+        if not scheduled_marker and expected_time_str:
+            scheduled_marker = expected_time_str in page_text
 
         title_tokens = [
             t.lower()

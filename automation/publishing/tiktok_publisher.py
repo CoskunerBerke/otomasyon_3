@@ -148,8 +148,17 @@ class TikTokPublisher(BaseTikTokPublisher):
                     return record
 
                 # 10. Secondary remote verification (do not fake success).
+                # Pass the slot time: TikTok marks a scheduled post with a "17 Ağu, 19:30"
+                # badge rather than the word "Planlandı", so without it verification can
+                # never confirm a correctly scheduled Reel.
+                _sched_time = ""
+                try:
+                    _sched_time = str(record.scheduled_at_local).split()[1][:5]
+                except Exception:
+                    _sched_time = ""
                 remote_ok, remote_msg = observer.verify_remote_scheduled_status(
-                    expected_title=record.title
+                    expected_title=record.title,
+                    expected_time_str=_sched_time
                 )
                 if not remote_ok:
                     logger.warning(
