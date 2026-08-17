@@ -10,6 +10,7 @@ import logging
 import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("ReelsAIFactory.InstagramCloudWorker")
 
@@ -56,12 +57,25 @@ class InstagramCloudWorker:
             )
             self.client = InstagramAPIClient(ig_cfg)
 
+    def _local_now(self) -> datetime.datetime:
+        """
+        Tz-naive 'now' in the configured app timezone (Europe/Istanbul), matching the
+        wall-clock convention of scheduled_at_local. Railway containers run on UTC system
+        clocks, so a bare datetime.datetime.now() here would compare UTC time against
+        Istanbul-local schedule times and delay every due-job check by the UTC offset.
+        """
+        try:
+            tz = ZoneInfo(self.config.timezone_str)
+        except Exception:
+            tz = datetime.timezone(datetime.timedelta(hours=3))
+        return datetime.datetime.now(tz).replace(tzinfo=None)
+
     def process_due_jobs(self, worker_id: str = "cloud_worker_1") -> int:
         """
         Scans for due jobs within the preparation window and processes them.
         Returns the number of jobs processed.
         """
-        now_dt = datetime.datetime.now()
+        now_dt = self._local_now()
         # Look ahead by prepare_minutes
         prepare_cutoff = (now_dt + datetime.timedelta(minutes=self.config.instagram_prepare_minutes_before)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -207,7 +221,7 @@ class InstagramCloudWorker:
                 return False
 
             job.remote_media_id = str(media_id).strip()
-            job.published_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            job.published_at = self._local_now().strftime("%Y-%m-%d %H:%M:%S")
 
             # 7. Remote Verification
             time.sleep(1.5)
@@ -218,7 +232,7 @@ class InstagramCloudWorker:
             else:
                 job.status = InstagramJobStatus.PUBLISHED
 
-            job.updated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            job.updated_at = self._local_now().strftime("%Y-%m-%d %H:%M:%S")
             self.db.save_instagram_job(job)
             logger.info(f"[IG WORKER] Job {job.job_id} successfully published! Media ID: {job.remote_media_id}")
             return True
