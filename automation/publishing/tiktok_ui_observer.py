@@ -42,11 +42,11 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=600):
-                    loc.click(timeout=2500)
-                    logger.info("[TIKTOK] Bilgilendirme penceresi 'Anladım' ile kapatildi.")
-                    time.sleep(0.5)
-                    return
+                loc.wait_for(state="visible", timeout=600)
+                loc.click(timeout=2500)
+                logger.info("[TIKTOK] Bilgilendirme penceresi 'Anladım' ile kapatildi.")
+                time.sleep(0.5)
+                return
             except Exception:
                 continue
 
@@ -60,8 +60,8 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.LOGIN_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    return False
+                loc.wait_for(state="visible", timeout=1000)
+                return False
             except Exception:
                 pass
 
@@ -87,12 +87,12 @@ class TikTokUIObserver:
         for sel in username_selectors:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    text = loc.inner_text().strip() if not loc.get_attribute("href") else loc.get_attribute("href")
-                    if text:
-                        detected_username = text.split("/")[-1].split("?")[0].lstrip("@").strip()
-                        if detected_username:
-                            break
+                loc.wait_for(state="visible", timeout=1000)
+                text = loc.inner_text().strip() if not loc.get_attribute("href") else loc.get_attribute("href")
+                if text:
+                    detected_username = text.split("/")[-1].split("?")[0].lstrip("@").strip()
+                    if detected_username:
+                        break
             except Exception:
                 pass
 
@@ -124,9 +124,12 @@ class TikTokUIObserver:
             is_uploaded = False
             for sel in TikTokSelectors.UPLOAD_COMPLETE_INDICATORS:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=500):
-                    is_uploaded = True
-                    break
+                try:
+                    loc.wait_for(state="visible", timeout=500)
+                except Exception:
+                    continue
+                is_uploaded = True
+                break
 
             if not is_uploaded:
                 return False
@@ -160,8 +163,7 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.CONTENT_CHECK_MODAL_CANCEL_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if not loc.is_visible(timeout=800):
-                    continue
+                loc.wait_for(state="visible", timeout=800)
 
                 label = ""
                 try:
@@ -207,7 +209,8 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.UNSAVED_DRAFT_DISCARD_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=800) and loc.is_enabled():
+                loc.wait_for(state="visible", timeout=800)
+                if loc.is_enabled():
                     loc.click(timeout=2500)
                     logger.info("[TIKTOK] Kaydedilmemis duzenleme bandi 'Sil' ile temizlendi.")
                     time.sleep(1.5)
@@ -244,7 +247,8 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.SELECT_VIDEO_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1500) and loc.is_enabled():
+                loc.wait_for(state="visible", timeout=1500)
+                if loc.is_enabled():
                     logger.info(f"Triggering file chooser on TikTok via button: {sel}")
                     with self.page.expect_file_chooser(timeout=6000) as fc_info:
                         loc.click()
@@ -264,16 +268,16 @@ class TikTokUIObserver:
             for sel in TikTokSelectors.UPLOAD_COMPLETE_INDICATORS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000):
-                        return True
+                    loc.wait_for(state="visible", timeout=1000)
+                    return True
                 except Exception:
                     pass
 
             for sel in TikTokSelectors.CAPTION_EDITORS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000):
-                        return True
+                    loc.wait_for(state="visible", timeout=1000)
+                    return True
                 except Exception:
                     pass
 
@@ -291,9 +295,9 @@ class TikTokUIObserver:
         for ov_sel in TikTokSelectors.JOYRIDE_OVERLAYS:
             try:
                 loc = self.page.locator(ov_sel).first
-                if loc.is_visible(timeout=500):
-                    is_overlay_present = True
-                    break
+                loc.wait_for(state="visible", timeout=500)
+                is_overlay_present = True
+                break
             except Exception:
                 pass
 
@@ -308,9 +312,9 @@ class TikTokUIObserver:
             for ov_sel in TikTokSelectors.JOYRIDE_OVERLAYS:
                 try:
                     loc = self.page.locator(ov_sel).first
-                    if loc.is_visible(timeout=300):
-                        still_visible = True
-                        break
+                    loc.wait_for(state="visible", timeout=300)
+                    still_visible = True
+                    break
                 except Exception:
                     pass
 
@@ -323,7 +327,8 @@ class TikTokUIObserver:
             for btn_sel in TikTokSelectors.JOYRIDE_DISMISS_BUTTONS:
                 try:
                     loc = self.page.locator(btn_sel).first
-                    if loc.is_visible(timeout=500) and loc.is_enabled():
+                    loc.wait_for(state="visible", timeout=500)
+                    if loc.is_enabled():
                         loc.click()
                         time.sleep(0.5)
                         action_taken = True
@@ -337,7 +342,8 @@ class TikTokUIObserver:
                 for next_sel in TikTokSelectors.JOYRIDE_NEXT_BUTTONS:
                     try:
                         loc = self.page.locator(next_sel).first
-                        if loc.is_visible(timeout=500) and loc.is_enabled():
+                        loc.wait_for(state="visible", timeout=500)
+                        if loc.is_enabled():
                             loc.click()
                             time.sleep(0.5)
                             action_taken = True
@@ -355,9 +361,9 @@ class TikTokUIObserver:
         for ov_sel in TikTokSelectors.JOYRIDE_OVERLAYS:
             try:
                 loc = self.page.locator(ov_sel).first
-                if loc.is_visible(timeout=500):
-                    logger.error("TIKTOK_ONBOARDING_OVERLAY_BLOCKING: React Joyride overlay remained visible after dismissal attempts.")
-                    return False, "TIKTOK_ONBOARDING_OVERLAY_BLOCKING"
+                loc.wait_for(state="visible", timeout=500)
+                logger.error("TIKTOK_ONBOARDING_OVERLAY_BLOCKING: React Joyride overlay remained visible after dismissal attempts.")
+                return False, "TIKTOK_ONBOARDING_OVERLAY_BLOCKING"
             except Exception:
                 pass
 
@@ -380,9 +386,9 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.CAPTION_EDITORS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=2000):
-                    editor_loc = loc
-                    break
+                loc.wait_for(state="visible", timeout=2000)
+                editor_loc = loc
+                break
             except Exception:
                 pass
 
@@ -473,9 +479,13 @@ class TikTokUIObserver:
         # Verify input presence in DOM
         is_planla_present = False
         try:
-            if hasattr(planla_input, "is_visible") and planla_input.is_visible(timeout=1000):
-                is_planla_present = True
-            elif hasattr(planla_input, "count") and planla_input.count() > 0:
+            if hasattr(planla_input, "is_visible"):
+                try:
+                    planla_input.wait_for(state="visible", timeout=1000)
+                    is_planla_present = True
+                except Exception:
+                    pass
+            if not is_planla_present and hasattr(planla_input, "count") and planla_input.count() > 0:
                 is_planla_present = True
         except Exception:
             pass
@@ -485,9 +495,9 @@ class TikTokUIObserver:
             for sel in TikTokSelectors.SCHEDULE_RADIO_OPTIONS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=500):
-                        is_planla_present = True
-                        break
+                    loc.wait_for(state="visible", timeout=500)
+                    is_planla_present = True
+                    break
                 except Exception:
                     pass
 
@@ -524,14 +534,14 @@ class TikTokUIObserver:
             if radio_id:
                 try:
                     lbl = self.page.locator(f"label[for='{radio_id}']").first
-                    if lbl.is_visible(timeout=300):
-                        logger.info("[TIKTOK] Trying schedule radio via LABEL")
-                        if hasattr(lbl, "scroll_into_view_if_needed"):
-                            lbl.scroll_into_view_if_needed(timeout=1000)
-                        lbl.click(timeout=2500)
-                        time.sleep(0.2)
-                        if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
-                            interaction_success = True
+                    lbl.wait_for(state="visible", timeout=300)
+                    logger.info("[TIKTOK] Trying schedule radio via LABEL")
+                    if hasattr(lbl, "scroll_into_view_if_needed"):
+                        lbl.scroll_into_view_if_needed(timeout=1000)
+                    lbl.click(timeout=2500)
+                    time.sleep(0.2)
+                    if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
+                        interaction_success = True
                 except Exception as e:
                     logger.debug(f"[TIKTOK] Strategy A (LABEL) exception: {e}")
 
@@ -539,14 +549,14 @@ class TikTokUIObserver:
             if not interaction_success:
                 try:
                     anc_lbl = planla_input.locator("xpath=ancestor::label[1]").first
-                    if anc_lbl.is_visible(timeout=300):
-                        logger.info("[TIKTOK] Trying schedule radio via ANCESTOR_LABEL")
-                        if hasattr(anc_lbl, "scroll_into_view_if_needed"):
-                            anc_lbl.scroll_into_view_if_needed(timeout=1000)
-                        anc_lbl.click(timeout=2500)
-                        time.sleep(0.2)
-                        if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
-                            interaction_success = True
+                    anc_lbl.wait_for(state="visible", timeout=300)
+                    logger.info("[TIKTOK] Trying schedule radio via ANCESTOR_LABEL")
+                    if hasattr(anc_lbl, "scroll_into_view_if_needed"):
+                        anc_lbl.scroll_into_view_if_needed(timeout=1000)
+                    anc_lbl.click(timeout=2500)
+                    time.sleep(0.2)
+                    if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
+                        interaction_success = True
                 except Exception as e:
                     logger.debug(f"[TIKTOK] Strategy B (ANCESTOR_LABEL) exception: {e}")
 
@@ -559,15 +569,17 @@ class TikTokUIObserver:
                     ]
                     for wrp in wrapper_candidates:
                         try:
-                            if wrp and wrp.is_visible(timeout=300):
-                                logger.info("[TIKTOK] Trying schedule radio via WRAPPER")
-                                if hasattr(wrp, "scroll_into_view_if_needed"):
-                                    wrp.scroll_into_view_if_needed(timeout=1000)
-                                wrp.click(timeout=2500)
-                                time.sleep(0.2)
-                                if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
-                                    interaction_success = True
-                                    break
+                            if not wrp:
+                                continue
+                            wrp.wait_for(state="visible", timeout=300)
+                            logger.info("[TIKTOK] Trying schedule radio via WRAPPER")
+                            if hasattr(wrp, "scroll_into_view_if_needed"):
+                                wrp.scroll_into_view_if_needed(timeout=1000)
+                            wrp.click(timeout=2500)
+                            time.sleep(0.2)
+                            if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
+                                interaction_success = True
+                                break
                         except Exception:
                             pass
                 except Exception as e:
@@ -583,15 +595,17 @@ class TikTokUIObserver:
                     ]
                     for circ in circle_candidates:
                         try:
-                            if circ and circ.is_visible(timeout=300):
-                                logger.info("[TIKTOK] Trying schedule radio via INNER_CIRCLE")
-                                if hasattr(circ, "scroll_into_view_if_needed"):
-                                    circ.scroll_into_view_if_needed(timeout=1000)
-                                circ.click(timeout=2500)
-                                time.sleep(0.2)
-                                if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
-                                    interaction_success = True
-                                    break
+                            if not circ:
+                                continue
+                            circ.wait_for(state="visible", timeout=300)
+                            logger.info("[TIKTOK] Trying schedule radio via INNER_CIRCLE")
+                            if hasattr(circ, "scroll_into_view_if_needed"):
+                                circ.scroll_into_view_if_needed(timeout=1000)
+                            circ.click(timeout=2500)
+                            time.sleep(0.2)
+                            if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
+                                interaction_success = True
+                                break
                         except Exception:
                             pass
                 except Exception as e:
@@ -621,14 +635,14 @@ class TikTokUIObserver:
                 for sel in TikTokSelectors.SCHEDULE_RADIO_OPTIONS:
                     try:
                         loc = self.page.locator(sel).first
-                        if loc.is_visible(timeout=300):
-                            if hasattr(loc, "scroll_into_view_if_needed"):
-                                loc.scroll_into_view_if_needed(timeout=1000)
-                            loc.click(timeout=2000)
-                            time.sleep(0.2)
-                            if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
-                                interaction_success = True
-                                break
+                        loc.wait_for(state="visible", timeout=300)
+                        if hasattr(loc, "scroll_into_view_if_needed"):
+                            loc.scroll_into_view_if_needed(timeout=1000)
+                        loc.click(timeout=2000)
+                        time.sleep(0.2)
+                        if _get_input_checked(planla_input) and not _get_input_checked(simdi_input):
+                            interaction_success = True
+                            break
                     except Exception:
                         pass
 
@@ -734,10 +748,10 @@ class TikTokUIObserver:
                     for idx in range(min(c_count, 8)):
                         loc = candidates.nth(idx)
                         is_vis = False
-                        if hasattr(loc, "is_visible") and callable(loc.is_visible):
+                        if hasattr(loc, "wait_for") and callable(loc.wait_for):
                             try:
-                                v = loc.is_visible(timeout=400)
-                                is_vis = (v is True or (isinstance(v, bool) and v))
+                                loc.wait_for(state="visible", timeout=400)
+                                is_vis = True
                             except Exception:
                                 is_vis = False
                         is_en = True
@@ -753,10 +767,10 @@ class TikTokUIObserver:
                 else:
                     loc = candidates.first if hasattr(candidates, "first") else candidates
                     is_vis = False
-                    if hasattr(loc, "is_visible") and callable(loc.is_visible):
+                    if hasattr(loc, "wait_for") and callable(loc.wait_for):
                         try:
-                            v = loc.is_visible(timeout=400)
-                            is_vis = (v is True or (isinstance(v, bool) and v))
+                            loc.wait_for(state="visible", timeout=400)
+                            is_vis = True
                         except Exception:
                             is_vis = False
                     is_en = True
@@ -869,9 +883,10 @@ class TikTokUIObserver:
             # 1. Open Calendar Picker
             cal_wrapper = self.page.locator(".calendar-wrapper").first
             is_cal_open = False
-            if hasattr(cal_wrapper, "is_visible"):
+            if hasattr(cal_wrapper, "wait_for"):
                 try:
-                    is_cal_open = bool(cal_wrapper.is_visible(timeout=300))
+                    cal_wrapper.wait_for(state="visible", timeout=300)
+                    is_cal_open = True
                 except Exception:
                     is_cal_open = False
 
@@ -946,14 +961,19 @@ class TikTokUIObserver:
                         cnt = 1
                     for idx in range(cnt):
                         d_loc = candidates.nth(idx) if hasattr(candidates, "nth") else candidates.first
-                        if hasattr(d_loc, "is_visible") and d_loc.is_visible(timeout=400):
-                            if hasattr(d_loc, "scroll_into_view_if_needed"):
-                                d_loc.scroll_into_view_if_needed(timeout=1000)
-                            d_loc.click(timeout=1500)
-                            day_clicked = True
-                            logger.info(f"[TIKTOK DATE] Clicked day '{target_day_str}' ({d_sel})")
-                            time.sleep(0.3)
-                            break
+                        if not hasattr(d_loc, "wait_for"):
+                            continue
+                        try:
+                            d_loc.wait_for(state="visible", timeout=400)
+                        except Exception:
+                            continue
+                        if hasattr(d_loc, "scroll_into_view_if_needed"):
+                            d_loc.scroll_into_view_if_needed(timeout=1000)
+                        d_loc.click(timeout=1500)
+                        day_clicked = True
+                        logger.info(f"[TIKTOK DATE] Clicked day '{target_day_str}' ({d_sel})")
+                        time.sleep(0.3)
+                        break
                     if day_clicked:
                         break
                 except Exception:
@@ -1027,9 +1047,10 @@ class TikTokUIObserver:
         try:
             timepicker_container = self.page.locator("div.tiktok-timepicker-time-picker-container").first
             is_open = False
-            if hasattr(timepicker_container, "is_visible"):
+            if hasattr(timepicker_container, "wait_for"):
                 try:
-                    is_open = bool(timepicker_container.is_visible(timeout=300))
+                    timepicker_container.wait_for(state="visible", timeout=300)
+                    is_open = True
                 except Exception:
                     is_open = False
 
@@ -1062,14 +1083,16 @@ class TikTokUIObserver:
             for h_sel in hour_selectors:
                 try:
                     h_loc = self.page.locator(h_sel).first
-                    if hasattr(h_loc, "is_visible") and h_loc.is_visible(timeout=500):
-                        if hasattr(h_loc, "scroll_into_view_if_needed"):
-                            h_loc.scroll_into_view_if_needed(timeout=1000)
-                        h_loc.click(timeout=1500)
-                        hour_clicked = True
-                        logger.info(f"[TIKTOK TIME] Clicked hour '{target_hour}' ({h_sel})")
-                        time.sleep(0.2)
-                        break
+                    if not hasattr(h_loc, "wait_for"):
+                        continue
+                    h_loc.wait_for(state="visible", timeout=500)
+                    if hasattr(h_loc, "scroll_into_view_if_needed"):
+                        h_loc.scroll_into_view_if_needed(timeout=1000)
+                    h_loc.click(timeout=1500)
+                    hour_clicked = True
+                    logger.info(f"[TIKTOK TIME] Clicked hour '{target_hour}' ({h_sel})")
+                    time.sleep(0.2)
+                    break
                 except Exception:
                     continue
 
@@ -1085,14 +1108,16 @@ class TikTokUIObserver:
             for m_sel in min_selectors:
                 try:
                     m_loc = self.page.locator(m_sel).first
-                    if hasattr(m_loc, "is_visible") and m_loc.is_visible(timeout=500):
-                        if hasattr(m_loc, "scroll_into_view_if_needed"):
-                            m_loc.scroll_into_view_if_needed(timeout=1000)
-                        m_loc.click(timeout=1500)
-                        min_clicked = True
-                        logger.info(f"[TIKTOK TIME] Clicked minute '{target_minute}' ({m_sel})")
-                        time.sleep(0.2)
-                        break
+                    if not hasattr(m_loc, "wait_for"):
+                        continue
+                    m_loc.wait_for(state="visible", timeout=500)
+                    if hasattr(m_loc, "scroll_into_view_if_needed"):
+                        m_loc.scroll_into_view_if_needed(timeout=1000)
+                    m_loc.click(timeout=1500)
+                    min_clicked = True
+                    logger.info(f"[TIKTOK TIME] Clicked minute '{target_minute}' ({m_sel})")
+                    time.sleep(0.2)
+                    break
                 except Exception:
                     continue
 
@@ -1108,7 +1133,8 @@ class TikTokUIObserver:
             timepicker_container = self.page.locator("div.tiktok-timepicker-time-picker-container").first
             is_open = False
             try:
-                if hasattr(timepicker_container, "is_visible") and timepicker_container.is_visible(timeout=500):
+                if hasattr(timepicker_container, "wait_for"):
+                    timepicker_container.wait_for(state="visible", timeout=500)
                     is_open = True
             except Exception:
                 pass
@@ -1125,12 +1151,21 @@ class TikTokUIObserver:
                 for n_sel in neutral_selectors:
                     try:
                         n_loc = self.page.locator(n_sel).first
-                        if hasattr(n_loc, "is_visible") and n_loc.is_visible(timeout=500):
-                            n_loc.click(timeout=1000)
-                            time.sleep(0.3)
-                            if not (hasattr(timepicker_container, "is_visible") and timepicker_container.is_visible(timeout=400)):
-                                is_open = False
-                                break
+                        if not hasattr(n_loc, "wait_for"):
+                            continue
+                        n_loc.wait_for(state="visible", timeout=500)
+                        n_loc.click(timeout=1000)
+                        time.sleep(0.3)
+                        tp_still_visible = False
+                        if hasattr(timepicker_container, "wait_for"):
+                            try:
+                                timepicker_container.wait_for(state="visible", timeout=400)
+                                tp_still_visible = True
+                            except Exception:
+                                tp_still_visible = False
+                        if not tp_still_visible:
+                            is_open = False
+                            break
                     except Exception:
                         pass
 
@@ -1263,7 +1298,8 @@ class TikTokUIObserver:
         """
         aigc_loc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
         try:
-            if hasattr(aigc_loc, "is_visible") and aigc_loc.is_visible(timeout=300):
+            if hasattr(aigc_loc, "wait_for"):
+                aigc_loc.wait_for(state="visible", timeout=300)
                 logger.info("[TIKTOK MORE] AIGC container already visible | MORE_OPTIONS_ALREADY_EXPANDED")
                 return True
         except Exception:
@@ -1281,29 +1317,36 @@ class TikTokUIObserver:
         for b_sel in btn_selectors:
             try:
                 loc = self.page.locator(b_sel).first
-                if hasattr(loc, "is_visible") and loc.is_visible(timeout=500):
-                    if hasattr(loc, "scroll_into_view_if_needed"):
-                        loc.scroll_into_view_if_needed(timeout=1000)
-                    loc.click(timeout=1500)
-                    logger.info(f"[TIKTOK MORE] Clicked '{b_sel}'")
-                    time.sleep(0.3)
+                if not hasattr(loc, "wait_for"):
+                    continue
+                loc.wait_for(state="visible", timeout=500)
+                if hasattr(loc, "scroll_into_view_if_needed"):
+                    loc.scroll_into_view_if_needed(timeout=1000)
+                loc.click(timeout=1500)
+                logger.info(f"[TIKTOK MORE] Clicked '{b_sel}'")
+                time.sleep(0.3)
 
-                    # Poll up to 3 seconds for AIGC container to become visible
-                    poll_start = time.time()
-                    while time.time() - poll_start < 3.0:
-                        fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-                        if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=300):
+                # Poll up to 3 seconds for AIGC container to become visible
+                poll_start = time.time()
+                while time.time() - poll_start < 3.0:
+                    fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
+                    if hasattr(fresh_aigc, "wait_for"):
+                        try:
+                            fresh_aigc.wait_for(state="visible", timeout=300)
                             logger.info("[TIKTOK MORE] AIGC container visible")
                             logger.info("MORE_OPTIONS_EXPANDED")
                             return True
-                        time.sleep(0.15)
+                        except Exception:
+                            pass
+                    time.sleep(0.15)
             except Exception as e:
                 logger.debug(f"[TIKTOK MORE] Click attempt on {b_sel} failed: {e}")
 
         # Check one last time
         try:
             fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-            if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=500):
+            if hasattr(fresh_aigc, "wait_for"):
+                fresh_aigc.wait_for(state="visible", timeout=500)
                 logger.info("[TIKTOK MORE] AIGC container visible | MORE_OPTIONS_EXPANDED")
                 return True
         except Exception:
@@ -1335,11 +1378,10 @@ class TikTokUIObserver:
 
         aigc_container = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
         try:
-            if not (hasattr(aigc_container, "is_visible") and aigc_container.is_visible(timeout=400)):
-                logger.error("AI_DISCLOSURE_CONTROL_NOT_FOUND: aigc_container not visible after expansion.")
-                return False
+            aigc_container.wait_for(state="visible", timeout=400)
         except Exception:
-            pass
+            logger.error("AI_DISCLOSURE_CONTROL_NOT_FOUND: aigc_container not visible after expansion.")
+            return False
 
         def _read_strict_aigc_state() -> Tuple[bool, Dict[str, Any]]:
             """Read live state strictly scoped inside aigc_container, explicit OFF overriding stale state."""
@@ -1352,7 +1394,9 @@ class TikTokUIObserver:
             }
             try:
                 fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-                if not (hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=200)):
+                try:
+                    fresh_aigc.wait_for(state="visible", timeout=200)
+                except Exception:
                     fresh_aigc = aigc_container
 
                 content = fresh_aigc.locator("div.Switch__content, .Switch__content").first
@@ -1581,7 +1625,8 @@ class TikTokUIObserver:
         # 1. Hard precommit gates
         try:
             tp = self.page.locator("div.tiktok-timepicker-time-picker-container").first
-            if hasattr(tp, "is_visible") and tp.is_visible(timeout=200):
+            if hasattr(tp, "wait_for"):
+                tp.wait_for(state="visible", timeout=200)
                 logger.error("[TIKTOK FINAL] TIMEPICKER_OPEN: Timepicker container is still open!")
                 return False, "TIMEPICKER_OPEN"
         except Exception:
@@ -1605,7 +1650,8 @@ class TikTokUIObserver:
         aigc_state_info: Dict[str, Any] = {}
         try:
             aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-            if hasattr(aigc, "is_visible") and aigc.is_visible(timeout=300):
+            if hasattr(aigc, "wait_for"):
+                aigc.wait_for(state="visible", timeout=300)
                 content = aigc.locator("div.Switch__content, .Switch__content").first
                 if hasattr(content, "get_attribute"):
                     aigc_state_info["aria"] = content.get_attribute("aria-checked")
@@ -1643,7 +1689,8 @@ class TikTokUIObserver:
             poll_start = time.time()
             while time.time() - poll_start < 3.0:
                 try:
-                    if hasattr(final_btn, "is_visible") and final_btn.is_visible(timeout=300):
+                    if hasattr(final_btn, "wait_for"):
+                        final_btn.wait_for(state="visible", timeout=300)
                         btn_diag["enabled"] = final_btn.is_enabled() if hasattr(final_btn, "is_enabled") else True
                         btn_diag["aria_disabled"] = final_btn.get_attribute("aria-disabled") if hasattr(final_btn, "get_attribute") else "false"
                         btn_diag["data_disabled"] = final_btn.get_attribute("data-disabled") if hasattr(final_btn, "get_attribute") else "false"
@@ -1674,7 +1721,8 @@ class TikTokUIObserver:
                         continue
                     try:
                         loc = self.page.locator(sel).first
-                        if loc.is_visible(timeout=400) and loc.is_enabled():
+                        loc.wait_for(state="visible", timeout=400)
+                        if loc.is_enabled():
                             btn_text = (loc.inner_text() or "").strip()
                             text_norm = btn_text.lower()
                             if text_norm and any(token in text_norm for token in ("planla", "schedule")):
@@ -1714,7 +1762,8 @@ class TikTokUIObserver:
             for sel in TikTokSelectors.MODAL_CONFIRM_BUTTONS:
                 try:
                     modal_btn = self.page.locator(sel).first
-                    if modal_btn.is_visible(timeout=1000) and modal_btn.is_enabled():
+                    modal_btn.wait_for(state="visible", timeout=1000)
+                    if modal_btn.is_enabled():
                         modal_btn.click(timeout=2500)
                         time.sleep(1.0)
                         break
@@ -1731,9 +1780,9 @@ class TikTokUIObserver:
                 for sel in TikTokSelectors.SCHEDULE_SUCCESS_INDICATORS:
                     try:
                         loc = self.page.locator(sel).first
-                        if loc.is_visible(timeout=400):
-                            logger.info("TikTok Studio schedule success indicator detected.")
-                            return True, "TIKTOK_FINAL_SCHEDULE_SUBMITTED"
+                        loc.wait_for(state="visible", timeout=400)
+                        logger.info("TikTok Studio schedule success indicator detected.")
+                        return True, "TIKTOK_FINAL_SCHEDULE_SUBMITTED"
                     except Exception:
                         pass
 
@@ -1751,7 +1800,8 @@ class TikTokUIObserver:
                         + ", div[role='dialog']:has-text('Continue posting?')"
                         + ", div[role='dialog']:has-text('kontrol ediyoruz')"
                     ).first
-                    if hasattr(check_modal_loc, "is_visible") and check_modal_loc.is_visible(timeout=300):
+                    if hasattr(check_modal_loc, "wait_for"):
+                        check_modal_loc.wait_for(state="visible", timeout=300)
                         check_modal_detected = True
                         logger.info("[TIKTOK CHECK] CONTENT_CHECK_CONFIRMATION_DETECTED")
                         logger.info("[TIKTOK CHECK] NEVER clicking 'Hemen paylaş' (Automation forbidden)")
@@ -1879,18 +1929,18 @@ class TikTokUIObserver:
         has_editor = False
         for sel in TikTokSelectors.CAPTION_EDITORS:
             try:
-                if self.page.locator(sel).first.is_visible(timeout=500):
-                    has_editor = True
-                    break
+                self.page.locator(sel).first.wait_for(state="visible", timeout=500)
+                has_editor = True
+                break
             except Exception:
                 pass
 
         has_upload_complete = False
         for sel in TikTokSelectors.UPLOAD_COMPLETE_INDICATORS:
             try:
-                if self.page.locator(sel).first.is_visible(timeout=500):
-                    has_upload_complete = True
-                    break
+                self.page.locator(sel).first.wait_for(state="visible", timeout=500)
+                has_upload_complete = True
+                break
             except Exception:
                 pass
 
@@ -1903,8 +1953,13 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.SELECT_VIDEO_BUTTONS + TikTokSelectors.FILE_INPUT_SELECTORS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=500) or loc.count() > 0:
+                try:
+                    loc.wait_for(state="visible", timeout=500)
                     has_select_btn = True
+                except Exception:
+                    if loc.count() > 0:
+                        has_select_btn = True
+                if has_select_btn:
                     break
             except Exception:
                 pass
@@ -1984,7 +2039,8 @@ class TikTokUIObserver:
         for sel in TikTokSelectors.FINAL_ACTION_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1500) and loc.is_enabled():
+                loc.wait_for(state="visible", timeout=1500)
+                if loc.is_enabled():
                     final_btn = loc
                     break
             except Exception:

@@ -75,8 +75,8 @@ class FlowPage:
         for sel in selectors:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=timeout_ms):
-                    return loc
+                loc.wait_for(state="visible", timeout=timeout_ms)
+                return loc
             except Exception:
                 continue
         return None
@@ -93,9 +93,9 @@ class FlowPage:
         for auth_sel in FlowSelectors.AUTH_CHALLENGE_PATTERNS:
             try:
                 loc = self.page.locator(auth_sel).first
-                if loc.is_visible(timeout=800):
-                    self.capture_error_snapshot("security_challenge")
-                    raise UserActionRequiredError(f"Güvenlik doğrulaması / CAPTCHA tespit edildi ({auth_sel}).")
+                loc.wait_for(state="visible", timeout=800)
+                self.capture_error_snapshot("security_challenge")
+                raise UserActionRequiredError(f"Güvenlik doğrulaması / CAPTCHA tespit edildi ({auth_sel}).")
             except UserActionRequiredError:
                 raise
             except Exception:
@@ -110,8 +110,7 @@ class FlowPage:
         for landing_sel in FlowSelectors.LANDING_PAGE_INDICATOR_SELECTORS:
             try:
                 loc = self.page.locator(landing_sel).first
-                if not loc.is_visible(timeout=500):
-                    continue
+                loc.wait_for(state="visible", timeout=500)
                 new_project_btn = self.find_first_visible(FlowSelectors.NEW_PROJECT_BUTTON_SELECTORS, timeout_ms=500)
                 if new_project_btn:
                     continue
@@ -130,9 +129,9 @@ class FlowPage:
         for cred_sel in FlowSelectors.CREDIT_WARNING_SELECTORS:
             try:
                 loc = self.page.locator(cred_sel).first
-                if loc.is_visible(timeout=800):
-                    self.capture_error_snapshot("out_of_credits")
-                    raise InsufficientCreditsError("Google Flow kredileriniz tükendi veya kota aşıldı.")
+                loc.wait_for(state="visible", timeout=800)
+                self.capture_error_snapshot("out_of_credits")
+                raise InsufficientCreditsError("Google Flow kredileriniz tükendi veya kota aşıldı.")
             except InsufficientCreditsError:
                 raise
             except Exception:
@@ -442,13 +441,16 @@ class FlowPage:
         for sel in selectors:
             try:
                 locs = self.page.locator(sel).all()
-                for loc in locs:
-                    if loc.is_visible(timeout=timeout_ms):
-                        aria_dis = loc.get_attribute("aria-disabled")
-                        if aria_dis != "true" and loc.is_enabled():
-                            return loc
             except Exception:
                 continue
+            for loc in locs:
+                try:
+                    loc.wait_for(state="visible", timeout=timeout_ms)
+                except Exception:
+                    continue
+                aria_dis = loc.get_attribute("aria-disabled")
+                if aria_dis != "true" and loc.is_enabled():
+                    return loc
         return None
 
     def trigger_generation(self, allow_real_generation: bool = True, session: Optional[GenerationSession] = None) -> None:
