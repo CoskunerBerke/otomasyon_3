@@ -25,6 +25,7 @@ from .state_machine import GenerationSession, FlowDecisionAction
 from ..config import AppConfig
 from ..content.prompt_engine import ReelConceptPlan
 from ..quality.frame_extractor import FrameExtractor
+from ..content.content_modes import requires_audio
 from ..quality.concatenator import VideoConcatenator
 
 class VideoProvider(ABC):
@@ -212,7 +213,8 @@ class GoogleFlowWebProvider(VideoProvider):
                 self.concatenator.concatenate_segments(
                     segment_paths=completed_segment_paths,
                     output_path=final_concat_path,
-                    reel_id=reel_id
+                    reel_id=reel_id,
+                    preserve_audio=requires_audio(plan.content_mode)
                 )
                 if self.agent_manager:
                     self.agent_manager.record_final_qc_pass(reel_id, duration=30.0)
@@ -285,16 +287,35 @@ class MockVideoProvider(VideoProvider):
                     self.agent_manager.record_flow_generation_start(reel_id, seg.index, len(plan.segments))
 
                 seg_file = segments_dir / f"segment_{seg.index:02d}.mp4"
-                cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-f", "lavfi",
-                    "-i", f"testsrc=size=540x960:rate=30",
-                    "-t", "10",
-                    "-c:v", "libx264",
-                    "-pix_fmt", "yuv420p",
-                    str(seg_file)
-                ]
+                # Mock segments carry a silent AAC track in audio modes so a dry run
+                # exercises the same audio path as production instead of failing QC on a
+                # missing stream. The 540x960 size still marks these as mock media.
+                if requires_audio(plan.content_mode):
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-f", "lavfi",
+                        "-i", "testsrc=size=540x960:rate=30",
+                        "-f", "lavfi",
+                        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                        "-t", "10",
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-shortest",
+                        str(seg_file)
+                    ]
+                else:
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-f", "lavfi",
+                        "-i", f"testsrc=size=540x960:rate=30",
+                        "-t", "10",
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        str(seg_file)
+                    ]
                 try:
                     subprocess.run(cmd, capture_output=True, check=True)
                 except Exception:
@@ -328,7 +349,9 @@ class MockVideoProvider(VideoProvider):
                 self.agent_manager.record_final_concat_start(reel_id)
 
             final_file = self.output_dir / target_filename
-            res = self.concatenator.concatenate_segments(seg_paths, final_file, reel_id)
+            res = self.concatenator.concatenate_segments(
+                seg_paths, final_file, reel_id, preserve_audio=requires_audio(plan.content_mode)
+            )
 
             if self.agent_manager:
                 self.agent_manager.record_final_qc_pass(reel_id, duration=30.0)

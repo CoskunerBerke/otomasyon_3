@@ -7,8 +7,10 @@ import random
 from typing import List, Dict, Any, Optional
 
 from .concepts import CATEGORIES, ConceptDefinition
+from .content_modes import NARRATIVE_AMBIENT_STORY, SILENT_STEP_BY_STEP
 from .diversity import calculate_diversity_score, compute_similarity
 from .prompt_engine import PromptEngine, ReelConceptPlan
+from .story_concepts import STORY_CONCEPTS
 
 class ContentProvider(ABC):
     """Abstract interface for generating video concept plans."""
@@ -27,6 +29,10 @@ class TemplateContentProvider(ContentProvider):
 
     def __init__(self, categories: Optional[List[ConceptDefinition]] = None):
         self.categories = categories or CATEGORIES
+
+    def _build_plan(self, **kwargs) -> ReelConceptPlan:
+        """Which kind of plan this provider produces. Overridden by StoryContentProvider."""
+        return PromptEngine.build_concept_plan(**kwargs)
 
     def generate_plans(
         self,
@@ -66,7 +72,7 @@ class TemplateContentProvider(ContentProvider):
 
                     # Only consider candidates with reasonable novelty (no near-duplicates)
                     if novelty >= 0.40:
-                        plan = PromptEngine.build_concept_plan(
+                        plan = self._build_plan(
                             concept=concept,
                             env=env,
                             arch=arch,
@@ -110,10 +116,66 @@ class TemplateContentProvider(ContentProvider):
 
         return selected_plans
 
+class StoryContentProvider(TemplateContentProvider):
+    """
+    Same candidate/diversity/selection loop as the construction provider, over the real
+    places in STORY_CONCEPTS, producing narrative_ambient_story plans.
+    """
+
+    def __init__(self, categories: Optional[List[ConceptDefinition]] = None):
+        super().__init__(categories or STORY_CONCEPTS)
+
+    def _build_plan(self, **kwargs) -> ReelConceptPlan:
+        return PromptEngine.build_story_concept_plan(**kwargs)
+
+    def generate_plans(
+        self,
+        count: int,
+        past_records: List[Dict[str, Any]],
+        duration_seconds: int = 10
+    ) -> List[ReelConceptPlan]:
+        """
+        Ranks every story concept as the base provider does, then round-robins across
+        category groups before truncating to `count`.
+
+        Taking the base provider's top N directly would be wrong twice over: selection
+        order is publishing order and STORY_CONCEPTS is grouped by theme, so the first
+        six slots would all be "Buried by Nature" -- and with novelty scores tied on a
+        fresh history, four whole groups would never be reached at all.
+        """
+        ranked = super().generate_plans(len(self.categories), past_records, duration_seconds)
+        return self._interleave_by_group(ranked)[:count]
+
+    @staticmethod
+    def _interleave_by_group(plans: List[ReelConceptPlan]) -> List[ReelConceptPlan]:
+        """Round-robin across category groups, preserving each group's internal order."""
+        buckets: Dict[str, List[ReelConceptPlan]] = {}
+        for plan in plans:
+            buckets.setdefault(plan.concept_def.category_group, []).append(plan)
+
+        ordered: List[ReelConceptPlan] = []
+        while any(buckets.values()):
+            for group in list(buckets.keys()):
+                if buckets[group]:
+                    ordered.append(buckets[group].pop(0))
+        return ordered
+
+
+def provider_for_mode(content_mode: str) -> ContentProvider:
+    """Maps a content_mode to the provider that produces it."""
+    if content_mode == NARRATIVE_AMBIENT_STORY:
+        return StoryContentProvider()
+    if content_mode == SILENT_STEP_BY_STEP:
+        return TemplateContentProvider()
+    raise ValueError(f"No content provider registered for content_mode '{content_mode}'")
+
+
 class ContentEngine:
     """High level facade for content generation."""
 
-    def __init__(self, provider: Optional[ContentProvider] = None):
+    def __init__(self, provider: Optional[ContentProvider] = None, content_mode: Optional[str] = None):
+        if provider is None and content_mode is not None:
+            provider = provider_for_mode(content_mode)
         self.provider = provider or TemplateContentProvider()
 
     def generate_next_reels(

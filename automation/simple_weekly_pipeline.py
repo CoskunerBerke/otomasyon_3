@@ -45,8 +45,15 @@ from automation.publishing.preflight_gate import run_pre_publish_hard_gate, veri
 from automation.publishing.metadata_builder import PublishingMetadataBuilder
 from automation.flow.generator import GoogleFlowWebProvider, MockVideoProvider, VideoProvider
 from automation.content.concepts import CATEGORIES
+from automation.content.content_modes import (
+    NARRATIVE_AMBIENT_STORY,
+    SILENT_STEP_BY_STEP,
+    is_live_eligible_mode,
+    requires_audio,
+)
 from automation.content.engine import ContentEngine
 from automation.content.prompt_engine import PromptEngine, ReelConceptPlan
+from automation.content.story_concepts import STORY_CONCEPTS
 from automation.quality.validator import VideoValidator
 from automation.media_handoff import handoff_reel_to_cloud
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
@@ -107,11 +114,17 @@ class SimpleWeeklyPipeline:
         cloud_client: Optional[LocalWorkerCloudClient] = None,
         stuck_wait_minutes: int = 30,
         stuck_retry_seconds: int = 300,
+        content_mode: str = SILENT_STEP_BY_STEP,
     ):
         self.base_dir = (base_dir or Path(".").resolve())
         self.dry_run = dry_run
         self.week_id = week_id
         self.start_date = start_date
+        if not is_live_eligible_mode(content_mode):
+            raise ValueError(f"Unknown content_mode '{content_mode}' -- register it in automation.content.content_modes first.")
+        # Only used when PLAN creates a fresh manifest. A resumed manifest keeps the mode
+        # it was locked with, so a rerun can never silently re-mode a week mid-flight.
+        self.content_mode = content_mode
         # How long to hold a stuck platform for a manual fix before moving on, and how
         # often to retry inside that window. Tests set these to 0 to skip the wait.
         self.stuck_wait_minutes = stuck_wait_minutes
@@ -227,7 +240,16 @@ class SimpleWeeklyPipeline:
 
         existing = self.batch_repo.load_manifest(week_id)
         if existing is not None:
-            logger.info(f"[PLAN] Existing manifest loaded for {week_id} (status={existing.status})")
+            logger.info(f"[PLAN] Existing manifest loaded for {week_id} (status={existing.status}, mode={existing.content_mode})")
+            # The manifest wins. A resumed week keeps the mode it was planned in even if
+            # this invocation passed a different --content-mode, so half a week can never
+            # come out silent and the other half narrated.
+            if existing.content_mode != self.content_mode:
+                logger.warning(
+                    f"[PLAN] --content-mode '{self.content_mode}' ignored: {week_id} was planned as "
+                    f"'{existing.content_mode}' and is being resumed in that mode."
+                )
+                self.content_mode = existing.content_mode
             return existing
 
         logger.info(f"[PLAN] No manifest for {week_id} -- creating a fresh DRAFT (14 slots, 19:30 & 22:00 Europe/Istanbul).")
@@ -235,21 +257,32 @@ class SimpleWeeklyPipeline:
 
         reel_ids = self._allocate_reel_ids(count=14)
 
-        content_engine = ContentEngine()
+        content_engine = ContentEngine(content_mode=self.content_mode)
         past_history = [{"id": r.reel_id, "title": r.title, "category": r.content_mode} for r in self.state_repo.list_all_reels()]
         concept_plans = content_engine.generate_next_reels(count=14, past_records=past_history, duration_seconds=10)
 
         reels: List[BatchReel] = []
         for i, (slot, reel_id, plan) in enumerate(zip(slot_plan.slots, reel_ids, concept_plans), start=1):
-            yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_youtube_metadata(
-                reel_id=reel_id,
-                title=plan.title,
-                category=plan.category,
-                environment=plan.environment,
-                architecture=plan.architecture,
-                transformation=plan.transformation,
-                reveal=plan.reveal,
-            )
+            if self.content_mode == NARRATIVE_AMBIENT_STORY:
+                concept = plan.concept_def
+                yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_story_youtube_metadata(
+                    reel_id=reel_id,
+                    name=concept.name,
+                    category_group=concept.category_group,
+                    real_basis=concept.real_basis,
+                    topic_description=concept.topic_description,
+                    narrative_frame=concept.narrative_frame,
+                )
+            else:
+                yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_youtube_metadata(
+                    reel_id=reel_id,
+                    title=plan.title,
+                    category=plan.category,
+                    environment=plan.environment,
+                    architecture=plan.architecture,
+                    transformation=plan.transformation,
+                    reveal=plan.reveal,
+                )
             reels.append(BatchReel(
                 index=i,
                 reel_id=reel_id,
@@ -259,6 +292,7 @@ class SimpleWeeklyPipeline:
                 title=yt_title,
                 caption=plan.topic_description,
                 hashtags=yt_tags,
+                content_mode=plan.content_mode,
                 concept_id_slug=plan.concept_def.id_slug,
                 environment=plan.environment,
                 architecture=plan.architecture,
@@ -276,6 +310,7 @@ class SimpleWeeklyPipeline:
             timezone="Europe/Istanbul",
             target_reels=14,
             status="DRAFT",
+            content_mode=self.content_mode,
             reels=reels,
         )
         self.batch_repo.save_manifest(manifest)
@@ -285,11 +320,23 @@ class SimpleWeeklyPipeline:
     def _rebuild_concept_plan(self, reel: BatchReel) -> ReelConceptPlan:
         """Deterministically rebuilds the exact ReelConceptPlan (same prompt, same
         segments) used when this manifest entry was created -- see BatchReel's raw
-        selector fields for why this is safe across separate process runs."""
-        concept = next((c for c in CATEGORIES if c.id_slug == reel.concept_id_slug), None)
+        selector fields for why this is safe across separate process runs.
+
+        The concept is looked up in the library its own content_mode belongs to: a story
+        slug does not exist in CATEGORIES and would otherwise read as a corrupt manifest.
+        """
+        if reel.content_mode == NARRATIVE_AMBIENT_STORY:
+            library, builder = STORY_CONCEPTS, PromptEngine.build_story_concept_plan
+        else:
+            library, builder = CATEGORIES, PromptEngine.build_concept_plan
+
+        concept = next((c for c in library if c.id_slug == reel.concept_id_slug), None)
         if concept is None:
-            raise ValueError(f"Unknown concept_id_slug '{reel.concept_id_slug}' for {reel.reel_id} -- manifest is corrupt.")
-        return PromptEngine.build_concept_plan(
+            raise ValueError(
+                f"Unknown concept_id_slug '{reel.concept_id_slug}' for {reel.reel_id} "
+                f"in content_mode '{reel.content_mode}' -- manifest is corrupt."
+            )
+        return builder(
             concept=concept,
             env=reel.environment,
             arch=reel.architecture,
@@ -319,11 +366,17 @@ class SimpleWeeklyPipeline:
 
     def _run_generate_phase(self, manifest: BatchManifest) -> PhaseResult:
         self._init_flow_provider_if_needed()
-        validator = VideoValidator(reject_wrong_ratio=True, audio_enabled=False)
 
         for reel in manifest.reels:
             if reel.generation_status == "COMPLETE":
                 continue
+
+            # Per Reel, not per run: the manifest is the authority on what this Reel's
+            # audio should be, so a mixed-mode batch still validates each one correctly.
+            validator = VideoValidator(
+                reject_wrong_ratio=True,
+                audio_enabled=requires_audio(reel.content_mode),
+            )
 
             logger.info(f"[GENERATE] {reel.reel_id} ({reel.title}) -- Flow uretimi baslatiliyor...")
             try:
@@ -958,6 +1011,13 @@ def main():
     parser.add_argument("--live", action="store_true", default=False, help="Enable real live generation & publishing")
     parser.add_argument("--vault-path", type=str, default=None, help="Path to Obsidian vault")
     parser.add_argument("--phase", type=str, default=None, choices=["generate", "validate", "lock", "youtube", "tiktok", "instagram"], help="Debug only: run a single phase")
+    parser.add_argument(
+        "--content-mode",
+        type=str,
+        default=SILENT_STEP_BY_STEP,
+        choices=[SILENT_STEP_BY_STEP, NARRATIVE_AMBIENT_STORY],
+        help="Content mode for a NEW week. Ignored when resuming an existing manifest.",
+    )
 
     args = parser.parse_args()
 
@@ -974,6 +1034,7 @@ def main():
         dry_run=not args.live,
         week_id=args.week_id,
         start_date=start_date,
+        content_mode=args.content_mode,
     )
 
     success, results, manifest = pipeline.run(phase=args.phase)

@@ -62,7 +62,10 @@ def test_v3_eligibility_rejects_legacy_information_mode(tmp_path: Path):
 
     ok, reason = is_v3_publishing_eligible(meta, check_ffprobe=False)
     assert ok is False
-    assert "silent_global_step_by_step required" in reason
+    # Rejection is now stated in terms of the mode registry: legacy_information is not a
+    # registered live-eligible mode. Silent is no longer the only accepted mode -- see
+    # tests/test_narrative_ambient_story.py for the audio-mode side of this gate.
+    assert "not a registered live-eligible mode" in reason
 
 def test_v3_eligibility_rejects_non_3_segments(tmp_path: Path):
     video = tmp_path / "v3_bad_seg.mp4"

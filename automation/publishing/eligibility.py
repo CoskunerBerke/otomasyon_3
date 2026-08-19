@@ -1,12 +1,19 @@
 """
 V3-Only Publishing Eligibility Hard Gate.
-Strictly validates pipeline_version == 3, content_mode == silent_global_step_by_step,
-segment counts, and actual FFprobe duration (29.0s - 31.5s).
+Strictly validates pipeline_version == 3, a registered live-eligible content_mode,
+segment counts, actual FFprobe duration (29.0s - 31.5s), and the mode's audio policy.
+
+Audio is checked in both directions: a silent-mode Reel with a stray track is rejected,
+and so is an ambient-story Reel that lost its track somewhere in the pipeline. The modes
+themselves live in automation.content.content_modes -- an unregistered mode is never
+eligible, so a typo in content_mode blocks publishing instead of quietly passing.
 """
 import hashlib
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+from automation.content.content_modes import check_audio_stream, is_live_eligible_mode
 
 logger = logging.getLogger("ReelsAIFactory.PublishingEligibility")
 
@@ -53,8 +60,9 @@ def is_live_production_eligible(reel_state: Optional[Any], video_path: Path) -> 
     if int(getattr(reel_state, "pipeline_version", 0) or 0) != 3:
         return False, f"pipeline_version is {getattr(reel_state, 'pipeline_version', None)} (V3 required)"
 
-    if str(getattr(reel_state, "content_mode", "")) != "silent_global_step_by_step":
-        return False, f"content_mode is '{getattr(reel_state, 'content_mode', '')}' (silent_global_step_by_step required)"
+    state_mode = str(getattr(reel_state, "content_mode", ""))
+    if not is_live_eligible_mode(state_mode):
+        return False, f"content_mode '{state_mode}' is not a registered live-eligible mode"
 
     if str(getattr(reel_state, "generation_status", "")) != "COMPLETE":
         return False, f"generation_status is '{getattr(reel_state, 'generation_status', '')}' (COMPLETE required)"
@@ -77,8 +85,12 @@ def is_live_production_eligible(reel_state: Optional[Any], video_path: Path) -> 
         meta = inspect_video(video_path)
         if (meta.width, meta.height) in KNOWN_MOCK_RESOLUTIONS:
             return False, f"Video resolution {meta.width}x{meta.height} matches known mock/test signature"
+
+        audio_ok, audio_reason = check_audio_stream(state_mode, meta.has_audio)
+        if not audio_ok:
+            return False, audio_reason
     except Exception as e:
-        logger.warning(f"[ELIGIBILITY] ffprobe resolution check failed for {video_path}: {e}")
+        logger.warning(f"[ELIGIBILITY] ffprobe inspection failed for {video_path}: {e}")
 
     return True, "LIVE_PRODUCTION_ELIGIBLE"
 
@@ -101,10 +113,10 @@ def is_v3_publishing_eligible(reel_meta: Dict[str, Any], check_ffprobe: bool = T
     if p_ver_int != 3:
         return False, f"Pipeline version is {p_ver_int} (V3 required)"
 
-    # 2. Content Mode must be silent_global_step_by_step
+    # 2. Content Mode must be a registered live-eligible mode
     c_mode = str(reel_meta.get("content_mode", ""))
-    if c_mode != "silent_global_step_by_step":
-        return False, f"Content mode is '{c_mode}' (silent_global_step_by_step required)"
+    if not is_live_eligible_mode(c_mode):
+        return False, f"Content mode '{c_mode}' is not a registered live-eligible mode"
 
     # 3. Segments check (if present in metadata)
     segments = reel_meta.get("segments")
@@ -132,8 +144,9 @@ def is_v3_publishing_eligible(reel_meta: Dict[str, Any], check_ffprobe: bool = T
                     return False, f"Actual video duration is {meta.duration_seconds:.1f}s (Expected 29.0-31.5s)"
                 if not meta.is_vertical_9_16:
                     return False, f"Video is not 9:16 vertical (Aspect ratio: {meta.aspect_ratio})"
-                if meta.has_audio:
-                    return False, f"Video contains audio stream (Silent video required)"
+                audio_ok, audio_reason = check_audio_stream(c_mode, meta.has_audio)
+                if not audio_ok:
+                    return False, audio_reason
             else:
                 # If ffprobe returns 0s (e.g. non-media raw bytes in tests), check note metadata
                 note_dur = float(reel_meta.get("duration", reel_meta.get("duration_seconds", reel_meta.get("final_duration_seconds", 30))))
