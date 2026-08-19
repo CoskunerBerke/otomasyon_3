@@ -601,6 +601,18 @@ class InstagramWebObserver:
                 self.capture_error_snapshot("primary_button_is_share_now")
                 return False, "PUBLISH_NOW_BUTTON_REFUSED"
 
+        # Stale-state guard: if the success wording is ALREADY on the page before the
+        # click, a later sighting of it proves nothing about this Reel. Refuse rather than
+        # submit into a state that cannot be verified.
+        try:
+            pre = (self.page.inner_text("body") or "").lower()
+        except Exception:
+            pre = ""
+        if self._has_success_marker(pre):
+            self.capture_error_snapshot("success_marker_present_before_submit")
+            logger.error("[IG WEB] Gonderimden ONCE sayfada basari metni var -- onay guvenilir olamaz, tiklanmayacak.")
+            return False, "STALE_SUCCESS_STATE_BEFORE_SUBMIT"
+
         try:
             btn.click(timeout=4000)
         except Exception as e:
@@ -618,8 +630,11 @@ class InstagramWebObserver:
         while time.time() - start < timeout_seconds:
             try:
                 body = (self.page.inner_text("body") or "").lower()
-                if any(m in body for m in InstagramWebSelectors.SCHEDULE_SUCCESS_MARKERS):
-                    logger.info("[IG WEB] Planlama onaylandi.")
+                # Both halves are required: the success phrase AND the dialog's own
+                # "Bitti" button on screen. The phrase alone was fooled once.
+                if self._has_success_marker(body) and self._success_dialog_visible():
+                    logger.info("[IG WEB] Planlama onaylandi (basari penceresi + Bitti gorundu).")
+                    self.capture_success_evidence()
                     self._close_success_dialog()
                     return True, "INSTAGRAM_SCHEDULED"
             except Exception:
@@ -628,6 +643,32 @@ class InstagramWebObserver:
 
         self.capture_error_snapshot("schedule_confirmation_not_verified")
         return False, "SUBMITTED_CONFIRMATION_TIMEOUT"
+
+    @staticmethod
+    def _has_success_marker(lower_body: str) -> bool:
+        return any(m in lower_body for m in InstagramWebSelectors.SCHEDULE_SUCCESS_MARKERS)
+
+    def _success_dialog_visible(self) -> bool:
+        for sel in InstagramWebSelectors.SUCCESS_DIALOG_DONE_BUTTONS:
+            try:
+                if self.page.locator(sel).first.is_visible(timeout=500):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def capture_success_evidence(self) -> None:
+        """
+        One screenshot per confirmed schedule. Failures already leave evidence; a false
+        success leaves none, which is exactly what made the missing 14th post on
+        2026-08-19 undiagnosable. Cheap insurance: a PNG per Reel.
+        """
+        try:
+            self.screenshots_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.page.screenshot(path=str(self.screenshots_dir / f"ok_ig_scheduled_{ts}.png"))
+        except Exception:
+            pass
 
     def _close_success_dialog(self) -> None:
         """
