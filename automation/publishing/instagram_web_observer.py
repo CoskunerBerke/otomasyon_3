@@ -664,11 +664,14 @@ class InstagramWebObserver:
         2026-08-19 undiagnosable. Cheap insurance: a PNG per Reel.
         """
         try:
-            self.screenshots_dir.mkdir(parents=True, exist_ok=True)
+            # Same folder capture_error_snapshot uses; this class has no screenshots_dir
+            # attribute, and referencing one made the first live capture fail silently.
+            shots = Path("screenshots") / "errors"
+            shots.mkdir(parents=True, exist_ok=True)
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.page.screenshot(path=str(self.screenshots_dir / f"ok_ig_scheduled_{ts}.png"))
-        except Exception:
-            pass
+            self.page.screenshot(path=str(shots / f"ok_ig_scheduled_{ts}.png"))
+        except Exception as e:
+            logger.debug(f"[IG WEB] basari kaniti alinamadi: {e}")
 
     def _close_success_dialog(self) -> None:
         """
