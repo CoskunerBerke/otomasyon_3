@@ -3,6 +3,7 @@ Comprehensive Test Suite for Cloud Control Plane, Telegram Approval Bot,
 Always-On Instagram Scheduler, Local Worker Bridge, and Obsidian Sync.
 """
 import os
+import re
 import json
 import datetime
 from pathlib import Path
@@ -46,8 +47,105 @@ from automation.cloud.local_worker_api import (
 )
 from automation.cloud_sync import CloudObsidianSync
 from automation.local_worker import LocalWorker
+from automation.local_worker_cloud_client import LocalWorkerCloudClient
 from automation.publishing.instagram_models import InstagramConfig
 from automation.publishing.instagram_api import InstagramAPIClient
+
+
+# =============================================================================
+# 0. ENVIRONMENT ISOLATION (must apply to every test in this module)
+# =============================================================================
+#
+# CloudConfig resolves every setting through os.getenv(KEY, <safe default>) --
+# INSTAGRAM_DRY_RUN defaults to "true", INSTAGRAM_ALLOW_UPLOAD/ALLOW_PUBLISH to
+# "false", PUBLIC_BASE_URL to "", and so on. A developer machine configured for
+# live Instagram or live Railway work exports those very keys, so a plain
+# CloudConfig(tmp_path) would silently inherit the LIVE values instead of the
+# documented defaults. A test written as "the safe defaults block the upload"
+# would then prove nothing on that machine -- it would drive the live path.
+#
+# Every test here therefore runs with the whole CloudConfig environment surface
+# removed, so the safety defaults under test are the ones actually in effect on
+# any machine. Tests that need a non-default value set it explicitly on the cfg
+# object. This only mutates os.environ inside the pytest process (monkeypatch
+# restores it afterwards); the .env file itself is never read, written, or
+# printed. It also relies on every test passing tmp_path as CloudConfig's
+# base_dir, so CloudConfig._load_dotenv() finds no .env to re-inject.
+
+CLOUD_CONFIG_ENV_KEYS = (
+    "APP_ENV",
+    "APP_TIMEZONE",
+    "DATABASE_URL",
+    "ENABLE_INSTAGRAM_WORKER",
+    "ENABLE_MEDIA_CLEANUP",
+    "ENABLE_TELEGRAM_WEBHOOK",
+    "ENABLE_WEEKLY_SCHEDULER",
+    "INSTAGRAM_ACCOUNT_ID",
+    "INSTAGRAM_ALLOW_PUBLISH",
+    "INSTAGRAM_ALLOW_UPLOAD",
+    "INSTAGRAM_DRY_RUN",
+    "INSTAGRAM_EXPECTED_USERNAME",
+    "INSTAGRAM_PREPARE_MINUTES_BEFORE",
+    "LOCAL_WORKER_API_KEY",
+    "LOCAL_WORKER_POLL_SECONDS",
+    "MEDIA_RETENTION_DAYS",
+    "MEDIA_STORAGE_BACKEND",
+    "META_ACCESS_TOKEN",
+    "META_GRAPH_VERSION",
+    "PORT",
+    "PUBLIC_BASE_URL",
+    "S3_ACCESS_KEY_ID",
+    "S3_BUCKET",
+    "S3_ENDPOINT_URL",
+    "S3_REGION",
+    "S3_SECRET_ACCESS_KEY",
+    "TELEGRAM_ALLOWED_USER_ID",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "TELEGRAM_WEBHOOK_SECRET",
+    "WEEKLY_APPROVAL_DAY",
+    "WEEKLY_APPROVAL_LOCAL_TIME",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_cloud_env(monkeypatch):
+    """Strips every CloudConfig-controlled variable from the process environment."""
+    for key in CLOUD_CONFIG_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    return monkeypatch
+
+
+def test_env_isolation_covers_every_cloudconfig_env_key():
+    """Guard against drift: if CloudConfig starts reading a new environment
+    variable, CLOUD_CONFIG_ENV_KEYS must learn about it too. Otherwise that new
+    variable becomes another channel through which a machine's live settings can
+    leak into these tests and quietly invalidate a safety assertion."""
+    config_source = (
+        Path(__file__).resolve().parents[1] / "automation" / "cloud" / "config.py"
+    ).read_text(encoding="utf-8")
+
+    referenced = set(re.findall(r'os\.getenv\(\s*"([A-Z0-9_]+)"', config_source))
+    assert referenced, "Could not parse any os.getenv() key out of automation/cloud/config.py"
+
+    uncovered = sorted(referenced - set(CLOUD_CONFIG_ENV_KEYS))
+    assert not uncovered, (
+        "CloudConfig reads environment variables that the isolation fixture does "
+        f"not clear: {uncovered}"
+    )
+
+
+def test_isolated_env_yields_safe_instagram_defaults(tmp_path):
+    """The publishing safety defaults are the premise of the dry-run gate test
+    below, so assert them directly instead of assuming them."""
+    cfg = CloudConfig(tmp_path)
+
+    assert cfg.instagram_dry_run is True
+    assert cfg.instagram_allow_upload is False
+    assert cfg.instagram_allow_publish is False
+    assert cfg.enable_instagram_worker is False
+    assert cfg.enable_weekly_scheduler is False
+    assert cfg.public_base_url == ""
 
 
 # =============================================================================
@@ -360,11 +458,12 @@ def test_instagram_worker_claims_and_publishes_due_job(tmp_path):
     cfg = CloudConfig(tmp_path)
     cfg.database_url = f"sqlite:///{db_file}"
     cfg.instagram_prepare_minutes_before = 30
-    # CloudConfig defaults to dry_run=True / allow_upload=False / allow_publish=False, so
-    # execute_job() would short-circuit at its dry-run safety gate and never reach the
-    # upload -> poll -> publish -> remote-verify path this test exists to cover. Enabling
-    # the flags here is safe because api_client below is a fully mocked
-    # InstagramAPIClient -- no real Meta Graph API call can happen.
+    # Under the isolated environment the flags resolve to dry_run=True /
+    # allow_upload=False / allow_publish=False, so execute_job() would short-circuit at
+    # its dry-run safety gate and never reach the upload -> poll -> publish ->
+    # remote-verify path this test exists to cover. Pinning the flags here is safe
+    # because api_client below is a fully mocked InstagramAPIClient -- no real Meta
+    # Graph API call can happen.
     cfg.instagram_dry_run = False
     cfg.instagram_allow_upload = True
     cfg.instagram_allow_publish = True
@@ -418,25 +517,30 @@ def test_instagram_worker_claims_and_publishes_due_job(tmp_path):
     assert completed_job.permalink == "https://instagr.am/p/123"
 
 
-def test_instagram_worker_dry_run_gate_blocks_real_upload(tmp_path, monkeypatch):
-    """The default CloudConfig safety flags (dry_run=True / allow_upload=False) must stop
+def test_instagram_worker_dry_run_gate_blocks_real_upload(tmp_path):
+    """The publishing safety flags (dry_run=True / allow_upload=False) must stop
     execute_job() before any binary upload or publish call reaches Meta -- a job may only
     be simulated, never really published, unless the flags are explicitly enabled.
 
-    The flags are cleared from the environment first. CloudConfig._load_dotenv copies the
-    repo's real .env into os.environ and leaves it there for the rest of the process, so
-    any earlier test that built a CloudConfig at the repo root decides what "default"
-    means here -- and this test then passes or fails on collection order rather than on
-    the behaviour it is meant to pin.
+    The environment is cleared by the isolated_cloud_env fixture above, not per test:
+    CloudConfig._load_dotenv copies the repo's real .env into os.environ and leaves it
+    there for the rest of the process, so without that fixture whichever test built a
+    CloudConfig first decides what "default" means here.
     """
-    for flag in ("INSTAGRAM_DRY_RUN", "INSTAGRAM_ALLOW_UPLOAD", "INSTAGRAM_ALLOW_PUBLISH"):
-        monkeypatch.delenv(flag, raising=False)
-
     db_file = tmp_path / "cloud_test.db"
     cfg = CloudConfig(tmp_path)
     cfg.database_url = f"sqlite:///{db_file}"
     cfg.instagram_prepare_minutes_before = 30
-    # Deliberately NOT enabling instagram_dry_run/allow_upload/allow_publish.
+    # The blocking flag values are pinned on the object rather than left to
+    # CloudConfig's env-resolved defaults. INSTAGRAM_DRY_RUN / INSTAGRAM_ALLOW_UPLOAD
+    # in a developer's environment would otherwise decide what this test exercises,
+    # and on a machine configured for live Instagram work the assertions below would
+    # be checking the live upload path instead of the guard.
+    # (That the defaults are these same safe values is covered separately by
+    # test_isolated_env_yields_safe_instagram_defaults.)
+    cfg.instagram_dry_run = True
+    cfg.instagram_allow_upload = False
+    cfg.instagram_allow_publish = False
 
     db = Database(cfg.database_url)
     storage = LocalMediaStorageAdapter(tmp_path / "media_storage")
@@ -535,6 +639,9 @@ def test_health_endpoint_diagnostics(tmp_path):
     cfg.database_url = f"sqlite:///{db_file}"
     cfg.telegram_bot_token = "123456:SECRET_BOT_TOKEN"
     cfg.meta_access_token = "EAAB_SECRET_META_TOKEN"
+    # HEALTHY requires is_storage_configured; pin the backend so the assertion does not
+    # depend on MEDIA_STORAGE_BACKEND / S3_* resolution on the machine running the test.
+    cfg.media_storage_backend = "local"
 
     db = Database(cfg.database_url)
     health_data = get_health_status(cfg, db)
@@ -570,14 +677,28 @@ def test_dry_development_mode_zero_external_actions(tmp_path):
 def test_local_worker_run_cycle_and_obsidian_sync(tmp_path):
     """Test 15, 28, 29: Local worker runs cycle, handles offline queue, and syncs Obsidian without crashing."""
     vault_dir = tmp_path / "obsidian_vault"
+
+    # LocalWorker builds a real LocalWorkerCloudClient out of PUBLIC_BASE_URL and
+    # LOCAL_WORKER_API_KEY when none is injected, and run_cycle() then really posts a
+    # heartbeat and really claims the next pending command. On a machine pointed at the
+    # live Railway control plane that is an outbound call to production from a unit test,
+    # so the client is always mocked here -- offline behaviour is what this test asserts.
+    mock_cloud_client = MagicMock(spec=LocalWorkerCloudClient)
+    mock_cloud_client.send_heartbeat.return_value = (False, {}, "PUBLIC_BASE_URL_MISSING")
+    mock_cloud_client.get_next_command.return_value = (False, {}, "PUBLIC_BASE_URL_MISSING")
+    mock_cloud_client.get_cloud_state.return_value = (False, {}, "PUBLIC_BASE_URL_MISSING")
+
     worker = LocalWorker(
         worker_id="win_test_worker",
         base_dir=tmp_path,
-        vault_path=vault_dir
+        vault_path=vault_dir,
+        cloud_client=mock_cloud_client
     )
 
     cycle_res = worker.run_cycle()
     assert cycle_res["worker_id"] == "win_test_worker"
+    assert cycle_res["heartbeat_ok"] is False
+    assert cycle_res["processed_command_id"] is None
     assert (vault_dir / "03_APPROVALS").exists()
 
 
