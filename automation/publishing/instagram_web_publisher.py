@@ -87,8 +87,34 @@ class InstagramWebPublisher(BaseInstagramWebPublisher):
 
         with self.browser_manager.connect() as (_browser, context):
             page = context.pages[0] if context.pages else context.new_page()
+            self._let_navigation_leave_an_abandoned_composer(page)
             obs = InstagramWebObserver(page)
             return self._run_composer(obs, page, video_path, caption, hashtags, target, reel_id)
+
+    @staticmethod
+    def _let_navigation_leave_an_abandoned_composer(page: Any) -> None:
+        """
+        A previous attempt may have left a half-filled composer open in this tab. Loading
+        /scheduled_content/ over it is the right thing -- nothing in it was published --
+        but if the site raises a native "leave page?" prompt, Playwright's default is to
+        DISMISS it, which cancels the navigation and times the whole attempt out.
+
+        Only a beforeunload prompt is accepted. Anything else keeps the default, so no
+        native confirm can ever be answered "yes" by accident.
+        """
+        def _on_dialog(dialog: Any) -> None:
+            try:
+                if getattr(dialog, "type", "") == "beforeunload":
+                    dialog.accept()
+                else:
+                    dialog.dismiss()
+            except Exception:
+                pass
+
+        try:
+            page.on("dialog", _on_dialog)
+        except Exception:
+            pass
 
     @staticmethod
     def _wait_for_page_ready(page: Any, timeout_seconds: int) -> bool:
