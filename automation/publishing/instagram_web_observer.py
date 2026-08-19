@@ -49,11 +49,19 @@ class InstagramWebObserver:
             logger.debug(f"[IG WEB] snapshot '{tag}' alinamadi: {e}")
 
     def _first_visible(self, selectors: List[str], timeout_ms: int = 2500) -> Optional[Any]:
+        """Try each selector in turn, actually waiting up to `timeout_ms` for it to render.
+
+        Locator.is_visible(timeout=...) ignores its timeout and returns instantly -- it is
+        a snapshot check, not a wait. Instagram's composer is a React SPA that keeps
+        rendering after "domcontentloaded", so an instant check catches it mid-render and
+        reports every control as missing even when it appears a moment later. wait_for()
+        is the call that actually polls for the timeout.
+        """
         for sel in selectors:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=timeout_ms):
-                    return loc
+                loc.wait_for(state="visible", timeout=timeout_ms)
+                return loc
             except Exception:
                 continue
         return None
@@ -80,7 +88,25 @@ class InstagramWebObserver:
     # ------------------------------------------------------------------
 
     def open_composer(self) -> bool:
-        return self._click(InstagramWebSelectors.OPEN_COMPOSER_BUTTONS, "İçeriği planla / Oluştur")
+        """Click the /scheduled_content/ page's own 'İçeriği planla' button.
+
+        This must be called after navigating to /scheduled_content/ -- that page's button
+        is the only entry point used, since it is the one guaranteed to open a composer
+        with the schedule toggle. There is no fallback to the generic 'Oluştur' composer:
+        that opens a different dialog with no scheduling at all, so a missing button is
+        reported rather than silently swapped for the wrong flow.
+        """
+        if self._click(InstagramWebSelectors.OPEN_COMPOSER_BUTTONS, "İçeriği planla"):
+            return True
+
+        self.capture_error_snapshot("composer_button_not_found")
+        logger.error("=" * 50)
+        logger.error("STATUS: NEEDS_USER_HTML")
+        logger.error("Platform: Instagram Web")
+        logger.error("Target: /scheduled_content/ page's 'İçeriği planla' button")
+        logger.error("Needed: outerHTML of that button and its parent/wrapper.")
+        logger.error("=" * 50)
+        return False
 
     def upload_file(self, video_path: Path) -> bool:
         """Attach the video. Prefers the hidden file input; falls back to the visible
@@ -174,8 +200,7 @@ class InstagramWebObserver:
             ):
                 try:
                     row = self.page.locator(row_sel).last
-                    if not row.is_visible(timeout=1200):
-                        continue
+                    row.wait_for(state="visible", timeout=1200)
                     sw = row.locator(InstagramWebSelectors.SWITCH_INPUTS[0]).last
                     if sw.count() > 0:
                         return sw
@@ -375,8 +400,7 @@ class InstagramWebObserver:
         for sel in InstagramWebSelectors.MONTH_HEADER:
             try:
                 loc = self.page.locator(sel).first
-                if not loc.is_visible(timeout=1200):
-                    continue
+                loc.wait_for(state="visible", timeout=1200)
                 text = (loc.inner_text() or "").strip()
             except Exception:
                 continue
@@ -400,8 +424,7 @@ class InstagramWebObserver:
             sel = template.format(day=day)
             try:
                 loc = self.page.locator(sel).first
-                if not loc.is_visible(timeout=1000):
-                    continue
+                loc.wait_for(state="visible", timeout=1000)
                 loc.click(timeout=2500)
                 return True
             except Exception:

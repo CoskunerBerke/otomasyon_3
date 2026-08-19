@@ -19,11 +19,12 @@ from typing import List
 class InstagramWebSelectors:
     """Semantic selectors for the instagram.com scheduling flow."""
 
-    # Entry point on /scheduled_content/ ("İçeriği planla") and the generic composer.
+    # Entry point is /scheduled_content/'s own "İçeriği planla" button -- and only that.
+    # The generic "Oluştur" composer (sidebar) opens a different dialog with no schedule
+    # toggle at all, so it is deliberately NOT a fallback here: falling back to it would
+    # silently swap in the wrong flow instead of failing loudly (Kural 31).
     OPEN_COMPOSER_BUTTONS: List[str] = [
         "div[role='button']:has-text('İçeriği planla'), div[role='button']:has-text('Schedule content')",
-        "svg[aria-label='Yeni gönderi'], svg[aria-label='New post'], "
-        "a[href='#'][role='link']:has-text('Oluştur'), div[role='button']:has-text('Oluştur')",
     ]
 
     # "Fotoğrafları ve videoları buraya sürükle" -> <button>Bilgisayardan seç</button>

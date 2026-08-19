@@ -37,6 +37,11 @@ class _Loc:
     def is_visible(self, timeout=None):
         return self._visible
 
+    def wait_for(self, state="visible", timeout=None):
+        """Mirrors real Playwright: raises if the awaited state isn't met, else returns."""
+        if state == "visible" and not self._visible:
+            raise TimeoutError(f"locator not visible within {timeout}ms")
+
     def inner_text(self):
         return self._text
 

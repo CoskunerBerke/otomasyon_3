@@ -70,9 +70,13 @@ def run_rehearsal(week_id: str, index: int, base_dir: Path) -> int:
         obs = InstagramWebObserver(page)
 
         try:
-            page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=30000)
+            page.goto(
+                "https://www.instagram.com/scheduled_content/",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
         except Exception as e:
-            print(f"HATA: instagram.com acilamadi: {e}")
+            print(f"HATA: instagram.com/scheduled_content/ acilamadi: {e}")
             return 1
 
         results = []

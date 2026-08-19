@@ -6,7 +6,7 @@ reimplement Flow generation, YouTube/TikTok publishing, or Instagram media hando
 it calls the existing, working modules one Reel at a time, in a fixed phase order, and
 never lets a later phase start before the previous one is fully (14/14) done:
 
-    PLAN -> GENERATE -> VALIDATE -> LOCK -> YOUTUBE -> TIKTOK -> INSTAGRAM_HANDOFF -> DONE
+    PLAN -> GENERATE -> VALIDATE -> LOCK -> YOUTUBE -> TIKTOK -> INSTAGRAM -> DONE
 
 Content plan (workspace/batches/<week_id>/manifest.json) becomes immutable once LOCKED.
 Platform publishing status (workspace/batches/<week_id>/progress.json) is tracked
@@ -39,6 +39,11 @@ from automation.publishing.tiktok_publisher import (
     BaseTikTokPublisher,
     TikTokPublisher,
     MockTikTokPublisher,
+)
+from automation.publishing.instagram_web_publisher import (
+    BaseInstagramWebPublisher,
+    InstagramWebPublisher,
+    MockInstagramWebPublisher,
 )
 from automation.publishing.eligibility import is_live_production_eligible, HARD_EXCLUDED_REEL_IDS
 from automation.publishing.preflight_gate import run_pre_publish_hard_gate, verify_reel_id_invariant, is_placeholder_metadata
@@ -73,6 +78,27 @@ from automation.orchestration.slot_generator import (
 from automation.orchestration.obsidian_mirror import ObsidianControlCenter, DEFAULT_VAULT_PATH
 
 PLATFORM_SUCCESS_STATUSES = ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED")
+
+# How Instagram gets its Reels. Exactly one of these runs per Reel -- running both would
+# schedule the post through the composer AND hand the same media to the cloud worker,
+# which publishes it again when its moment arrives. Two copies of every Reel.
+#
+#   "web"   -- drive instagram.com's native scheduler; the post appears in the account's
+#              scheduled queue immediately, like YouTube and TikTok. Ends at SCHEDULED.
+#   "cloud" -- upload to S3 and hand off to the Railway worker, which publishes at the
+#              scheduled moment via the Graph API. Ends at MEDIA_READY.
+INSTAGRAM_DELIVERY_WEB = "web"
+INSTAGRAM_DELIVERY_CLOUD = "cloud"
+INSTAGRAM_DELIVERY_MODES = (INSTAGRAM_DELIVERY_WEB, INSTAGRAM_DELIVERY_CLOUD)
+
+# "This Reel already reached Instagram", whichever route delivered it. Both routes' end
+# states count, always -- the delivery mode chooses what to do with NEW work, never how
+# to read work that is already done.
+#
+# Reading this per-mode was a real bug: with the web route selected, a week delivered via
+# the cloud (ending at MEDIA_READY) read as unfinished, so the pipeline resumed it and
+# scheduled all 14 already-delivered Reels a second time through the composer.
+INSTAGRAM_TERMINAL_STATUSES = ("MEDIA_READY",) + PLATFORM_SUCCESS_STATUSES
 
 # The submit went through but the confirmation read-back was inconclusive. The video is
 # very likely correctly scheduled on the platform, so halting the whole week here does
@@ -116,6 +142,8 @@ class SimpleWeeklyPipeline:
         stuck_wait_minutes: int = 30,
         stuck_retry_seconds: int = 300,
         content_mode: str = SILENT_STEP_BY_STEP,
+        instagram_delivery: str = INSTAGRAM_DELIVERY_WEB,
+        ig_web_publisher: Optional[BaseInstagramWebPublisher] = None,
     ):
         self.base_dir = (base_dir or Path(".").resolve())
         self.dry_run = dry_run
@@ -126,6 +154,12 @@ class SimpleWeeklyPipeline:
         # Only used when PLAN creates a fresh manifest. A resumed manifest keeps the mode
         # it was locked with, so a rerun can never silently re-mode a week mid-flight.
         self.content_mode = content_mode
+
+        if instagram_delivery not in INSTAGRAM_DELIVERY_MODES:
+            raise ValueError(
+                f"Unknown instagram_delivery '{instagram_delivery}' -- expected one of {INSTAGRAM_DELIVERY_MODES}."
+            )
+        self.instagram_delivery = instagram_delivery
         # How long to hold a stuck platform for a manual fix before moving on, and how
         # often to retry inside that window. Tests set these to 0 to skip the wait.
         self.stuck_wait_minutes = stuck_wait_minutes
@@ -157,6 +191,7 @@ class SimpleWeeklyPipeline:
         self.yt_publisher = yt_publisher
         self.tt_publisher = tt_publisher
         self.cloud_client = cloud_client
+        self.ig_web_publisher = ig_web_publisher
 
     # =========================================================================
     # PHASE 0: PLAN (manifest creation, Reel ID allocation)
@@ -257,7 +292,7 @@ class SimpleWeeklyPipeline:
                 entry = progress.get(reel.reel_id, {})
                 reached_a_platform = any(
                     entry.get(platform, {}).get("status")
-                    in (PLATFORM_SUCCESS_STATUSES + (("MEDIA_READY",) if platform == "instagram" else ()))
+                    in (INSTAGRAM_TERMINAL_STATUSES if platform == "instagram" else PLATFORM_SUCCESS_STATUSES)
                     for platform in ("youtube", "tiktok", "instagram")
                 )
                 if not reached_a_platform:
@@ -659,7 +694,7 @@ class SimpleWeeklyPipeline:
         for reel_id in reel_ids:
             status = progress.get(reel_id, {}).get(platform, {}).get("status")
             if platform == "instagram":
-                if status != "MEDIA_READY":
+                if status not in INSTAGRAM_TERMINAL_STATUSES:
                     return False
             elif status not in PLATFORM_SUCCESS_STATUSES:
                 return False
@@ -799,7 +834,100 @@ class SimpleWeeklyPipeline:
         cfg = CloudConfig(self.base_dir)
         self.cloud_client = LocalWorkerCloudClient(public_base_url=cfg.public_base_url, api_key=cfg.local_worker_api_key)
 
+    def _init_ig_web_publisher_if_needed(self) -> None:
+        if self.ig_web_publisher is not None:
+            return
+        self.ig_web_publisher = (
+            MockInstagramWebPublisher() if self.dry_run else InstagramWebPublisher()
+        )
+
     def _run_instagram_phase(self, manifest: BatchManifest) -> PhaseResult:
+        """Delivers the week to Instagram by exactly one route -- see INSTAGRAM_DELIVERY_MODES."""
+        if self.instagram_delivery == INSTAGRAM_DELIVERY_WEB:
+            return self._run_instagram_web_phase(manifest)
+        return self._run_instagram_cloud_phase(manifest)
+
+    def _run_instagram_web_phase(self, manifest: BatchManifest) -> PhaseResult:
+        """
+        Schedules each Reel through instagram.com's own composer, so the post shows up in
+        the account's scheduled queue right away rather than waiting for a worker.
+
+        One composer session per Reel, and a Reel already marked done is skipped -- a
+        rerun after a partial week must never schedule the same video twice.
+        """
+        phase = "INSTAGRAM_WEB"
+        if manifest.status != "LOCKED":
+            return PhaseResult(False, phase, "Manifest LOCKED değil, planlama başlayamaz.", {})
+
+        self._init_ig_web_publisher_if_needed()
+        self.batch_repo.ensure_progress_entries(manifest.week_id, manifest.reel_ids())
+
+        for reel in manifest.reels:
+            progress = self.batch_repo.load_progress(manifest.week_id)
+            entry = progress.get(reel.reel_id, {}).get("instagram", {})
+            if entry.get("status") in INSTAGRAM_TERMINAL_STATUSES:
+                # Covers a Reel already handed to the cloud worker too: scheduling it here
+                # as well would put two copies of the same video on the account.
+                logger.info(f"[INSTAGRAM] {reel.reel_id} zaten {entry.get('status')}, atlanıyor.")
+                continue
+
+            video_file = Path(reel.video_path) if reel.video_path else None
+            ok, reason = self._instagram_preflight(manifest, reel, video_file, phase)
+            if not ok:
+                return PhaseResult(False, phase, f"{reel.reel_id}: {reason}", {"failed_reel": reel.reel_id})
+
+            logger.info(f"[INSTAGRAM] {reel.reel_id} planlanıyor ({reel.index}/14): {reel.scheduled_at_local}")
+            status, error = self.ig_web_publisher.schedule_reel(
+                video_path=video_file,
+                caption=reel.caption,
+                hashtags=reel.hashtags,
+                scheduled_at_local=reel.scheduled_at_local,
+                reel_id=reel.reel_id,
+            )
+
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", status, error=error
+            )
+
+            if status in PLATFORM_SUCCESS_STATUSES:
+                logger.info(f"[INSTAGRAM] {reel.reel_id} planlandı.")
+                continue
+
+            logger.error(f"[INSTAGRAM] {reel.reel_id} planlanamadı ({status}): {error}")
+            return PhaseResult(
+                False, phase, f"{reel.reel_id}: {status} -- {error}",
+                {"failed_reel": reel.reel_id, "status": status, "error": error},
+            )
+
+        return PhaseResult(True, phase, f"{len(manifest.reels)}/{len(manifest.reels)} Instagram planlaması tamamlandı", {})
+
+    def _instagram_preflight(self, manifest: BatchManifest, reel: BatchReel, video_file: Optional[Path], phase: str):
+        """The media checks both Instagram routes share. Returns (ok, reason)."""
+        if video_file is None or not video_file.exists():
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL",
+                error="Video file missing on disk",
+            )
+            return False, "video dosyası bulunamadı"
+
+        reel_state = self.state_repo.get_reel_state(reel.reel_id)
+        elig_ok, elig_reason = is_live_production_eligible(reel_state, video_file)
+        if not elig_ok:
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=elig_reason
+            )
+            return False, elig_reason
+
+        id_ok, id_reason = verify_reel_id_invariant(reel.reel_id, reel_state.reel_id, reel.reel_id, video_file)
+        if not id_ok:
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=id_reason
+            )
+            return False, id_reason
+
+        return True, ""
+
+    def _run_instagram_cloud_phase(self, manifest: BatchManifest) -> PhaseResult:
         if manifest.status != "LOCKED":
             return PhaseResult(False, "INSTAGRAM_HANDOFF", "Manifest LOCKED değil, handoff başlayamaz.", {})
 
@@ -808,27 +936,18 @@ class SimpleWeeklyPipeline:
         self.batch_repo.ensure_progress_entries(manifest.week_id, reel_ids)
 
         for reel in manifest.reels:
-            video_file = Path(reel.video_path)
-            if not video_file.exists():
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error="Video file missing on disk")
-                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: video dosyası bulunamadı", {"failed_reel": reel.reel_id})
-
             progress = self.batch_repo.load_progress(manifest.week_id)
             entry = progress.get(reel.reel_id, {}).get("instagram", {})
-            if entry.get("status") == "MEDIA_READY":
-                logger.info(f"[INSTAGRAM] {reel.reel_id} zaten MEDIA_READY, atlanıyor.")
+            if entry.get("status") in INSTAGRAM_TERMINAL_STATUSES:
+                logger.info(f"[INSTAGRAM] {reel.reel_id} zaten {entry.get('status')}, atlanıyor.")
                 continue
 
-            reel_state = self.state_repo.get_reel_state(reel.reel_id)
-            elig_ok, elig_reason = is_live_production_eligible(reel_state, video_file)
-            if not elig_ok:
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=elig_reason)
-                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: {elig_reason}", {"failed_reel": reel.reel_id})
-
-            id_ok, id_reason = verify_reel_id_invariant(reel.reel_id, reel_state.reel_id, reel.reel_id, video_file)
-            if not id_ok:
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=id_reason)
-                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: {id_reason}", {"failed_reel": reel.reel_id})
+            # Same media checks as the web route, from the same place -- provenance,
+            # eligibility and the Reel ID invariant do not depend on how it is delivered.
+            video_file = Path(reel.video_path) if reel.video_path else None
+            ok, reason = self._instagram_preflight(manifest, reel, video_file, "INSTAGRAM_HANDOFF")
+            if not ok:
+                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: {reason}", {"failed_reel": reel.reel_id})
 
             logger.info(f"[INSTAGRAM] {reel.reel_id} Railway/S3'e gönderiliyor ({reel.index}/14)...")
             ok, data, err = handoff_reel_to_cloud(
@@ -1146,6 +1265,18 @@ def main():
     parser.add_argument("--vault-path", type=str, default=None, help="Path to Obsidian vault")
     parser.add_argument("--phase", type=str, default=None, choices=["generate", "validate", "lock", "youtube", "tiktok", "instagram"], help="Debug only: run a single phase")
     parser.add_argument(
+        "--instagram-delivery",
+        type=str,
+        default=INSTAGRAM_DELIVERY_WEB,
+        choices=list(INSTAGRAM_DELIVERY_MODES),
+        help=(
+            "How Instagram is delivered. 'web' schedules through instagram.com's own "
+            "composer (post appears in the scheduled queue immediately). 'cloud' hands "
+            "the media to the Railway worker, which publishes it at the scheduled moment. "
+            "Never both -- that would post every Reel twice."
+        ),
+    )
+    parser.add_argument(
         "--content-mode",
         type=str,
         default=SILENT_STEP_BY_STEP,
@@ -1169,6 +1300,7 @@ def main():
         week_id=args.week_id,
         start_date=start_date,
         content_mode=args.content_mode,
+        instagram_delivery=args.instagram_delivery,
     )
 
     success, results, manifest = pipeline.run(phase=args.phase)
