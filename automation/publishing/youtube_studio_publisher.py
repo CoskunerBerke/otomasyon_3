@@ -19,6 +19,11 @@ from .youtube_studio_ui_observer import YouTubeStudioUIObserver
 
 logger = logging.getLogger("ReelsAIFactory.YouTubeStudioPublisher")
 
+# Gaps between remote-verification attempts. A Short that was just scheduled can take
+# well over a minute to show "Planlandı" in the content list, because YouTube runs its
+# content check first. The last entry is 0: no sleep after the final attempt.
+VERIFY_BACKOFF_SECONDS = (10.0, 20.0, 30.0, 0.0)
+
 def parse_schedule_datetime(scheduled_at_local: str) -> Tuple[str, str]:
     """
     Parses a local schedule datetime string (ISO or space separated)
@@ -248,17 +253,12 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
 
                 # Bounded remote verification: eventual consistency on YouTube's side means
                 # a schedule that just succeeded may not be reflected in the content list
-                # instantly. Retry once (max 2 total attempts) before treating it as
-                # inconclusive. Never re-uploads or re-submits the schedule while verifying.
-                is_sched, s_msg = observer.verify_remote_scheduled_status(
-                    remote_id=target_vid_id,
-                    target_title=record.title,
-                    expected_date_str=expected_date_str,
-                    expected_time_str=expected_time_str,
-                    channel_id=self.config.youtube_expected_channel_id
-                )
-                if not is_sched:
-                    time.sleep(5.0)
+                # instantly -- the content check has to finish first. Retry with growing
+                # gaps before treating it as inconclusive; two attempts seconds apart were
+                # not enough (2026-08-19: 5 of 14 Reels flagged while all 14 were scheduled).
+                # Never re-uploads or re-submits the schedule while verifying.
+                is_sched, s_msg = False, "NOT_ATTEMPTED"
+                for attempt, backoff in enumerate(VERIFY_BACKOFF_SECONDS, start=1):
                     is_sched, s_msg = observer.verify_remote_scheduled_status(
                         remote_id=target_vid_id,
                         target_title=record.title,
@@ -266,6 +266,14 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                         expected_time_str=expected_time_str,
                         channel_id=self.config.youtube_expected_channel_id
                     )
+                    if is_sched:
+                        break
+                    if backoff:
+                        logger.info(
+                            f"[{record.reel_id}] Uzak dogrulama {attempt}. denemede sonuçsuz ({s_msg}); "
+                            f"{backoff:.0f}s sonra tekrar denenecek."
+                        )
+                        time.sleep(backoff)
                 if not is_sched:
                     # Still inconclusive after 2 attempts: preserve remote evidence
                     # (remote_id/remote_url already captured above) and never falsely
