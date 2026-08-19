@@ -16,6 +16,17 @@ logger = logging.getLogger("ReelsAIFactory.TikTokUIObserver")
 # How long to let TikTok's date field catch up with a clicked calendar cell before
 # calling it a mismatch. One immediate read is not enough: the same date that failed
 # for one Reel had succeeded for the one before it, seconds earlier.
+# How long to let TikTok's upload form finish rendering before deciding the "Daha fazla
+# göster" control is absent. It arrives with the rest of the form, so a few hundred
+# milliseconds of probing reads a late button as a missing one.
+# Gaps between remote-verification passes. TikTok's content list is not updated the
+# instant a schedule is confirmed, and a single immediate read reported 7 of 14 correctly
+# scheduled Reels as unverified. The trailing 0 means no sleep after the final attempt.
+REMOTE_VERIFY_BACKOFF_SECONDS = (5.0, 10.0, 20.0, 0.0)
+
+MORE_OPTIONS_WAIT_SECONDS = 12.0
+MORE_OPTIONS_PROBE_MS = 800
+
 DATE_READBACK_ATTEMPTS = 6
 DATE_READBACK_INTERVAL_SECONDS = 0.5
 
@@ -1350,51 +1361,68 @@ class TikTokUIObserver:
         """
         aigc_loc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
         try:
-            if hasattr(aigc_loc, "is_visible") and aigc_loc.is_visible(timeout=300):
+            if hasattr(aigc_loc, "is_visible") and aigc_loc.is_visible(timeout=MORE_OPTIONS_PROBE_MS):
                 logger.info("[TIKTOK MORE] AIGC container already visible | MORE_OPTIONS_ALREADY_EXPANDED")
                 return True
         except Exception:
             pass
 
         logger.info("[TIKTOK MORE] AIGC container not visible. Expanding 'Daha fazla göster'...")
+
+        # Kural 31: two strategies. The three that were dropped were not just surplus --
+        # `div:has-text('Daha fazla göster')` matches every ancestor containing that text,
+        # up to and including the page wrapper, so `.first` could resolve to a huge
+        # container and the click would land anywhere inside it. `div.more-btn` alone is
+        # kept as the language-independent fallback.
         btn_selectors = [
-            "div.more-btn:has(span:text-is('Daha fazla göster'))",
-            "div.more-btn:has(span:text-is('Show more'))",
+            "div.more-btn:has(span:text-is('Daha fazla göster')), div.more-btn:has(span:text-is('Show more'))",
             "div.more-btn",
-            "div:has-text('Daha fazla göster')",
-            "button:has-text('Daha fazla göster')"
         ]
 
-        for b_sel in btn_selectors:
-            try:
-                loc = self.page.locator(b_sel).first
-                if hasattr(loc, "is_visible") and loc.is_visible(timeout=500):
+        # The control arrives with the rest of the upload form. Probing for a few hundred
+        # milliseconds is how a late-rendering button gets read as a missing one -- the
+        # same mistake that cost this run three separate failures today.
+        deadline = time.time() + MORE_OPTIONS_WAIT_SECONDS
+        while time.time() < deadline:
+            for b_sel in btn_selectors:
+                try:
+                    loc = self.page.locator(b_sel).first
+                    if not (hasattr(loc, "is_visible") and loc.is_visible(timeout=MORE_OPTIONS_PROBE_MS)):
+                        continue
                     if hasattr(loc, "scroll_into_view_if_needed"):
                         loc.scroll_into_view_if_needed(timeout=1000)
                     loc.click(timeout=1500)
                     logger.info(f"[TIKTOK MORE] Clicked '{b_sel}'")
                     time.sleep(0.3)
 
-                    # Poll up to 3 seconds for AIGC container to become visible
+                    # Poll for the AIGC container to appear after the expand.
                     poll_start = time.time()
                     while time.time() - poll_start < 3.0:
                         fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-                        if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=300):
+                        if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=MORE_OPTIONS_PROBE_MS):
                             logger.info("[TIKTOK MORE] AIGC container visible")
                             logger.info("MORE_OPTIONS_EXPANDED")
                             return True
                         time.sleep(0.15)
-            except Exception as e:
-                logger.debug(f"[TIKTOK MORE] Click attempt on {b_sel} failed: {e}")
+                except Exception as e:
+                    logger.debug(f"[TIKTOK MORE] Click attempt on {b_sel} failed: {e}")
+
+            # Neither strategy resolved yet; the form may still be rendering.
+            time.sleep(0.5)
 
         # Check one last time
         try:
             fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-            if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=500):
+            if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=MORE_OPTIONS_PROBE_MS):
                 logger.info("[TIKTOK MORE] AIGC container visible | MORE_OPTIONS_EXPANDED")
                 return True
         except Exception:
             pass
+
+        # Capture the page while the form is still on screen. Without this the only
+        # record of the failure is a log line asking a human for HTML that nobody is
+        # standing by to copy.
+        self.capture_error_snapshot("tiktok_more_options_not_found")
 
         logger.error("=" * 50)
         logger.error("STATUS: NEEDS_USER_HTML")
@@ -1894,14 +1922,40 @@ class TikTokUIObserver:
         A navigation attempt by itself is never treated as proof of scheduling.
         """
         content_url = "https://www.tiktok.com/tiktokstudio/content"
-        try:
-            if "tiktokstudio/content" not in (self.page.url or ""):
-                self.page.goto(
-                    content_url,
-                    wait_until="domcontentloaded",
-                    timeout=20000
+
+        # Reload every attempt, even when already on this URL. A post scheduled seconds
+        # ago is not in a list that was rendered before it existed, and the old code
+        # skipped navigation precisely in that case -- so the check ran against a stale
+        # page and reported "not verified" for a post that was there.
+        for attempt, backoff in enumerate(REMOTE_VERIFY_BACKOFF_SECONDS, start=1):
+            ok, msg = self._read_scheduled_marker_once(
+                content_url, expected_title, expected_time_str
+            )
+            if ok:
+                return True, msg
+            if backoff:
+                logger.info(
+                    f"[TIKTOK VERIFY] {attempt}. deneme sonucsuz; {backoff:.0f}s sonra tekrar."
                 )
-                time.sleep(2.0)
+                time.sleep(backoff)
+
+        self.capture_error_snapshot("tiktok_remote_schedule_not_verified")
+        return False, msg
+
+    def _read_scheduled_marker_once(
+        self,
+        content_url: str,
+        expected_title: str,
+        expected_time_str: str,
+    ) -> Tuple[bool, str]:
+        """One pass over the content list: reload, read, look for the scheduled markers."""
+        try:
+            self.page.goto(
+                content_url,
+                wait_until="domcontentloaded",
+                timeout=20000
+            )
+            time.sleep(2.0)
         except Exception as e:
             return False, f"REMOTE_VERIFICATION_NAVIGATION_FAILED: {e}"
 

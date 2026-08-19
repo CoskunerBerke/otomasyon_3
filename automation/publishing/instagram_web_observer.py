@@ -19,6 +19,13 @@ from .instagram_web_selectors import InstagramWebSelectors
 
 logger = logging.getLogger("ReelsAIFactory.InstagramWebObserver")
 
+# Instagram keeps rendering long after "domcontentloaded", and processes an attached
+# video before the composer will advance. These are the two places that were tuned in
+# milliseconds and would read a slow step as a broken one -- the failure mode that cost
+# this project three separate outages in one day (Flow, YouTube Studio, TikTok).
+STEP_WAIT_MS = 15000
+UPLOAD_SETTLE_SECONDS = 5.0
+
 TR_MONTHS = {
     1: "Oca", 2: "Şub", 3: "Mar", 4: "Nis", 5: "May", 6: "Haz",
     7: "Tem", 8: "Ağu", 9: "Eyl", 10: "Eki", 11: "Kas", 12: "Ara",
@@ -119,7 +126,7 @@ class InstagramWebObserver:
                 if loc.count() > 0:
                     loc.set_input_files(str(video_path))
                     logger.info(f"[IG WEB] Dosya dogrudan input'a verildi: {video_path.name}")
-                    time.sleep(2.0)
+                    time.sleep(UPLOAD_SETTLE_SECONDS)
                     return True
             except Exception as e:
                 logger.debug(f"[IG WEB] file input {sel}: {e}")
@@ -131,7 +138,7 @@ class InstagramWebObserver:
                     btn.click(timeout=3000)
                 fc.value.set_files(str(video_path))
                 logger.info(f"[IG WEB] Dosya file chooser ile verildi: {video_path.name}")
-                time.sleep(2.0)
+                time.sleep(UPLOAD_SETTLE_SECONDS)
                 return True
             except Exception as e:
                 logger.warning(f"[IG WEB] file chooser basarisiz: {e}")
@@ -140,16 +147,22 @@ class InstagramWebObserver:
         return False
 
     def advance_to_caption_step(self, max_steps: int = 3) -> bool:
-        """Click 'İleri' through crop and filter screens until the caption step appears."""
+        """Click 'İleri' through crop and filter screens until the caption step appears.
+
+        Instagram processes the video after it is attached, and the crop screen's 'İleri'
+        does not become usable until that finishes -- for a 30s Reel that is seconds, not
+        milliseconds. Each wait here is therefore generous: a step that is merely slow
+        must not be read as a composer that failed to advance.
+        """
         for step in range(max_steps):
-            if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=1500) is not None:
+            if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=STEP_WAIT_MS) is not None:
                 logger.info(f"[IG WEB] Caption adimina ulasildi ({step} 'İleri').")
                 return True
-            if not self._click(InstagramWebSelectors.NEXT_BUTTONS, "İleri"):
+            if not self._click(InstagramWebSelectors.NEXT_BUTTONS, "İleri", timeout_ms=STEP_WAIT_MS):
                 break
             time.sleep(1.2)
 
-        if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=2000) is not None:
+        if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=STEP_WAIT_MS) is not None:
             return True
         self.capture_error_snapshot("caption_step_not_reached")
         return False
