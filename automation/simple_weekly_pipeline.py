@@ -68,6 +68,7 @@ from automation.orchestration.slot_generator import (
     generate_14_slot_week_plan,
     calculate_next_safe_week_start,
     generate_week_id,
+    get_timezone,
 )
 from automation.orchestration.obsidian_mirror import ObsidianControlCenter, DEFAULT_VAULT_PATH
 
@@ -226,6 +227,89 @@ class SimpleWeeklyPipeline:
                 return manifest.week_id
         return None
 
+    def find_last_scheduled_date(self) -> Optional[datetime.date]:
+        """
+        The date of the latest slot that actually reached a platform, across every batch.
+
+        "Latest video on YouTube/TikTok/Instagram" is read from progress.json rather than
+        from the three Studio UIs: progress.json is written by the publishing phases
+        themselves and records the remote id and URL each one came back with, so it
+        already *is* the platform outcome -- without three more DOM scrapes that can
+        break on any layout change.
+
+        Slots that were planned but never published (PENDING/NOT_STARTED/FAILED) do not
+        count. Their dates are not occupied, so a new week may legitimately reuse them.
+        """
+        latest: Optional[datetime.date] = None
+
+        if not self.batch_repo.batches_dir.exists():
+            return None
+
+        for week_dir in sorted(self.batch_repo.batches_dir.iterdir()):
+            if not week_dir.is_dir():
+                continue
+            manifest = self.batch_repo.load_manifest(week_dir.name)
+            if manifest is None:
+                continue
+            progress = self.batch_repo.load_progress(week_dir.name)
+
+            for reel in manifest.reels:
+                entry = progress.get(reel.reel_id, {})
+                reached_a_platform = any(
+                    entry.get(platform, {}).get("status")
+                    in (PLATFORM_SUCCESS_STATUSES + (("MEDIA_READY",) if platform == "instagram" else ()))
+                    for platform in ("youtube", "tiktok", "instagram")
+                )
+                if not reached_a_platform:
+                    continue
+
+                try:
+                    slot_date = datetime.datetime.strptime(
+                        reel.scheduled_at_local, "%Y-%m-%d %H:%M:%S"
+                    ).date()
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"[PLAN] {reel.reel_id} has an unparseable scheduled_at_local "
+                        f"({reel.scheduled_at_local!r}) -- skipped when finding the last scheduled date."
+                    )
+                    continue
+
+                if latest is None or slot_date > latest:
+                    latest = slot_date
+
+        return latest
+
+    def _resolve_start_date(self) -> datetime.date:
+        """
+        Where the next week begins: the day after the last slot already on a platform.
+
+        Falls back to the next-Monday rule only when nothing has ever been published, and
+        never returns a date in the past -- 14 Reels take hours of Flow time, so the
+        earliest honest start is tomorrow even if the calendar says today is free.
+        """
+        if self.start_date:
+            return self.start_date
+
+        tz = get_timezone("Europe/Istanbul")
+        today = datetime.datetime.now(tz).date()
+        earliest = today + datetime.timedelta(days=1)
+
+        last_scheduled = self.find_last_scheduled_date()
+        if last_scheduled is None:
+            logger.info("[PLAN] Hicbir platformda planlanmis video yok -- takvim kuralina donuluyor.")
+            return max(calculate_next_safe_week_start(), earliest)
+
+        day_after = last_scheduled + datetime.timedelta(days=1)
+        chosen = max(day_after, earliest)
+        if chosen != day_after:
+            logger.warning(
+                f"[PLAN] Son planli video {last_scheduled} -- ertesi gun ({day_after}) gecmiste kaldigi icin "
+                f"baslangic {chosen} olarak alindi."
+            )
+        else:
+            logger.info(f"[PLAN] Son planli video {last_scheduled}; yeni hafta {chosen} tarihinde basliyor.")
+        return chosen
+
     def _get_or_create_manifest(self) -> BatchManifest:
         """Loads the existing manifest for this week, or creates a fresh DRAFT one."""
         if not self.week_id:
@@ -234,11 +318,20 @@ class SimpleWeeklyPipeline:
                 logger.info(f"[PLAN] Yarim kalmis batch bulundu, devam ediliyor: {resumable}")
                 self.week_id = resumable
 
-        start_date = self.start_date or calculate_next_safe_week_start()
+        start_date = self._resolve_start_date()
         week_id = self.week_id or generate_week_id(start_date)
         self.week_id = week_id
 
         existing = self.batch_repo.load_manifest(week_id)
+        if existing is not None and existing.start_date != start_date.isoformat() and self.week_id is None:
+            # The ISO week we computed is already occupied by a batch that starts on a
+            # different day. Resuming it would silently publish into the wrong week, so
+            # stop and let a human pick the date with --start-date / --week-id.
+            raise RuntimeError(
+                f"WEEK_ID_COLLISION: computed start {start_date} maps to {week_id}, but that week "
+                f"already exists starting {existing.start_date}. Re-run with an explicit "
+                f"--start-date or --week-id."
+            )
         if existing is not None:
             logger.info(f"[PLAN] Existing manifest loaded for {week_id} (status={existing.status}, mode={existing.content_mode})")
             # The manifest wins. A resumed week keeps the mode it was planned in even if
@@ -364,8 +457,23 @@ class SimpleWeeklyPipeline:
     def all_generated(self, manifest: BatchManifest) -> bool:
         return all(r.generation_status == "COMPLETE" for r in manifest.reels)
 
+    # Two Reels failing the same way in a row is a broken setup, not bad luck -- e.g.
+    # Flow returning silent renders for an audio mode. Stopping there leaves the
+    # remaining Flow credits unspent and the batch resumable once the cause is fixed.
+    MAX_CONSECUTIVE_SAME_FAILURES = 2
+
+    @staticmethod
+    def _failure_signature(error: Exception) -> str:
+        """The error's kind, ignoring the Reel-specific tail: 'QC_FAILED: AUDIO_MISSING'."""
+        text = str(error)
+        parts = [p.strip() for p in text.split(":")]
+        return ": ".join(parts[:2]) if len(parts) > 1 else text[:60]
+
     def _run_generate_phase(self, manifest: BatchManifest) -> PhaseResult:
         self._init_flow_provider_if_needed()
+
+        repeated_failure: Optional[str] = None
+        consecutive_same = 0
 
         for reel in manifest.reels:
             if reel.generation_status == "COMPLETE":
@@ -424,6 +532,32 @@ class SimpleWeeklyPipeline:
                 reel.generation_status = "FAILED"
                 reel.generation_error = str(e)
                 logger.error(f"[GENERATE] {reel.reel_id} basarisiz: {e}")
+
+                signature = self._failure_signature(e)
+                consecutive_same = consecutive_same + 1 if signature == repeated_failure else 1
+                repeated_failure = signature
+
+                if consecutive_same >= self.MAX_CONSECUTIVE_SAME_FAILURES:
+                    self.batch_repo.save_manifest(manifest)
+                    complete_count = sum(1 for r in manifest.reels if r.generation_status == "COMPLETE")
+                    logger.error(
+                        f"[GENERATE] Ayni hata ust uste {consecutive_same} kez tekrarladi ({signature}) -- "
+                        f"kalan Reel'ler denenmeden duruluyor. Sebep giderilince ayni komut kaldigi yerden devam eder."
+                    )
+                    return PhaseResult(
+                        success=False,
+                        phase="GENERATE",
+                        message=f"{complete_count}/{len(manifest.reels)} video hazir -- tekrarlayan hata: {signature}",
+                        detail={
+                            "complete": complete_count,
+                            "total": len(manifest.reels),
+                            "stopped_early": True,
+                            "repeated_failure": signature,
+                        },
+                    )
+            else:
+                consecutive_same = 0
+                repeated_failure = None
 
             self.batch_repo.save_manifest(manifest)
 

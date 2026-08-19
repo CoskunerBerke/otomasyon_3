@@ -37,7 +37,7 @@ from automation.content.concepts import CATEGORIES
 from automation.content.engine import ContentEngine, StoryContentProvider
 from automation.content.prompt_engine import PromptEngine
 from automation.content.story_concepts import STORY_CONCEPTS, get_story_concept
-from automation.orchestration.batch_manifest import BatchManifest, BatchReel
+from automation.orchestration.batch_manifest import BatchManifest, BatchReel, BatchRepository
 from automation.publishing.eligibility import is_live_production_eligible
 from automation.publishing.metadata_builder import PublishingMetadataBuilder
 from automation.publishing.preflight_gate import is_placeholder_metadata
@@ -344,3 +344,152 @@ def test_resuming_a_week_keeps_its_planned_mode(tmp_path):
 
     assert resumed.content_mode == NARRATIVE_AMBIENT_STORY
     assert second.content_mode == NARRATIVE_AMBIENT_STORY
+
+
+# ---------------------------------------------------------------- continue from last
+
+def _make_week(tmp_path, week_id, start_date, statuses, count=14):
+    """Writes a LOCKED batch whose reels carry `statuses` (one dict per reel)."""
+    repo = BatchRepository(tmp_path)
+    reels = []
+    for i in range(count):
+        day = start_date + datetime.timedelta(days=i // 2)
+        time_str = "19:30:00" if i % 2 == 0 else "22:00:00"
+        reels.append(BatchReel(
+            index=i + 1,
+            reel_id=f"REEL-2026-{1000 + i}",
+            scheduled_at_local=f"{day.isoformat()} {time_str}",
+            scheduled_at_utc=f"{day.isoformat()} 16:30:00",
+            generation_status="COMPLETE",
+        ))
+    manifest = BatchManifest(
+        week_id=week_id, start_date=start_date.isoformat(), status="LOCKED", reels=reels
+    )
+    repo.save_manifest(manifest)
+    repo.ensure_progress_entries(week_id, [r.reel_id for r in reels])
+
+    progress = repo.load_progress(week_id)
+    for reel, status in zip(reels, statuses):
+        progress[reel.reel_id] = status
+    repo.save_progress(week_id, progress)
+    return manifest
+
+
+def _scheduled_everywhere():
+    return {
+        "youtube": {"status": "SCHEDULED", "remote_id": "x", "url": "u", "error": None},
+        "tiktok": {"status": "SCHEDULED", "remote_id": "x", "url": "u", "error": None},
+        "instagram": {"status": "MEDIA_READY", "remote_media_id": "m", "error": None},
+    }
+
+
+def _nothing_published():
+    return {
+        "youtube": {"status": "PENDING", "remote_id": None, "url": None, "error": None},
+        "tiktok": {"status": "PENDING", "remote_id": None, "url": None, "error": None},
+        "instagram": {"status": "PENDING", "remote_media_id": None, "error": None},
+    }
+
+
+def _pipeline(tmp_path, **kwargs):
+    return SimpleWeeklyPipeline(
+        base_dir=tmp_path, vault_path=tmp_path / "vault", dry_run=True,
+        content_mode=NARRATIVE_AMBIENT_STORY, **kwargs
+    )
+
+
+def test_last_scheduled_date_is_the_latest_published_slot(tmp_path):
+    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), [_scheduled_everywhere()] * 14)
+    assert _pipeline(tmp_path).find_last_scheduled_date() == datetime.date(2026, 8, 23)
+
+
+def test_unpublished_slots_do_not_occupy_their_dates(tmp_path):
+    """A week that was planned but never reached a platform must not push the start date."""
+    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), [_scheduled_everywhere()] * 14)
+    _make_week(tmp_path, "2026-W40", datetime.date(2026, 9, 28), [_nothing_published()] * 14)
+
+    assert _pipeline(tmp_path).find_last_scheduled_date() == datetime.date(2026, 8, 23)
+
+
+def test_partially_published_week_counts_only_what_landed(tmp_path):
+    statuses = [_scheduled_everywhere()] * 6 + [_nothing_published()] * 8
+    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), statuses)
+
+    # Reels 1-6 cover 17-19 August; the rest never went anywhere.
+    assert _pipeline(tmp_path).find_last_scheduled_date() == datetime.date(2026, 8, 19)
+
+
+def test_start_date_is_the_day_after_the_last_scheduled_video(tmp_path, monkeypatch):
+    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), [_scheduled_everywhere()] * 14)
+    pipe = _pipeline(tmp_path)
+    assert pipe._resolve_start_date() == datetime.date(2026, 8, 24)
+
+
+def test_start_date_never_lands_in_the_past(tmp_path):
+    """An old batch must not schedule a new week into dates that have already gone by."""
+    _make_week(tmp_path, "2020-W10", datetime.date(2020, 3, 2), [_scheduled_everywhere()] * 14)
+    pipe = _pipeline(tmp_path)
+    resolved = pipe._resolve_start_date()
+    assert resolved > datetime.date.today()
+
+
+def test_explicit_start_date_wins(tmp_path):
+    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), [_scheduled_everywhere()] * 14)
+    pipe = _pipeline(tmp_path, start_date=datetime.date(2026, 12, 7))
+    assert pipe._resolve_start_date() == datetime.date(2026, 12, 7)
+
+
+def test_first_ever_run_falls_back_to_the_calendar(tmp_path):
+    pipe = _pipeline(tmp_path)
+    assert pipe.find_last_scheduled_date() is None
+    assert pipe._resolve_start_date() > datetime.date.today()
+
+
+def test_new_week_starts_where_the_last_one_ended(tmp_path):
+    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), [_scheduled_everywhere()] * 14)
+    manifest = _pipeline(tmp_path)._get_or_create_manifest()
+
+    assert manifest.start_date == "2026-08-24"
+    assert manifest.reels[0].scheduled_at_local == "2026-08-24 19:30:00"
+    assert manifest.reels[-1].scheduled_at_local == "2026-08-30 22:00:00"
+    # No date may be reused from the finished week.
+    assert all(r.scheduled_at_local > "2026-08-23 22:00:00" for r in manifest.reels)
+
+
+# ---------------------------------------------------------------- generate fail-fast
+
+class _ExplodingProvider:
+    """Fails every Reel the same way, counting how many times it was asked."""
+
+    def __init__(self, message="QC_FAILED: AUDIO_MISSING: no audio stream"):
+        self.calls = 0
+        self.message = message
+
+    def generate_single_video(self, plan, reel_id, target_filename, **kwargs):
+        self.calls += 1
+        raise RuntimeError(self.message)
+
+
+def test_generate_stops_after_the_same_failure_repeats(tmp_path):
+    """Flow returning silent renders must not burn credits on all 14 Reels."""
+    pipe = _pipeline(tmp_path, start_date=datetime.date(2026, 8, 24))
+    provider = _ExplodingProvider()
+    pipe.flow_provider = provider
+
+    manifest = pipe._get_or_create_manifest()
+    result = pipe._run_generate_phase(manifest)
+
+    assert not result.success
+    assert result.detail["stopped_early"] is True
+    assert "AUDIO_MISSING" in result.detail["repeated_failure"]
+    assert provider.calls == SimpleWeeklyPipeline.MAX_CONSECUTIVE_SAME_FAILURES
+    assert sum(1 for r in manifest.reels if r.generation_status == "FAILED") == 2
+
+
+def test_failure_signature_groups_the_same_cause(tmp_path):
+    sig = SimpleWeeklyPipeline._failure_signature
+    a = sig(RuntimeError("QC_FAILED: AUDIO_MISSING: ambient audio required but REEL-1 has none"))
+    b = sig(RuntimeError("QC_FAILED: AUDIO_MISSING: ambient audio required but REEL-2 has none"))
+    c = sig(RuntimeError("FLOW_TIMEOUT: segment 2 never finished"))
+    assert a == b, "same cause on different Reels must share a signature"
+    assert a != c
