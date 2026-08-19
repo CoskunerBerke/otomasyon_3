@@ -13,6 +13,12 @@ from .tiktok_selectors import TikTokSelectors
 
 logger = logging.getLogger("ReelsAIFactory.TikTokUIObserver")
 
+# How long to let TikTok's date field catch up with a clicked calendar cell before
+# calling it a mismatch. One immediate read is not enough: the same date that failed
+# for one Reel had succeeded for the one before it, seconds earlier.
+DATE_READBACK_ATTEMPTS = 6
+DATE_READBACK_INTERVAL_SECONDS = 0.5
+
 class TikTokUIObserver:
     """Interacts with visible DOM elements of TikTok Studio."""
 
@@ -944,12 +950,17 @@ class TikTokUIObserver:
                 time.sleep(0.3)
 
             # 3. Select Target Day
+            #
+            # Kural 31: two strategies, and both require `.valid`. The grid repeats the
+            # day number across months -- asking for "27" in August also matches 27 July
+            # in the leading row and, at month end, the trailing next-month days. Those
+            # spillover cells and past days render without `.valid`, so dropping that
+            # class from the selector is how a click lands on the wrong month and the
+            # date silently stays put (2026-08-19: REEL-2026-0032 wanted 27 Aug and the
+            # field never moved off 19 Aug).
             day_selectors = [
                 f".calendar-wrapper .day-span-container:has(span.day.valid:text-is('{target_day_str}'))",
                 f".calendar-wrapper span.day.valid:text-is('{target_day_str}')",
-                f".calendar-wrapper span.day.selected.valid:text-is('{target_day_str}')",
-                f".calendar-wrapper .day-span-container:has(span.day:text-is('{target_day_str}'))",
-                f".calendar-wrapper span.day:text-is('{target_day_str}')"
             ]
             day_clicked = False
             for d_sel in day_selectors:
@@ -974,12 +985,27 @@ class TikTokUIObserver:
                     continue
 
             # 4. Verify Readback
+            #
+            # The field updates a moment after the cell is clicked, and TikTok is not
+            # consistently quick about it -- REEL-2026-0031 set the very same date
+            # successfully while 0032 was read too early and reported a mismatch. Poll
+            # briefly instead of trusting one immediate read.
             actual = self._read_locator_value(date_loc)
+            for _ in range(DATE_READBACK_ATTEMPTS):
+                if self._normalize_schedule_date(actual) == norm_expected:
+                    break
+                time.sleep(DATE_READBACK_INTERVAL_SECONDS)
+                actual = self._read_locator_value(date_loc)
+
             if self._normalize_schedule_date(actual) == norm_expected:
                 logger.info(f"[TIKTOK DATE] Calendar UI selection SUCCESS: '{actual}'")
                 return True
             else:
                 logger.warning(f"[TIKTOK DATE] Calendar UI readback mismatch: expected='{norm_expected}' got='{actual}'")
+                # The picker is still on screen here; capture it while the evidence exists.
+                # Without this a DATE_MISMATCH -- the one failure that halts TikTok
+                # outright -- left nothing behind to diagnose from.
+                self.capture_error_snapshot("tiktok_date_mismatch_calendar_open")
         except Exception as e:
             logger.debug(f"[TIKTOK DATE] Calendar UI attempt exception: {e}")
 
