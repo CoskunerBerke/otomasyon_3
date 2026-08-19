@@ -490,6 +490,17 @@ class _FakeLocator:
 
 
 class _FakePage:
+    """
+    Minimal Playwright stand-in for selector-level assertions.
+
+    Selectors in the production lists are comma-joined unions: Kural 31 caps the number
+    of *semantic strategies* at 2 per UI action, but one strategy may name several
+    equivalent DOM shapes (e.g. "button[aria-label='Anladım'], ytcp-button[aria-label=...]").
+    Real Playwright resolves such a union to whichever alternative matches, so this fake
+    must too. Exact-string matching on the whole union would report every grouped selector
+    as invisible and quietly turn these tests into no-ops.
+    """
+
     def __init__(self, inner_text="", visible_selectors=None):
         self._inner_text = inner_text
         self._visible_selectors = visible_selectors or {}
@@ -498,12 +509,21 @@ class _FakePage:
     def inner_text(self, selector):
         return self._inner_text
 
+    def _resolve(self, selector):
+        """First comma-separated alternative this fake treats as present, if any."""
+        for alternative in (part.strip() for part in selector.split(",")):
+            if self._visible_selectors.get(alternative, False):
+                return alternative, True
+        return selector, False
+
     def locator(self, selector):
-        # Cache per-selector so a click recorded during the call under test is still
-        # observable via a second page.locator(same_selector) call in the assertion.
-        if selector not in self._locators:
-            self._locators[selector] = _FakeLocator(visible=self._visible_selectors.get(selector, False))
-        return self._locators[selector]
+        # Key the cache by the matched alternative so a click recorded during the call
+        # under test stays observable from an assertion that names that alternative on
+        # its own, e.g. page.locator("button:has-text('Anladım')").
+        key, visible = self._resolve(selector)
+        if key not in self._locators:
+            self._locators[key] = _FakeLocator(visible=visible)
+        return self._locators[key]
 
 
 def test_youtube_review_modal_dismissed_via_anladim_only():
@@ -526,15 +546,68 @@ def test_youtube_review_modal_dismissed_via_anladim_only():
     assert page.locator(dismiss_selector).clicked is True
 
 
-def test_youtube_review_modal_not_touched_when_absent():
+def test_youtube_review_modal_dismissed_via_aria_label_strategy():
+    """
+    Strategy 1 (aria-label) is what actually fires in production, against the real DOM
+    the operator supplied on 2026-08-17:
+        <button aria-label="Anladım" aria-disabled="false" tabindex="0">
+    """
     from automation.publishing.youtube_studio_ui_observer import YouTubeStudioUIObserver
 
-    page = _FakePage(inner_text="Kontroller tamamlandı", visible_selectors={"button:has-text('Anladım')": True})
+    page = _FakePage(
+        inner_text="İçeriğinizi kontrol etmeye devam ediyoruz.",
+        visible_selectors={"button[aria-label='Anladım']": True}
+    )
     observer = YouTubeStudioUIObserver(page)
     observer.dismiss_content_review_info_if_present()
 
-    # Text marker absent -> must never click, even though the button would be "visible".
-    assert page.locator("button:has-text('Anladım')").clicked is False
+    assert page.locator("button[aria-label='Anladım']").clicked is True
+
+
+def test_youtube_review_modal_dismissed_even_when_marker_text_absent_from_dialog():
+    """
+    Regression for the stall fixed in c118658: the notice is a separate overlay, so its
+    text is NOT inside ytcp-uploads-dialog. Gating the click on that text meant dismissal
+    never fired and every live run blocked until a human clicked the button by hand.
+    Dismissal must therefore key off the button itself, not the surrounding prose.
+    """
+    from automation.publishing.youtube_studio_ui_observer import YouTubeStudioUIObserver
+
+    page = _FakePage(
+        inner_text="Kontroller tamamlandı",
+        visible_selectors={"button[aria-label='Anladım']": True}
+    )
+    observer = YouTubeStudioUIObserver(page)
+    observer.dismiss_content_review_info_if_present()
+
+    assert page.locator("button[aria-label='Anladım']").clicked is True
+
+
+def test_youtube_review_modal_not_touched_when_button_absent():
+    from automation.publishing.youtube_studio_ui_observer import YouTubeStudioUIObserver
+
+    # Notice text on screen but no dismiss button: nothing may be clicked.
+    page = _FakePage(inner_text="İçeriğinizi kontrol etmeye devam ediyoruz.", visible_selectors={})
+    observer = YouTubeStudioUIObserver(page)
+    observer.dismiss_content_review_info_if_present()
+
+    assert all(loc.clicked is False for loc in page._locators.values())
+
+
+def test_youtube_review_dismissal_can_only_match_an_acknowledgement_control():
+    """
+    Dismissal is deliberately not gated on the notice text, so the whole safety argument
+    rests on these selectors being unable to match anything but an acknowledgement
+    button. Guard that invariant, plus the Kural 31 two-strategy cap.
+    """
+    from automation.publishing.youtube_studio_selectors import YouTubeStudioSelectors
+
+    selectors = YouTubeStudioSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS
+    assert len(selectors) <= 2, "Kural 31: max 2 semantic selector strategies per action"
+
+    joined = " ".join(selectors).lower()
+    for forbidden in ("hemen payla", "şimdi payla", "post now", "publish now", "yayınla"):
+        assert forbidden not in joined, f"dismissal selector could match publish control: {forbidden}"
 
 
 # ---------------------------------------------------------------------------
