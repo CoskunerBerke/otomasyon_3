@@ -81,6 +81,48 @@ class FlowPage:
                 continue
         return None
 
+    def is_app_still_loading(self) -> bool:
+        """True while Flow's SPA is showing its loading shell rather than the workspace."""
+        return self.find_first_visible(FlowSelectors.APP_LOADING_INDICATOR_SELECTORS, timeout_ms=400) is not None
+
+    def wait_for_app_ready(self, timeout_seconds: int = 45) -> bool:
+        """
+        Wait until Flow's workspace has actually mounted.
+
+        goto(wait_until="domcontentloaded") returns as soon as the HTML shell is parsed,
+        but Flow paints a "Loading..." body and mounts the app afterwards. Searching for
+        "Yeni proje" in that window finds nothing and looks exactly like a UI change --
+        which is what happened on a cold start on 2026-08-19.
+
+        Ready means either control the caller could want is on screen: the new-project
+        button (home) or the prompt box (already inside a project).
+        """
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if self.find_first_visible(FlowSelectors.NEW_PROJECT_BUTTON_SELECTORS, timeout_ms=800):
+                return True
+            if self.find_first_visible(FlowSelectors.PROMPT_INPUT_SELECTORS, timeout_ms=400):
+                return True
+            time.sleep(1.0)
+        return False
+
+    def _raise_new_project_missing(self) -> None:
+        """
+        Report why the button is absent, rather than always blaming the UI.
+
+        "Still loading" and "the interface changed" need opposite responses from whoever
+        reads the error -- wait and retry versus update the selectors -- so they are not
+        reported with the same message.
+        """
+        self.capture_error_snapshot("new_project_btn_missing")
+        if self.is_app_still_loading():
+            raise FlowUIChangedError(
+                "Google Flow arayüzü yüklenmesini tamamlamadı ('Loading...' ekranda kaldı). "
+                "Sayfa açılmadan 'Yeni proje' butonu aranamaz -- bağlantı yavaşsa aynı komutu "
+                "tekrar çalıştırın; kaldığı yerden devam eder."
+            )
+        raise FlowUIChangedError("Google Flow 'Yeni proje' butonu bulunamadı.")
+
     def check_auth_and_security(self) -> None:
         """
         Check if Google Login, CAPTCHA, or verification is currently blocking the view.
@@ -195,12 +237,13 @@ class FlowPage:
             except Exception:
                 pass
 
+        self.wait_for_app_ready()
+
         new_btn = self.find_first_visible(FlowSelectors.NEW_PROJECT_BUTTON_SELECTORS, timeout_ms=3000)
         if not new_btn:
             if "/project/" in self.page.url:
                 return self.page.url
-            self.capture_error_snapshot("new_project_btn_missing")
-            raise FlowUIChangedError("Google Flow 'Yeni proje' butonu bulunamadı.")
+            self._raise_new_project_missing()
 
         new_btn.click()
 
@@ -230,9 +273,10 @@ class FlowPage:
 
         if state == FlowPageState.HOME:
             new_btn = self.find_first_visible(FlowSelectors.NEW_PROJECT_BUTTON_SELECTORS)
+            if not new_btn and self.wait_for_app_ready(timeout_seconds=20):
+                new_btn = self.find_first_visible(FlowSelectors.NEW_PROJECT_BUTTON_SELECTORS)
             if not new_btn:
-                self.capture_error_snapshot("new_project_btn_missing")
-                raise FlowUIChangedError("Google Flow 'Yeni proje' butonu bulunamadı.")
+                self._raise_new_project_missing()
 
             new_btn.click()
 
