@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import datetime
 
+from automation.content.content_modes import LIVE_ELIGIBLE_CONTENT_MODES
+
 REEL_ID_PATTERN = re.compile(r'REEL-(\d{4})-(\d{4})', re.IGNORECASE)
+
+# Registered live modes plus the legacy V2 visual mode, which predates the registry.
+RESUMABLE_CONTENT_MODES = frozenset(LIVE_ELIGIBLE_CONTENT_MODES | {"silent_global_visual"})
 
 class ObsidianReader:
     """Scans and parses notes in the Obsidian Vault."""
@@ -172,7 +177,7 @@ class ObsidianReader:
         for r in self.get_all_reels():
             c_mode = str(r.get("content_mode", ""))
             status = str(r.get("status", "")).upper()
-            if c_mode in ["silent_global_visual", "silent_global_step_by_step"] or status in ["READY", "PUBLISHED", "APPROVED"]:
+            if c_mode in RESUMABLE_CONTENT_MODES or status in ["READY", "PUBLISHED", "APPROVED"]:
                 visual_history.append(r)
         return visual_history
 
@@ -210,7 +215,7 @@ class ObsidianReader:
                 # Rule 4: Must have pipeline_version >= 2 and silent visual content mode
                 p_ver = int(meta.get("pipeline_version", 1))
                 c_mode = str(meta.get("content_mode", ""))
-                if p_ver < 2 or c_mode not in ["silent_global_visual", "silent_global_step_by_step"]:
+                if p_ver < 2 or c_mode not in RESUMABLE_CONTENT_MODES:
                     continue
 
                 # Rule 5: Resumable status check

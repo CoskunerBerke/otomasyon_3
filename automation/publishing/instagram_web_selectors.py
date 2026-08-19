@@ -19,11 +19,12 @@ from typing import List
 class InstagramWebSelectors:
     """Semantic selectors for the instagram.com scheduling flow."""
 
-    # Entry point on /scheduled_content/ ("İçeriği planla") and the generic composer.
+    # Entry point is /scheduled_content/'s own "İçeriği planla" button -- and only that.
+    # The generic "Oluştur" composer (sidebar) opens a different dialog with no schedule
+    # toggle at all, so it is deliberately NOT a fallback here: falling back to it would
+    # silently swap in the wrong flow instead of failing loudly (Kural 31).
     OPEN_COMPOSER_BUTTONS: List[str] = [
         "div[role='button']:has-text('İçeriği planla'), div[role='button']:has-text('Schedule content')",
-        "svg[aria-label='Yeni gönderi'], svg[aria-label='New post'], "
-        "a[href='#'][role='link']:has-text('Oluştur'), div[role='button']:has-text('Oluştur')",
     ]
 
     # "Fotoğrafları ve videoları buraya sürükle" -> <button>Bilgisayardan seç</button>
@@ -97,10 +98,26 @@ class InstagramWebSelectors:
         "share now",
     ]
 
+    # The success dialog (captured 2026-08-19): title "Reels videosu planlandı", body
+    # "Reels videon planlandı.", link "Planlı içerikleri gör", button "Bitti".
+    #
+    # Matched as whole phrases, not the bare word. A substring check for "planlandı" /
+    # "scheduled" anywhere in the body reported REEL-2026-0038 as scheduled on 2026-08-19
+    # when nothing had been scheduled: 13 of 14 posts landed on the calendar, the 14th was
+    # simply not there, and no evidence was left because the code believed it succeeded.
     SCHEDULE_SUCCESS_MARKERS: List[str] = [
-        "planlandı",
-        "scheduled",
+        "reels videon planlandı",
+        "reels videosu planlandı",
         "gönderin planlandı",
+        "reel scheduled",
+        "your reel has been scheduled",
+        "post scheduled",
+    ]
+
+    # Its "Bitti" button: <div role="button" tabindex="0">Bitti</div>, hashed classes only.
+    SUCCESS_DIALOG_DONE_BUTTONS: List[str] = [
+        "div[role='button']:text-is('Bitti'), div[role='button']:text-is('Done')",
+        "div[role='dialog'] div[role='button']:has-text('Bitti'), div[role='dialog'] div[role='button']:has-text('Done')",
     ]
 
     # Instagram refuses a slot that is too close to now, showing

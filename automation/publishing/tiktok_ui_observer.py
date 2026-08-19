@@ -13,6 +13,23 @@ from .tiktok_selectors import TikTokSelectors
 
 logger = logging.getLogger("ReelsAIFactory.TikTokUIObserver")
 
+# How long to let TikTok's date field catch up with a clicked calendar cell before
+# calling it a mismatch. One immediate read is not enough: the same date that failed
+# for one Reel had succeeded for the one before it, seconds earlier.
+# How long to let TikTok's upload form finish rendering before deciding the "Daha fazla
+# göster" control is absent. It arrives with the rest of the form, so a few hundred
+# milliseconds of probing reads a late button as a missing one.
+# Gaps between remote-verification passes. TikTok's content list is not updated the
+# instant a schedule is confirmed, and a single immediate read reported 7 of 14 correctly
+# scheduled Reels as unverified. The trailing 0 means no sleep after the final attempt.
+REMOTE_VERIFY_BACKOFF_SECONDS = (5.0, 10.0, 20.0, 0.0)
+
+MORE_OPTIONS_WAIT_SECONDS = 12.0
+MORE_OPTIONS_PROBE_MS = 800
+
+DATE_READBACK_ATTEMPTS = 6
+DATE_READBACK_INTERVAL_SECONDS = 0.5
+
 class TikTokUIObserver:
     """Interacts with visible DOM elements of TikTok Studio."""
 
@@ -185,6 +202,43 @@ class TikTokUIObserver:
         logger.warning("[TIKTOK CHECK] 'Iptal' butonu bulunamadi.")
         return False
 
+    def dismiss_delete_confirmation_if_present(self) -> bool:
+        """
+        Cancel TikTok's "Bu gönderi silinsin mi?" dialog via "Şimdi değil".
+
+        Cancelling deletes nothing: the post and its edits stay exactly as they are, and
+        the page stops being blocked. This is the safe half of a dialog whose other button
+        destroys content -- [Sil] is never clicked here, and cannot be reached by these
+        selectors, which match only the cancel wording.
+
+        Returns True if a dialog was cancelled.
+        """
+        for sel in TikTokSelectors.DELETE_DIALOG_CANCEL_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                if not (loc.is_visible(timeout=800) and loc.is_enabled()):
+                    continue
+
+                # Read the button back before committing. If anything other than the
+                # cancel wording is under this handle, do not click it.
+                try:
+                    label = (loc.inner_text() or "").strip().lower()
+                except Exception:
+                    label = ""
+                is_cancel = any(safe in label for safe in ("şimdi değil", "simdi degil", "not now"))
+                is_destructive = any(bad == label for bad in TikTokSelectors.DELETE_DIALOG_DESTRUCTIVE_LABELS)
+                if is_destructive or (label and not is_cancel):
+                    logger.error(f"[TIKTOK SAFETY] Beklenen 'Simdi degil' yerine '{label}' bulundu -- tiklanmadi.")
+                    continue
+
+                loc.click(timeout=2500)
+                time.sleep(1.0)
+                return True
+            except Exception:
+                continue
+
+        return False
+
     def dismiss_unsaved_draft_banner_if_present(self) -> bool:
         """
         Clear TikTok's "Düzenlemekte olduğunuz bir video kaydedilmedi" resume banner by
@@ -199,6 +253,30 @@ class TikTokUIObserver:
         try:
             page_text = self.page.inner_text("body").lower()
         except Exception:
+            return False
+
+        # Checked before the banner test bails out: this dialog appears on its own after a
+        # schedule, not only over a resume banner, and it blocks the page either way.
+        #
+        # It also carries its own [Sil], while the banner cleanup below matches buttons by
+        # label across the whole page -- so leaving it up would let that cleanup's click
+        # land on a delete button. Cancel it here, and never guess between the two.
+        hit = next((m for m in TikTokSelectors.DESTRUCTIVE_DELETE_CONFIRM_MARKERS if m in page_text), None)
+        if hit:
+            # Cancel it rather than leaving it on screen. "Şimdi değil" removes nothing --
+            # it dismisses the dialog and leaves the post untouched -- so taking that exit
+            # is safe and unblocks the page. Only [Sil] is forbidden, and it is never a
+            # candidate here: these selectors can resolve to no other wording.
+            if self.dismiss_delete_confirmation_if_present():
+                logger.info("[TIKTOK] Silme onayi 'Simdi degil' ile guvenle kapatildi.")
+                return False
+
+            self.capture_error_snapshot("tiktok_delete_confirm_present")
+            logger.error(
+                f"[TIKTOK SAFETY] Ekranda bir SILME onayi var ('{hit}') ve 'Simdi degil' "
+                f"butonu bulunamadi. 'Sil' butonuna DOKUNULMAYACAK. "
+                f"Bu pencereyi elle kapatin ('Simdi degil')."
+            )
             return False
 
         if not any(m in page_text for m in TikTokSelectors.UNSAVED_DRAFT_BANNER_MARKERS):
@@ -930,12 +1008,17 @@ class TikTokUIObserver:
                 time.sleep(0.3)
 
             # 3. Select Target Day
+            #
+            # Kural 31: two strategies, and both require `.valid`. The grid repeats the
+            # day number across months -- asking for "27" in August also matches 27 July
+            # in the leading row and, at month end, the trailing next-month days. Those
+            # spillover cells and past days render without `.valid`, so dropping that
+            # class from the selector is how a click lands on the wrong month and the
+            # date silently stays put (2026-08-19: REEL-2026-0032 wanted 27 Aug and the
+            # field never moved off 19 Aug).
             day_selectors = [
                 f".calendar-wrapper .day-span-container:has(span.day.valid:text-is('{target_day_str}'))",
                 f".calendar-wrapper span.day.valid:text-is('{target_day_str}')",
-                f".calendar-wrapper span.day.selected.valid:text-is('{target_day_str}')",
-                f".calendar-wrapper .day-span-container:has(span.day:text-is('{target_day_str}'))",
-                f".calendar-wrapper span.day:text-is('{target_day_str}')"
             ]
             day_clicked = False
             for d_sel in day_selectors:
@@ -960,12 +1043,27 @@ class TikTokUIObserver:
                     continue
 
             # 4. Verify Readback
+            #
+            # The field updates a moment after the cell is clicked, and TikTok is not
+            # consistently quick about it -- REEL-2026-0031 set the very same date
+            # successfully while 0032 was read too early and reported a mismatch. Poll
+            # briefly instead of trusting one immediate read.
             actual = self._read_locator_value(date_loc)
+            for _ in range(DATE_READBACK_ATTEMPTS):
+                if self._normalize_schedule_date(actual) == norm_expected:
+                    break
+                time.sleep(DATE_READBACK_INTERVAL_SECONDS)
+                actual = self._read_locator_value(date_loc)
+
             if self._normalize_schedule_date(actual) == norm_expected:
                 logger.info(f"[TIKTOK DATE] Calendar UI selection SUCCESS: '{actual}'")
                 return True
             else:
                 logger.warning(f"[TIKTOK DATE] Calendar UI readback mismatch: expected='{norm_expected}' got='{actual}'")
+                # The picker is still on screen here; capture it while the evidence exists.
+                # Without this a DATE_MISMATCH -- the one failure that halts TikTok
+                # outright -- left nothing behind to diagnose from.
+                self.capture_error_snapshot("tiktok_date_mismatch_calendar_open")
         except Exception as e:
             logger.debug(f"[TIKTOK DATE] Calendar UI attempt exception: {e}")
 
@@ -1263,51 +1361,68 @@ class TikTokUIObserver:
         """
         aigc_loc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
         try:
-            if hasattr(aigc_loc, "is_visible") and aigc_loc.is_visible(timeout=300):
+            if hasattr(aigc_loc, "is_visible") and aigc_loc.is_visible(timeout=MORE_OPTIONS_PROBE_MS):
                 logger.info("[TIKTOK MORE] AIGC container already visible | MORE_OPTIONS_ALREADY_EXPANDED")
                 return True
         except Exception:
             pass
 
         logger.info("[TIKTOK MORE] AIGC container not visible. Expanding 'Daha fazla göster'...")
+
+        # Kural 31: two strategies. The three that were dropped were not just surplus --
+        # `div:has-text('Daha fazla göster')` matches every ancestor containing that text,
+        # up to and including the page wrapper, so `.first` could resolve to a huge
+        # container and the click would land anywhere inside it. `div.more-btn` alone is
+        # kept as the language-independent fallback.
         btn_selectors = [
-            "div.more-btn:has(span:text-is('Daha fazla göster'))",
-            "div.more-btn:has(span:text-is('Show more'))",
+            "div.more-btn:has(span:text-is('Daha fazla göster')), div.more-btn:has(span:text-is('Show more'))",
             "div.more-btn",
-            "div:has-text('Daha fazla göster')",
-            "button:has-text('Daha fazla göster')"
         ]
 
-        for b_sel in btn_selectors:
-            try:
-                loc = self.page.locator(b_sel).first
-                if hasattr(loc, "is_visible") and loc.is_visible(timeout=500):
+        # The control arrives with the rest of the upload form. Probing for a few hundred
+        # milliseconds is how a late-rendering button gets read as a missing one -- the
+        # same mistake that cost this run three separate failures today.
+        deadline = time.time() + MORE_OPTIONS_WAIT_SECONDS
+        while time.time() < deadline:
+            for b_sel in btn_selectors:
+                try:
+                    loc = self.page.locator(b_sel).first
+                    if not (hasattr(loc, "is_visible") and loc.is_visible(timeout=MORE_OPTIONS_PROBE_MS)):
+                        continue
                     if hasattr(loc, "scroll_into_view_if_needed"):
                         loc.scroll_into_view_if_needed(timeout=1000)
                     loc.click(timeout=1500)
                     logger.info(f"[TIKTOK MORE] Clicked '{b_sel}'")
                     time.sleep(0.3)
 
-                    # Poll up to 3 seconds for AIGC container to become visible
+                    # Poll for the AIGC container to appear after the expand.
                     poll_start = time.time()
                     while time.time() - poll_start < 3.0:
                         fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-                        if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=300):
+                        if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=MORE_OPTIONS_PROBE_MS):
                             logger.info("[TIKTOK MORE] AIGC container visible")
                             logger.info("MORE_OPTIONS_EXPANDED")
                             return True
                         time.sleep(0.15)
-            except Exception as e:
-                logger.debug(f"[TIKTOK MORE] Click attempt on {b_sel} failed: {e}")
+                except Exception as e:
+                    logger.debug(f"[TIKTOK MORE] Click attempt on {b_sel} failed: {e}")
+
+            # Neither strategy resolved yet; the form may still be rendering.
+            time.sleep(0.5)
 
         # Check one last time
         try:
             fresh_aigc = self.page.locator("div[data-e2e='aigc_container'], [data-e2e='aigc_container']").first
-            if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=500):
+            if hasattr(fresh_aigc, "is_visible") and fresh_aigc.is_visible(timeout=MORE_OPTIONS_PROBE_MS):
                 logger.info("[TIKTOK MORE] AIGC container visible | MORE_OPTIONS_EXPANDED")
                 return True
         except Exception:
             pass
+
+        # Capture the page while the form is still on screen. Without this the only
+        # record of the failure is a log line asking a human for HTML that nobody is
+        # standing by to copy.
+        self.capture_error_snapshot("tiktok_more_options_not_found")
 
         logger.error("=" * 50)
         logger.error("STATUS: NEEDS_USER_HTML")
@@ -1807,14 +1922,40 @@ class TikTokUIObserver:
         A navigation attempt by itself is never treated as proof of scheduling.
         """
         content_url = "https://www.tiktok.com/tiktokstudio/content"
-        try:
-            if "tiktokstudio/content" not in (self.page.url or ""):
-                self.page.goto(
-                    content_url,
-                    wait_until="domcontentloaded",
-                    timeout=20000
+
+        # Reload every attempt, even when already on this URL. A post scheduled seconds
+        # ago is not in a list that was rendered before it existed, and the old code
+        # skipped navigation precisely in that case -- so the check ran against a stale
+        # page and reported "not verified" for a post that was there.
+        for attempt, backoff in enumerate(REMOTE_VERIFY_BACKOFF_SECONDS, start=1):
+            ok, msg = self._read_scheduled_marker_once(
+                content_url, expected_title, expected_time_str
+            )
+            if ok:
+                return True, msg
+            if backoff:
+                logger.info(
+                    f"[TIKTOK VERIFY] {attempt}. deneme sonucsuz; {backoff:.0f}s sonra tekrar."
                 )
-                time.sleep(2.0)
+                time.sleep(backoff)
+
+        self.capture_error_snapshot("tiktok_remote_schedule_not_verified")
+        return False, msg
+
+    def _read_scheduled_marker_once(
+        self,
+        content_url: str,
+        expected_title: str,
+        expected_time_str: str,
+    ) -> Tuple[bool, str]:
+        """One pass over the content list: reload, read, look for the scheduled markers."""
+        try:
+            self.page.goto(
+                content_url,
+                wait_until="domcontentloaded",
+                timeout=20000
+            )
+            time.sleep(2.0)
         except Exception as e:
             return False, f"REMOTE_VERIFICATION_NAVIGATION_FAILED: {e}"
 

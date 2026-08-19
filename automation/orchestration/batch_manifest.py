@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from automation.content.content_modes import SILENT_STEP_BY_STEP
+
 logger = logging.getLogger("ReelsAIFactory.BatchManifest")
 
 
@@ -36,7 +38,7 @@ class BatchReel:
     caption: str = ""
     hashtags: List[str] = field(default_factory=list)
     pipeline_version: int = 3
-    content_mode: str = "silent_global_step_by_step"
+    content_mode: str = SILENT_STEP_BY_STEP
     video_path: Optional[str] = None
     video_sha256: Optional[str] = None
     # NOT_STARTED | COMPLETE | FAILED -- Phase 1 (GENERATE) outcome for this Reel only.
@@ -95,7 +97,7 @@ class BatchReel:
             caption=data.get("caption", ""),
             hashtags=data.get("hashtags", []),
             pipeline_version=data.get("pipeline_version", 3),
-            content_mode=data.get("content_mode", "silent_global_step_by_step"),
+            content_mode=data.get("content_mode", SILENT_STEP_BY_STEP),
             video_path=data.get("video_path"),
             video_sha256=data.get("video_sha256"),
             generation_status=data.get("generation_status", "NOT_STARTED"),
@@ -122,6 +124,10 @@ class BatchManifest:
     # DRAFT -> LOCKED. Only these two values exist. Publishing phases refuse to run
     # against anything other than LOCKED.
     status: str = "DRAFT"
+    # The mode this week was planned in. Set once at PLAN; a resumed run reads it back
+    # rather than re-deriving it, so a rerun cannot re-mode a week that is already
+    # partly generated.
+    content_mode: str = SILENT_STEP_BY_STEP
     reels: List[BatchReel] = field(default_factory=list)
     created_at: str = field(default_factory=_now_str)
     updated_at: str = field(default_factory=_now_str)
@@ -134,6 +140,7 @@ class BatchManifest:
             "timezone": self.timezone,
             "target_reels": self.target_reels,
             "status": self.status,
+            "content_mode": self.content_mode,
             "reels": [r.to_dict() for r in self.reels],
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -148,6 +155,7 @@ class BatchManifest:
             timezone=data.get("timezone", "Europe/Istanbul"),
             target_reels=data.get("target_reels", 14),
             status=data.get("status", "DRAFT"),
+            content_mode=data.get("content_mode", SILENT_STEP_BY_STEP),
             reels=[BatchReel.from_dict(r) for r in data.get("reels", [])],
             created_at=data.get("created_at", _now_str()),
             updated_at=data.get("updated_at", _now_str()),

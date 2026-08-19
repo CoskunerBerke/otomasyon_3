@@ -2064,6 +2064,12 @@ class YouTubeStudioUIObserver:
         # (2026-08-17: "Planlandı 17 Ağu 2026" was visible in the Shorts tab the whole time),
         # which then halted the pipeline on a false negative. Check Shorts first, then
         # long-form, and only report failure after BOTH tabs come up empty.
+        # A freshly uploaded Short sits in "Kontrol ediliyor..." for a while, and its
+        # visibility cell stays blank until that finishes. These control how long a matched
+        # row is given to fill that cell in before the result is called inconclusive.
+        ROW_SETTLE_ATTEMPTS = 5
+        ROW_SETTLE_SECONDS = 3.0
+
         clean_title = target_title.lower().strip()
         r_id = (remote_id or "").lower().strip()
         base = f"https://studio.youtube.com/channel/{channel_id or ''}"
@@ -2106,18 +2112,39 @@ class YouTubeStudioUIObserver:
                             logger.warning("Remote verification FAIL: target video is still in draft/private state.")
                             return False, "DRAFT_PRIVATE"
 
-                        # Row matched by title but its visibility cell has not rendered yet
-                        # (the list lazy-loads). Give the row one short settle before
-                        # calling it unscheduled, rather than failing on a rendering race.
-                        try:
-                            time.sleep(2.0)
-                            txt = row.inner_text().lower()
+                        # The row is the right video but its visibility cell does not say
+                        # "Planlandı" yet. Right after an upload YouTube is still running its
+                        # content check ("Kontrol ediliyor...") and the cell fills in only
+                        # once that finishes -- so this is normally a timing race, not a
+                        # failed schedule. 2026-08-19: 5 of 14 Reels were reported this way
+                        # while all 14 were in fact scheduled correctly.
+                        #
+                        # Re-read the same row a few times before believing it. The row
+                        # handle stays valid, so this costs nothing when the cell is simply
+                        # late, and reloading the tab would only restart the lazy load.
+                        settled = False
+                        for _ in range(ROW_SETTLE_ATTEMPTS):
+                            try:
+                                time.sleep(ROW_SETTLE_SECONDS)
+                                txt = row.inner_text().lower()
+                            except Exception:
+                                break
                             if "planlandı" in txt or "scheduled" in txt:
                                 logger.info(f"True Remote Verification PASS ({tab_label}, after settle): '{target_title}'.")
-                                return True, "SCHEDULED"
-                        except Exception:
-                            pass
+                                settled = True
+                                break
+                            if "taslak" in txt or "draft" in txt or "gizli" in txt:
+                                # It really is a draft; no amount of waiting changes that.
+                                logger.warning("Remote verification FAIL: target settled into draft/private state.")
+                                return False, "DRAFT_PRIVATE"
+                        if settled:
+                            return True, "SCHEDULED"
 
+                        logger.warning(
+                            f"Remote verification inconclusive: '{target_title}' found in {tab_label} but its "
+                            f"visibility cell never said 'Planlandı' within "
+                            f"{ROW_SETTLE_ATTEMPTS * ROW_SETTLE_SECONDS:.0f}s. YouTube may still be checking it."
+                        )
                         return False, "REMOTE_TARGET_FOUND_BUT_NOT_SCHEDULED"
                 except Exception:
                     pass

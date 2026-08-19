@@ -6,7 +6,7 @@ reimplement Flow generation, YouTube/TikTok publishing, or Instagram media hando
 it calls the existing, working modules one Reel at a time, in a fixed phase order, and
 never lets a later phase start before the previous one is fully (14/14) done:
 
-    PLAN -> GENERATE -> VALIDATE -> LOCK -> YOUTUBE -> TIKTOK -> INSTAGRAM_HANDOFF -> DONE
+    PLAN -> GENERATE -> VALIDATE -> LOCK -> YOUTUBE -> TIKTOK -> INSTAGRAM -> DONE
 
 Content plan (workspace/batches/<week_id>/manifest.json) becomes immutable once LOCKED.
 Platform publishing status (workspace/batches/<week_id>/progress.json) is tracked
@@ -40,13 +40,25 @@ from automation.publishing.tiktok_publisher import (
     TikTokPublisher,
     MockTikTokPublisher,
 )
+from automation.publishing.instagram_web_publisher import (
+    BaseInstagramWebPublisher,
+    InstagramWebPublisher,
+    MockInstagramWebPublisher,
+)
 from automation.publishing.eligibility import is_live_production_eligible, HARD_EXCLUDED_REEL_IDS
 from automation.publishing.preflight_gate import run_pre_publish_hard_gate, verify_reel_id_invariant, is_placeholder_metadata
 from automation.publishing.metadata_builder import PublishingMetadataBuilder
 from automation.flow.generator import GoogleFlowWebProvider, MockVideoProvider, VideoProvider
 from automation.content.concepts import CATEGORIES
+from automation.content.content_modes import (
+    NARRATIVE_AMBIENT_STORY,
+    SILENT_STEP_BY_STEP,
+    is_live_eligible_mode,
+    requires_audio,
+)
 from automation.content.engine import ContentEngine
 from automation.content.prompt_engine import PromptEngine, ReelConceptPlan
+from automation.content.story_concepts import STORY_CONCEPTS
 from automation.quality.validator import VideoValidator
 from automation.media_handoff import handoff_reel_to_cloud
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
@@ -61,10 +73,36 @@ from automation.orchestration.slot_generator import (
     generate_14_slot_week_plan,
     calculate_next_safe_week_start,
     generate_week_id,
+    get_timezone,
 )
 from automation.orchestration.obsidian_mirror import ObsidianControlCenter, DEFAULT_VAULT_PATH
 
 PLATFORM_SUCCESS_STATUSES = ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED")
+
+# How Instagram gets its Reels. Exactly one of these runs per Reel -- running both would
+# schedule the post through the composer AND hand the same media to the cloud worker,
+# which publishes it again when its moment arrives. Two copies of every Reel.
+#
+#   "web"   -- drive instagram.com's native scheduler; the post appears in the account's
+#              scheduled queue immediately, like YouTube and TikTok. Ends at SCHEDULED.
+#   "cloud" -- upload to S3 and hand off to the Railway worker, which publishes at the
+#              scheduled moment via the Graph API. Ends at MEDIA_READY.
+INSTAGRAM_DELIVERY_WEB = "web"
+INSTAGRAM_DELIVERY_CLOUD = "cloud"
+INSTAGRAM_DELIVERY_MODES = (INSTAGRAM_DELIVERY_WEB, INSTAGRAM_DELIVERY_CLOUD)
+
+# "This Reel already reached Instagram", whichever route delivered it. Both routes' end
+# states count, always -- the delivery mode chooses what to do with NEW work, never how
+# to read work that is already done.
+#
+# Reading this per-mode was a real bug: with the web route selected, a week delivered via
+# the cloud (ending at MEDIA_READY) read as unfinished, so the pipeline resumed it and
+# scheduled all 14 already-delivered Reels a second time through the composer.
+# SUBMITTED_UNVERIFIED: 'Planla' was pressed, the post is almost certainly on the account,
+# only the confirmation dialog was not read in time. It is terminal on purpose -- a retry
+# would schedule the same video twice, and this system may not delete the extra copy.
+# The end-of-run summary flags it for a human look instead.
+INSTAGRAM_TERMINAL_STATUSES = ("MEDIA_READY", "SUBMITTED_UNVERIFIED") + PLATFORM_SUCCESS_STATUSES
 
 # The submit went through but the confirmation read-back was inconclusive. The video is
 # very likely correctly scheduled on the platform, so halting the whole week here does
@@ -107,11 +145,25 @@ class SimpleWeeklyPipeline:
         cloud_client: Optional[LocalWorkerCloudClient] = None,
         stuck_wait_minutes: int = 30,
         stuck_retry_seconds: int = 300,
+        content_mode: str = SILENT_STEP_BY_STEP,
+        instagram_delivery: str = INSTAGRAM_DELIVERY_WEB,
+        ig_web_publisher: Optional[BaseInstagramWebPublisher] = None,
     ):
         self.base_dir = (base_dir or Path(".").resolve())
         self.dry_run = dry_run
         self.week_id = week_id
         self.start_date = start_date
+        if not is_live_eligible_mode(content_mode):
+            raise ValueError(f"Unknown content_mode '{content_mode}' -- register it in automation.content.content_modes first.")
+        # Only used when PLAN creates a fresh manifest. A resumed manifest keeps the mode
+        # it was locked with, so a rerun can never silently re-mode a week mid-flight.
+        self.content_mode = content_mode
+
+        if instagram_delivery not in INSTAGRAM_DELIVERY_MODES:
+            raise ValueError(
+                f"Unknown instagram_delivery '{instagram_delivery}' -- expected one of {INSTAGRAM_DELIVERY_MODES}."
+            )
+        self.instagram_delivery = instagram_delivery
         # How long to hold a stuck platform for a manual fix before moving on, and how
         # often to retry inside that window. Tests set these to 0 to skip the wait.
         self.stuck_wait_minutes = stuck_wait_minutes
@@ -143,6 +195,7 @@ class SimpleWeeklyPipeline:
         self.yt_publisher = yt_publisher
         self.tt_publisher = tt_publisher
         self.cloud_client = cloud_client
+        self.ig_web_publisher = ig_web_publisher
 
     # =========================================================================
     # PHASE 0: PLAN (manifest creation, Reel ID allocation)
@@ -213,6 +266,89 @@ class SimpleWeeklyPipeline:
                 return manifest.week_id
         return None
 
+    def find_last_scheduled_date(self) -> Optional[datetime.date]:
+        """
+        The date of the latest slot that actually reached a platform, across every batch.
+
+        "Latest video on YouTube/TikTok/Instagram" is read from progress.json rather than
+        from the three Studio UIs: progress.json is written by the publishing phases
+        themselves and records the remote id and URL each one came back with, so it
+        already *is* the platform outcome -- without three more DOM scrapes that can
+        break on any layout change.
+
+        Slots that were planned but never published (PENDING/NOT_STARTED/FAILED) do not
+        count. Their dates are not occupied, so a new week may legitimately reuse them.
+        """
+        latest: Optional[datetime.date] = None
+
+        if not self.batch_repo.batches_dir.exists():
+            return None
+
+        for week_dir in sorted(self.batch_repo.batches_dir.iterdir()):
+            if not week_dir.is_dir():
+                continue
+            manifest = self.batch_repo.load_manifest(week_dir.name)
+            if manifest is None:
+                continue
+            progress = self.batch_repo.load_progress(week_dir.name)
+
+            for reel in manifest.reels:
+                entry = progress.get(reel.reel_id, {})
+                reached_a_platform = any(
+                    entry.get(platform, {}).get("status")
+                    in (INSTAGRAM_TERMINAL_STATUSES if platform == "instagram" else PLATFORM_SUCCESS_STATUSES)
+                    for platform in ("youtube", "tiktok", "instagram")
+                )
+                if not reached_a_platform:
+                    continue
+
+                try:
+                    slot_date = datetime.datetime.strptime(
+                        reel.scheduled_at_local, "%Y-%m-%d %H:%M:%S"
+                    ).date()
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"[PLAN] {reel.reel_id} has an unparseable scheduled_at_local "
+                        f"({reel.scheduled_at_local!r}) -- skipped when finding the last scheduled date."
+                    )
+                    continue
+
+                if latest is None or slot_date > latest:
+                    latest = slot_date
+
+        return latest
+
+    def _resolve_start_date(self) -> datetime.date:
+        """
+        Where the next week begins: the day after the last slot already on a platform.
+
+        Falls back to the next-Monday rule only when nothing has ever been published, and
+        never returns a date in the past -- 14 Reels take hours of Flow time, so the
+        earliest honest start is tomorrow even if the calendar says today is free.
+        """
+        if self.start_date:
+            return self.start_date
+
+        tz = get_timezone("Europe/Istanbul")
+        today = datetime.datetime.now(tz).date()
+        earliest = today + datetime.timedelta(days=1)
+
+        last_scheduled = self.find_last_scheduled_date()
+        if last_scheduled is None:
+            logger.info("[PLAN] Hicbir platformda planlanmis video yok -- takvim kuralina donuluyor.")
+            return max(calculate_next_safe_week_start(), earliest)
+
+        day_after = last_scheduled + datetime.timedelta(days=1)
+        chosen = max(day_after, earliest)
+        if chosen != day_after:
+            logger.warning(
+                f"[PLAN] Son planli video {last_scheduled} -- ertesi gun ({day_after}) gecmiste kaldigi icin "
+                f"baslangic {chosen} olarak alindi."
+            )
+        else:
+            logger.info(f"[PLAN] Son planli video {last_scheduled}; yeni hafta {chosen} tarihinde basliyor.")
+        return chosen
+
     def _get_or_create_manifest(self) -> BatchManifest:
         """Loads the existing manifest for this week, or creates a fresh DRAFT one."""
         if not self.week_id:
@@ -221,13 +357,31 @@ class SimpleWeeklyPipeline:
                 logger.info(f"[PLAN] Yarim kalmis batch bulundu, devam ediliyor: {resumable}")
                 self.week_id = resumable
 
-        start_date = self.start_date or calculate_next_safe_week_start()
+        start_date = self._resolve_start_date()
         week_id = self.week_id or generate_week_id(start_date)
         self.week_id = week_id
 
         existing = self.batch_repo.load_manifest(week_id)
+        if existing is not None and existing.start_date != start_date.isoformat() and self.week_id is None:
+            # The ISO week we computed is already occupied by a batch that starts on a
+            # different day. Resuming it would silently publish into the wrong week, so
+            # stop and let a human pick the date with --start-date / --week-id.
+            raise RuntimeError(
+                f"WEEK_ID_COLLISION: computed start {start_date} maps to {week_id}, but that week "
+                f"already exists starting {existing.start_date}. Re-run with an explicit "
+                f"--start-date or --week-id."
+            )
         if existing is not None:
-            logger.info(f"[PLAN] Existing manifest loaded for {week_id} (status={existing.status})")
+            logger.info(f"[PLAN] Existing manifest loaded for {week_id} (status={existing.status}, mode={existing.content_mode})")
+            # The manifest wins. A resumed week keeps the mode it was planned in even if
+            # this invocation passed a different --content-mode, so half a week can never
+            # come out silent and the other half narrated.
+            if existing.content_mode != self.content_mode:
+                logger.warning(
+                    f"[PLAN] --content-mode '{self.content_mode}' ignored: {week_id} was planned as "
+                    f"'{existing.content_mode}' and is being resumed in that mode."
+                )
+                self.content_mode = existing.content_mode
             return existing
 
         logger.info(f"[PLAN] No manifest for {week_id} -- creating a fresh DRAFT (14 slots, 19:30 & 22:00 Europe/Istanbul).")
@@ -235,21 +389,32 @@ class SimpleWeeklyPipeline:
 
         reel_ids = self._allocate_reel_ids(count=14)
 
-        content_engine = ContentEngine()
+        content_engine = ContentEngine(content_mode=self.content_mode)
         past_history = [{"id": r.reel_id, "title": r.title, "category": r.content_mode} for r in self.state_repo.list_all_reels()]
         concept_plans = content_engine.generate_next_reels(count=14, past_records=past_history, duration_seconds=10)
 
         reels: List[BatchReel] = []
         for i, (slot, reel_id, plan) in enumerate(zip(slot_plan.slots, reel_ids, concept_plans), start=1):
-            yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_youtube_metadata(
-                reel_id=reel_id,
-                title=plan.title,
-                category=plan.category,
-                environment=plan.environment,
-                architecture=plan.architecture,
-                transformation=plan.transformation,
-                reveal=plan.reveal,
-            )
+            if self.content_mode == NARRATIVE_AMBIENT_STORY:
+                concept = plan.concept_def
+                yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_story_youtube_metadata(
+                    reel_id=reel_id,
+                    name=concept.name,
+                    category_group=concept.category_group,
+                    real_basis=concept.real_basis,
+                    topic_description=concept.topic_description,
+                    narrative_frame=concept.narrative_frame,
+                )
+            else:
+                yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_youtube_metadata(
+                    reel_id=reel_id,
+                    title=plan.title,
+                    category=plan.category,
+                    environment=plan.environment,
+                    architecture=plan.architecture,
+                    transformation=plan.transformation,
+                    reveal=plan.reveal,
+                )
             reels.append(BatchReel(
                 index=i,
                 reel_id=reel_id,
@@ -259,6 +424,7 @@ class SimpleWeeklyPipeline:
                 title=yt_title,
                 caption=plan.topic_description,
                 hashtags=yt_tags,
+                content_mode=plan.content_mode,
                 concept_id_slug=plan.concept_def.id_slug,
                 environment=plan.environment,
                 architecture=plan.architecture,
@@ -276,6 +442,7 @@ class SimpleWeeklyPipeline:
             timezone="Europe/Istanbul",
             target_reels=14,
             status="DRAFT",
+            content_mode=self.content_mode,
             reels=reels,
         )
         self.batch_repo.save_manifest(manifest)
@@ -285,11 +452,23 @@ class SimpleWeeklyPipeline:
     def _rebuild_concept_plan(self, reel: BatchReel) -> ReelConceptPlan:
         """Deterministically rebuilds the exact ReelConceptPlan (same prompt, same
         segments) used when this manifest entry was created -- see BatchReel's raw
-        selector fields for why this is safe across separate process runs."""
-        concept = next((c for c in CATEGORIES if c.id_slug == reel.concept_id_slug), None)
+        selector fields for why this is safe across separate process runs.
+
+        The concept is looked up in the library its own content_mode belongs to: a story
+        slug does not exist in CATEGORIES and would otherwise read as a corrupt manifest.
+        """
+        if reel.content_mode == NARRATIVE_AMBIENT_STORY:
+            library, builder = STORY_CONCEPTS, PromptEngine.build_story_concept_plan
+        else:
+            library, builder = CATEGORIES, PromptEngine.build_concept_plan
+
+        concept = next((c for c in library if c.id_slug == reel.concept_id_slug), None)
         if concept is None:
-            raise ValueError(f"Unknown concept_id_slug '{reel.concept_id_slug}' for {reel.reel_id} -- manifest is corrupt.")
-        return PromptEngine.build_concept_plan(
+            raise ValueError(
+                f"Unknown concept_id_slug '{reel.concept_id_slug}' for {reel.reel_id} "
+                f"in content_mode '{reel.content_mode}' -- manifest is corrupt."
+            )
+        return builder(
             concept=concept,
             env=reel.environment,
             arch=reel.architecture,
@@ -317,13 +496,34 @@ class SimpleWeeklyPipeline:
     def all_generated(self, manifest: BatchManifest) -> bool:
         return all(r.generation_status == "COMPLETE" for r in manifest.reels)
 
+    # Two Reels failing the same way in a row is a broken setup, not bad luck -- e.g.
+    # Flow returning silent renders for an audio mode. Stopping there leaves the
+    # remaining Flow credits unspent and the batch resumable once the cause is fixed.
+    MAX_CONSECUTIVE_SAME_FAILURES = 2
+
+    @staticmethod
+    def _failure_signature(error: Exception) -> str:
+        """The error's kind, ignoring the Reel-specific tail: 'QC_FAILED: AUDIO_MISSING'."""
+        text = str(error)
+        parts = [p.strip() for p in text.split(":")]
+        return ": ".join(parts[:2]) if len(parts) > 1 else text[:60]
+
     def _run_generate_phase(self, manifest: BatchManifest) -> PhaseResult:
         self._init_flow_provider_if_needed()
-        validator = VideoValidator(reject_wrong_ratio=True, audio_enabled=False)
+
+        repeated_failure: Optional[str] = None
+        consecutive_same = 0
 
         for reel in manifest.reels:
             if reel.generation_status == "COMPLETE":
                 continue
+
+            # Per Reel, not per run: the manifest is the authority on what this Reel's
+            # audio should be, so a mixed-mode batch still validates each one correctly.
+            validator = VideoValidator(
+                reject_wrong_ratio=True,
+                audio_enabled=requires_audio(reel.content_mode),
+            )
 
             logger.info(f"[GENERATE] {reel.reel_id} ({reel.title}) -- Flow uretimi baslatiliyor...")
             try:
@@ -371,6 +571,32 @@ class SimpleWeeklyPipeline:
                 reel.generation_status = "FAILED"
                 reel.generation_error = str(e)
                 logger.error(f"[GENERATE] {reel.reel_id} basarisiz: {e}")
+
+                signature = self._failure_signature(e)
+                consecutive_same = consecutive_same + 1 if signature == repeated_failure else 1
+                repeated_failure = signature
+
+                if consecutive_same >= self.MAX_CONSECUTIVE_SAME_FAILURES:
+                    self.batch_repo.save_manifest(manifest)
+                    complete_count = sum(1 for r in manifest.reels if r.generation_status == "COMPLETE")
+                    logger.error(
+                        f"[GENERATE] Ayni hata ust uste {consecutive_same} kez tekrarladi ({signature}) -- "
+                        f"kalan Reel'ler denenmeden duruluyor. Sebep giderilince ayni komut kaldigi yerden devam eder."
+                    )
+                    return PhaseResult(
+                        success=False,
+                        phase="GENERATE",
+                        message=f"{complete_count}/{len(manifest.reels)} video hazir -- tekrarlayan hata: {signature}",
+                        detail={
+                            "complete": complete_count,
+                            "total": len(manifest.reels),
+                            "stopped_early": True,
+                            "repeated_failure": signature,
+                        },
+                    )
+            else:
+                consecutive_same = 0
+                repeated_failure = None
 
             self.batch_repo.save_manifest(manifest)
 
@@ -472,7 +698,7 @@ class SimpleWeeklyPipeline:
         for reel_id in reel_ids:
             status = progress.get(reel_id, {}).get(platform, {}).get("status")
             if platform == "instagram":
-                if status != "MEDIA_READY":
+                if status not in INSTAGRAM_TERMINAL_STATUSES:
                     return False
             elif status not in PLATFORM_SUCCESS_STATUSES:
                 return False
@@ -612,7 +838,107 @@ class SimpleWeeklyPipeline:
         cfg = CloudConfig(self.base_dir)
         self.cloud_client = LocalWorkerCloudClient(public_base_url=cfg.public_base_url, api_key=cfg.local_worker_api_key)
 
+    def _init_ig_web_publisher_if_needed(self) -> None:
+        if self.ig_web_publisher is not None:
+            return
+        self.ig_web_publisher = (
+            MockInstagramWebPublisher() if self.dry_run else InstagramWebPublisher()
+        )
+
     def _run_instagram_phase(self, manifest: BatchManifest) -> PhaseResult:
+        """Delivers the week to Instagram by exactly one route -- see INSTAGRAM_DELIVERY_MODES."""
+        if self.instagram_delivery == INSTAGRAM_DELIVERY_WEB:
+            return self._run_instagram_web_phase(manifest)
+        return self._run_instagram_cloud_phase(manifest)
+
+    def _run_instagram_web_phase(self, manifest: BatchManifest) -> PhaseResult:
+        """
+        Schedules each Reel through instagram.com's own composer, so the post shows up in
+        the account's scheduled queue right away rather than waiting for a worker.
+
+        One composer session per Reel, and a Reel already marked done is skipped -- a
+        rerun after a partial week must never schedule the same video twice.
+        """
+        phase = "INSTAGRAM_WEB"
+        if manifest.status != "LOCKED":
+            return PhaseResult(False, phase, "Manifest LOCKED değil, planlama başlayamaz.", {})
+
+        self._init_ig_web_publisher_if_needed()
+        self.batch_repo.ensure_progress_entries(manifest.week_id, manifest.reel_ids())
+
+        for reel in manifest.reels:
+            progress = self.batch_repo.load_progress(manifest.week_id)
+            entry = progress.get(reel.reel_id, {}).get("instagram", {})
+            if entry.get("status") in INSTAGRAM_TERMINAL_STATUSES:
+                # Covers a Reel already handed to the cloud worker too: scheduling it here
+                # as well would put two copies of the same video on the account.
+                logger.info(f"[INSTAGRAM] {reel.reel_id} zaten {entry.get('status')}, atlanıyor.")
+                continue
+
+            video_file = Path(reel.video_path) if reel.video_path else None
+            ok, reason = self._instagram_preflight(manifest, reel, video_file, phase)
+            if not ok:
+                return PhaseResult(False, phase, f"{reel.reel_id}: {reason}", {"failed_reel": reel.reel_id})
+
+            logger.info(f"[INSTAGRAM] {reel.reel_id} planlanıyor ({reel.index}/14): {reel.scheduled_at_local}")
+            status, error = self.ig_web_publisher.schedule_reel(
+                video_path=video_file,
+                caption=reel.caption,
+                hashtags=reel.hashtags,
+                scheduled_at_local=reel.scheduled_at_local,
+                reel_id=reel.reel_id,
+            )
+
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", status, error=error
+            )
+
+            if status in PLATFORM_SUCCESS_STATUSES:
+                logger.info(f"[INSTAGRAM] {reel.reel_id} planlandı.")
+                continue
+
+            if status == "SUBMITTED_UNVERIFIED":
+                logger.warning(
+                    f"[INSTAGRAM] {reel.reel_id} gonderildi ama onay okunamadi -- "
+                    f"tekrar denenmeyecek, sonda ozetlenecek. {error}"
+                )
+                continue
+
+            logger.error(f"[INSTAGRAM] {reel.reel_id} planlanamadı ({status}): {error}")
+            return PhaseResult(
+                False, phase, f"{reel.reel_id}: {status} -- {error}",
+                {"failed_reel": reel.reel_id, "status": status, "error": error},
+            )
+
+        return PhaseResult(True, phase, f"{len(manifest.reels)}/{len(manifest.reels)} Instagram planlaması tamamlandı", {})
+
+    def _instagram_preflight(self, manifest: BatchManifest, reel: BatchReel, video_file: Optional[Path], phase: str):
+        """The media checks both Instagram routes share. Returns (ok, reason)."""
+        if video_file is None or not video_file.exists():
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL",
+                error="Video file missing on disk",
+            )
+            return False, "video dosyası bulunamadı"
+
+        reel_state = self.state_repo.get_reel_state(reel.reel_id)
+        elig_ok, elig_reason = is_live_production_eligible(reel_state, video_file)
+        if not elig_ok:
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=elig_reason
+            )
+            return False, elig_reason
+
+        id_ok, id_reason = verify_reel_id_invariant(reel.reel_id, reel_state.reel_id, reel.reel_id, video_file)
+        if not id_ok:
+            self.batch_repo.update_platform_status(
+                manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=id_reason
+            )
+            return False, id_reason
+
+        return True, ""
+
+    def _run_instagram_cloud_phase(self, manifest: BatchManifest) -> PhaseResult:
         if manifest.status != "LOCKED":
             return PhaseResult(False, "INSTAGRAM_HANDOFF", "Manifest LOCKED değil, handoff başlayamaz.", {})
 
@@ -621,27 +947,18 @@ class SimpleWeeklyPipeline:
         self.batch_repo.ensure_progress_entries(manifest.week_id, reel_ids)
 
         for reel in manifest.reels:
-            video_file = Path(reel.video_path)
-            if not video_file.exists():
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error="Video file missing on disk")
-                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: video dosyası bulunamadı", {"failed_reel": reel.reel_id})
-
             progress = self.batch_repo.load_progress(manifest.week_id)
             entry = progress.get(reel.reel_id, {}).get("instagram", {})
-            if entry.get("status") == "MEDIA_READY":
-                logger.info(f"[INSTAGRAM] {reel.reel_id} zaten MEDIA_READY, atlanıyor.")
+            if entry.get("status") in INSTAGRAM_TERMINAL_STATUSES:
+                logger.info(f"[INSTAGRAM] {reel.reel_id} zaten {entry.get('status')}, atlanıyor.")
                 continue
 
-            reel_state = self.state_repo.get_reel_state(reel.reel_id)
-            elig_ok, elig_reason = is_live_production_eligible(reel_state, video_file)
-            if not elig_ok:
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=elig_reason)
-                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: {elig_reason}", {"failed_reel": reel.reel_id})
-
-            id_ok, id_reason = verify_reel_id_invariant(reel.reel_id, reel_state.reel_id, reel.reel_id, video_file)
-            if not id_ok:
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=id_reason)
-                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: {id_reason}", {"failed_reel": reel.reel_id})
+            # Same media checks as the web route, from the same place -- provenance,
+            # eligibility and the Reel ID invariant do not depend on how it is delivered.
+            video_file = Path(reel.video_path) if reel.video_path else None
+            ok, reason = self._instagram_preflight(manifest, reel, video_file, "INSTAGRAM_HANDOFF")
+            if not ok:
+                return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: {reason}", {"failed_reel": reel.reel_id})
 
             logger.info(f"[INSTAGRAM] {reel.reel_id} Railway/S3'e gönderiliyor ({reel.index}/14)...")
             ok, data, err = handoff_reel_to_cloud(
@@ -958,6 +1275,25 @@ def main():
     parser.add_argument("--live", action="store_true", default=False, help="Enable real live generation & publishing")
     parser.add_argument("--vault-path", type=str, default=None, help="Path to Obsidian vault")
     parser.add_argument("--phase", type=str, default=None, choices=["generate", "validate", "lock", "youtube", "tiktok", "instagram"], help="Debug only: run a single phase")
+    parser.add_argument(
+        "--instagram-delivery",
+        type=str,
+        default=INSTAGRAM_DELIVERY_WEB,
+        choices=list(INSTAGRAM_DELIVERY_MODES),
+        help=(
+            "How Instagram is delivered. 'web' schedules through instagram.com's own "
+            "composer (post appears in the scheduled queue immediately). 'cloud' hands "
+            "the media to the Railway worker, which publishes it at the scheduled moment. "
+            "Never both -- that would post every Reel twice."
+        ),
+    )
+    parser.add_argument(
+        "--content-mode",
+        type=str,
+        default=SILENT_STEP_BY_STEP,
+        choices=[SILENT_STEP_BY_STEP, NARRATIVE_AMBIENT_STORY],
+        help="Content mode for a NEW week. Ignored when resuming an existing manifest.",
+    )
 
     args = parser.parse_args()
 
@@ -974,6 +1310,8 @@ def main():
         dry_run=not args.live,
         week_id=args.week_id,
         start_date=start_date,
+        content_mode=args.content_mode,
+        instagram_delivery=args.instagram_delivery,
     )
 
     success, results, manifest = pipeline.run(phase=args.phase)

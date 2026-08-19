@@ -37,6 +37,11 @@ class _Loc:
     def is_visible(self, timeout=None):
         return self._visible
 
+    def wait_for(self, state="visible", timeout=None):
+        """Mirrors real Playwright: raises if the awaited state isn't met, else returns."""
+        if state == "visible" and not self._visible:
+            raise TimeoutError(f"locator not visible within {timeout}ms")
+
     def inner_text(self):
         return self._text
 
@@ -59,12 +64,20 @@ class _Page:
     """Composer page whose primary button label follows the schedule toggle, exactly
     like the real UI (toggle off => 'Paylaş', toggle on => 'Planla')."""
 
-    def __init__(self, schedule_on=True, ai_on=False, hour=19, minute=30, body=""):
+    def __init__(self, schedule_on=True, ai_on=False, hour=19, minute=30, body="",
+                 body_after_click=None, stale_success=False):
         self.schedule_on = schedule_on
         self.ai_on = ai_on
         self.hour = hour
         self.minute = minute
+        # `body` is what the page says before the submit; `body_after_click` is what it
+        # says once 'Planla' has been pressed (the success dialog). Real Instagram shows
+        # the success wording ONLY after the click -- a page that already carries it is
+        # stale state, which the observer must refuse to submit into.
         self.body = body
+        self.body_after_click = body_after_click
+        self.stale_success = stale_success
+        self.submitted = False
 
         self.schedule_switch = _Loc(attrs={"aria-checked": "true" if schedule_on else "false"})
         self.ai_switch = _Loc(attrs={"aria-checked": "true" if ai_on else "false"})
@@ -80,6 +93,13 @@ class _Page:
         self.schedule_switch.on_click = flip_schedule
         self.ai_switch.on_click = flip_ai
         self.primary = _Loc(text="Planla" if schedule_on else "Paylaş")
+
+        def submit():
+            self.submitted = True
+            if self.body_after_click is not None:
+                self.body = self.body_after_click
+
+        self.primary.on_click = submit
 
     def locator(self, selector):
         s = selector.lower()
@@ -104,6 +124,10 @@ class _Page:
             return _Loc(attrs={"aria-valuenow": str(self.minute)})
         if "aria-haspopup='dialog'" in s:
             return _Loc(text="17 Ağu 2026 Pzt")
+
+        if "text-is('bitti')" in s or "has-text('bitti')" in s:
+            # The success dialog's "Bitti" exists only once the schedule has gone through.
+            return _Loc(text="Bitti", visible=self.submitted or self.stale_success)
 
         return _Loc(visible=False, count=0)
 
@@ -162,7 +186,7 @@ def test_refuses_primary_button_labelled_share_even_if_toggle_reads_on():
 
 
 def test_schedules_when_toggle_on_and_confirmation_appears():
-    page = _Page(schedule_on=True, body="Gönderin planlandı")
+    page = _Page(schedule_on=True, body="", body_after_click="Reels videosu planlandı Reels videon planlandı. Bitti")
     obs = InstagramWebObserver(page)
 
     ok, reason = obs.click_schedule_and_verify(timeout_seconds=3)
@@ -170,6 +194,33 @@ def test_schedules_when_toggle_on_and_confirmation_appears():
     assert ok is True
     assert reason == "INSTAGRAM_SCHEDULED"
     assert page.primary.clicks == 1
+
+
+def test_refuses_to_submit_when_success_wording_is_already_on_the_page():
+    """
+    2026-08-19: the 14th Reel was recorded as scheduled on the strength of the word
+    "planlandı" being somewhere on the page, and never appeared on the calendar. If the
+    success wording is present BEFORE the click, a later sighting proves nothing.
+    """
+    page = _Page(schedule_on=True, body="Reels videon planlandı.", stale_success=True)
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.click_schedule_and_verify(timeout_seconds=3)
+
+    assert ok is False
+    assert reason == "STALE_SUCCESS_STATE_BEFORE_SUBMIT"
+    assert page.primary.clicks == 0, "must not submit into a state that cannot be verified"
+
+
+def test_bare_word_is_not_enough_for_confirmation():
+    """The dialog's phrase and its Bitti button are both required; a stray word is not."""
+    page = _Page(schedule_on=True, body="", body_after_click="içerik planlandı olarak işaretlendi")
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.click_schedule_and_verify(timeout_seconds=2)
+
+    assert ok is False
+    assert reason == "SUBMITTED_CONFIRMATION_TIMEOUT"
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +337,7 @@ def test_inline_too_soon_warning_blocks_submit():
 
 
 def test_no_warning_means_submit_proceeds():
-    page = _Page(schedule_on=True, body="Gönderin planlandı")
+    page = _Page(schedule_on=True, body="", body_after_click="Reels videon planlandı. Bitti")
     obs = InstagramWebObserver(page)
 
     ok, reason = obs.click_schedule_and_verify(timeout_seconds=3)

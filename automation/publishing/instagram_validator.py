@@ -100,6 +100,12 @@ def validate_instagram_reel_media(video_path: Path) -> InstagramMediaValidationR
 
         if audio_stream:
             res.audio_codec = str(audio_stream.get("codec_name", "")).lower()
+            # Meta accepts AAC audio for Reels. Silent Reels are fine (no stream at all),
+            # but a non-AAC track fails at upload, so catch it here instead of there.
+            if res.audio_codec != "aac":
+                res.errors.append(
+                    f"UNSUPPORTED_AUDIO_CODEC: '{res.audio_codec}' is not AAC, which Meta requires for Reels audio."
+                )
 
         # Validate duration
         if res.duration_seconds < 3.0:

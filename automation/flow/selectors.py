@@ -78,6 +78,17 @@ class FlowSelectors:
         "button:has-text('Get started')"
     ]
 
+    # Flow is a single-page app: the shell (header, avatar, Flow TV) paints immediately
+    # while the workspace is still mounting, and the body shows "Loading..." in the
+    # meantime. Captured 2026-08-19 -- a cold start took longer than the 4.5s the caller
+    # allowed, so the run reported a missing "Yeni proje" button on a page that was
+    # simply not finished loading yet. Used only to tell "still loading" apart from
+    # "genuinely absent"; nothing is ever clicked through these.
+    APP_LOADING_INDICATOR_SELECTORS: List[str] = [
+        "text=/^\\s*Loading\\.\\.\\.\\s*$/",
+        "text=/^\\s*Yükleniyor\\.\\.\\.\\s*$/",
+    ]
+
     # Settings / Ayarlar button (tune icon next to prompt composer)
     SETTINGS_BUTTON_SELECTORS: List[str] = [
         "button:has(i.google-symbols:text-is('tune'))",

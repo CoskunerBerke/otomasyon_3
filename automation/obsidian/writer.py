@@ -83,7 +83,7 @@ topic: {plan.topic_description}
 topic_key: {plan.topic_key}
 status: PROMPT_READY
 pipeline_version: 3
-content_mode: silent_global_step_by_step
+content_mode: {plan.content_mode}
 provider: google_flow
 created: {today_str}
 video_file: ""

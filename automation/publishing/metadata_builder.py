@@ -1,6 +1,12 @@
 """
 Deterministic and concept-driven metadata generator for YouTube Shorts and TikTok Studio.
 Generates unique English titles, descriptions, captions, and curated hashtags tailored to each concept.
+
+Two families of builder live here. build_youtube_metadata/build_tiktok_metadata serve the
+silent construction Reels ("Building X From Scratch"). build_story_* serve
+narrative_ambient_story Reels, where that phrasing would be simply false -- nobody built
+Pompeii in 30 seconds -- and where the copy must stay inside the concept's documented
+real_basis rather than dramatising beyond it.
 """
 import hashlib
 from typing import Dict, Any, Tuple, List
@@ -175,3 +181,117 @@ class PublishingMetadataBuilder:
                 "hashtags": tt_tags
             }
         }
+
+    STORY_HASHTAG_MAP = {
+        "Buried by Nature": ["#BuriedCity", "#LostCity", "#Archaeology", "#History", "#Ruins"],
+        "Reclaimed by the Jungle": ["#LostCity", "#Jungle", "#Ruins", "#Archaeology", "#AncientHistory"],
+        "Abandoned Overnight": ["#AbandonedPlaces", "#GhostTown", "#UrbanExploration", "#History", "#Abandoned"],
+        "Carved from Stone": ["#AncientArchitecture", "#RockCut", "#Archaeology", "#History", "#Wonders"],
+        "Lost to the Water": ["#LostPlaces", "#Environment", "#History", "#Abandoned", "#Geography"],
+        "Above the Clouds": ["#AncientWonders", "#LostCity", "#History", "#Archaeology", "#Mountains"],
+        "Born from the Sea": ["#Volcano", "#Geology", "#Nature", "#Science", "#NewLand"],
+    }
+
+    # Titles are chosen per narrative_frame. A single shared pool would put "Why Nobody
+    # Lives Here Anymore" on Gobekli Tepe, which was never inhabited, and on Lalibela,
+    # whose churches are still in use -- the frame is what keeps the claim true.
+    STORY_TITLE_VARIATIONS = {
+        "abandonment": [
+            "{title}: The Place That Was Left Behind",
+            "What Happened to {title}",
+            "Why Nobody Lives in {title} Anymore",
+            "{title}, Then and Now",
+            "The Day {title} Was Left Behind",
+        ],
+        "burial": [
+            "{title}: Buried, Then Found Again",
+            "What Was Buried at {title}",
+            "{title} -- Before and After It Was Buried",
+            "The Story of {title} in 30 Seconds",
+            "How {title} Disappeared",
+        ],
+        "vanishing": [
+            "{title}: Where the Water Went",
+            "What's Left of {title}",
+            "{title}, Then and Now",
+            "The Story of {title} in 30 Seconds",
+        ],
+        "creation": [
+            "The Making of {title}",
+            "How {title} Came to Be",
+            "The Story of {title} in 30 Seconds",
+        ],
+    }
+
+    STORY_CAPTION_VARIATIONS = [
+        "{topic_description}. Three moments: before, the turn, and what's left. 🏛️",
+        "{name} — {topic_description}. Sound on. 🔊",
+        "{topic_description}. Filmed as three continuous beats of the same place.",
+        "{name}: three moments, one place, thirty seconds. {topic_description}",
+    ]
+
+    @staticmethod
+    def _place_hashtag(name: str) -> str:
+        """'Plymouth, Montserrat' -> '#PlymouthMontserrat'. Empty string if nothing usable."""
+        letters = "".join(ch for ch in (name or "") if ch.isalnum() or ch.isspace())
+        joined = "".join(word.capitalize() if word.islower() else word for word in letters.split())
+        return f"#{joined}" if joined else ""
+
+    @classmethod
+    def build_story_youtube_metadata(
+        cls,
+        reel_id: str,
+        name: str,
+        category_group: str,
+        real_basis: str,
+        topic_description: str,
+        narrative_frame: str = "abandonment"
+    ) -> Tuple[str, str, List[str]]:
+        """
+        (title, description, hashtags) for a narrative_ambient_story Reel.
+
+        The description is built from `real_basis` verbatim rather than from a template,
+        so the published claim is exactly the documented one and cannot drift into
+        invented history as the wording gets reshuffled.
+        """
+        clean_name = (name or "").strip()
+        h = cls._deterministic_hash(reel_id + clean_name)
+
+        variations = cls.STORY_TITLE_VARIATIONS.get(
+            narrative_frame, cls.STORY_TITLE_VARIATIONS["abandonment"]
+        )
+        title = variations[h % len(variations)].format(title=clean_name)
+
+        desc = " ".join([
+            f"{topic_description}.",
+            real_basis,
+            "Reconstructed as three continuous 10-second beats -- the place in use, the event, and what remains today.",
+            "AI-generated visualisation with natural ambient sound. Not documentary footage.",
+        ])
+
+        place_tag = cls._place_hashtag(clean_name)
+        group_tags = cls.STORY_HASHTAG_MAP.get(
+            category_group, ["#History", "#LostPlaces", "#Archaeology", "#Abandoned", "#Documentary"]
+        )
+        tags = ["#Shorts"] + ([place_tag] if place_tag else []) + group_tags + ["#AI"]
+        return title, desc, list(dict.fromkeys(tags))[:8]
+
+    @classmethod
+    def build_story_tiktok_metadata(
+        cls,
+        reel_id: str,
+        name: str,
+        category_group: str,
+        topic_description: str
+    ) -> Tuple[str, List[str]]:
+        """(caption, hashtags) for a narrative_ambient_story Reel."""
+        clean_name = (name or "").strip()
+        h = cls._deterministic_hash(reel_id + clean_name + "tiktok")
+
+        tmpl = cls.STORY_CAPTION_VARIATIONS[h % len(cls.STORY_CAPTION_VARIATIONS)]
+        caption = tmpl.format(name=clean_name, topic_description=topic_description.rstrip("."))
+
+        place_tag = cls._place_hashtag(clean_name).lower()
+        base = ([place_tag] if place_tag else []) + ["#history", "#abandoned", "#lostplaces"]
+        group_tags = [t.lower() for t in cls.STORY_HASHTAG_MAP.get(category_group, ["#history"])]
+        return caption, list(dict.fromkeys(base + group_tags + ["#aitok"]))[:7]

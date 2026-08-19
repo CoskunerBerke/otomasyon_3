@@ -19,6 +19,17 @@ from .instagram_web_selectors import InstagramWebSelectors
 
 logger = logging.getLogger("ReelsAIFactory.InstagramWebObserver")
 
+# Instagram keeps rendering long after "domcontentloaded", and processes an attached
+# video before the composer will advance. These are the two places that were tuned in
+# milliseconds and would read a slow step as a broken one -- the failure mode that cost
+# this project three separate outages in one day (Flow, YouTube Studio, TikTok).
+STEP_WAIT_MS = 15000
+SWITCH_WAIT_MS = 4000
+CAPTION_PROBE_MS = 1500
+# After 'Planla', Instagram uploads + processes before confirming; ~1 min observed live.
+SCHEDULE_CONFIRM_TIMEOUT_SECONDS = 240
+UPLOAD_SETTLE_SECONDS = 5.0
+
 TR_MONTHS = {
     1: "Oca", 2: "Şub", 3: "Mar", 4: "Nis", 5: "May", 6: "Haz",
     7: "Tem", 8: "Ağu", 9: "Eyl", 10: "Eki", 11: "Kas", 12: "Ara",
@@ -49,11 +60,19 @@ class InstagramWebObserver:
             logger.debug(f"[IG WEB] snapshot '{tag}' alinamadi: {e}")
 
     def _first_visible(self, selectors: List[str], timeout_ms: int = 2500) -> Optional[Any]:
+        """Try each selector in turn, actually waiting up to `timeout_ms` for it to render.
+
+        Locator.is_visible(timeout=...) ignores its timeout and returns instantly -- it is
+        a snapshot check, not a wait. Instagram's composer is a React SPA that keeps
+        rendering after "domcontentloaded", so an instant check catches it mid-render and
+        reports every control as missing even when it appears a moment later. wait_for()
+        is the call that actually polls for the timeout.
+        """
         for sel in selectors:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=timeout_ms):
-                    return loc
+                loc.wait_for(state="visible", timeout=timeout_ms)
+                return loc
             except Exception:
                 continue
         return None
@@ -80,7 +99,25 @@ class InstagramWebObserver:
     # ------------------------------------------------------------------
 
     def open_composer(self) -> bool:
-        return self._click(InstagramWebSelectors.OPEN_COMPOSER_BUTTONS, "İçeriği planla / Oluştur")
+        """Click the /scheduled_content/ page's own 'İçeriği planla' button.
+
+        This must be called after navigating to /scheduled_content/ -- that page's button
+        is the only entry point used, since it is the one guaranteed to open a composer
+        with the schedule toggle. There is no fallback to the generic 'Oluştur' composer:
+        that opens a different dialog with no scheduling at all, so a missing button is
+        reported rather than silently swapped for the wrong flow.
+        """
+        if self._click(InstagramWebSelectors.OPEN_COMPOSER_BUTTONS, "İçeriği planla"):
+            return True
+
+        self.capture_error_snapshot("composer_button_not_found")
+        logger.error("=" * 50)
+        logger.error("STATUS: NEEDS_USER_HTML")
+        logger.error("Platform: Instagram Web")
+        logger.error("Target: /scheduled_content/ page's 'İçeriği planla' button")
+        logger.error("Needed: outerHTML of that button and its parent/wrapper.")
+        logger.error("=" * 50)
+        return False
 
     def upload_file(self, video_path: Path) -> bool:
         """Attach the video. Prefers the hidden file input; falls back to the visible
@@ -93,7 +130,7 @@ class InstagramWebObserver:
                 if loc.count() > 0:
                     loc.set_input_files(str(video_path))
                     logger.info(f"[IG WEB] Dosya dogrudan input'a verildi: {video_path.name}")
-                    time.sleep(2.0)
+                    time.sleep(UPLOAD_SETTLE_SECONDS)
                     return True
             except Exception as e:
                 logger.debug(f"[IG WEB] file input {sel}: {e}")
@@ -105,7 +142,7 @@ class InstagramWebObserver:
                     btn.click(timeout=3000)
                 fc.value.set_files(str(video_path))
                 logger.info(f"[IG WEB] Dosya file chooser ile verildi: {video_path.name}")
-                time.sleep(2.0)
+                time.sleep(UPLOAD_SETTLE_SECONDS)
                 return True
             except Exception as e:
                 logger.warning(f"[IG WEB] file chooser basarisiz: {e}")
@@ -114,16 +151,27 @@ class InstagramWebObserver:
         return False
 
     def advance_to_caption_step(self, max_steps: int = 3) -> bool:
-        """Click 'İleri' through crop and filter screens until the caption step appears."""
+        """Click 'İleri' through crop and filter screens until the caption step appears.
+
+        Instagram processes the video after it is attached, and the crop screen's 'İleri'
+        does not become usable until that finishes -- for a 30s Reel that is seconds, not
+        milliseconds. Each wait here is therefore generous: a step that is merely slow
+        must not be read as a composer that failed to advance.
+        """
         for step in range(max_steps):
-            if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=1500) is not None:
+            # Quick look for the caption box -- on the crop and filter screens it is not
+            # there, and waiting STEP_WAIT_MS for it on each of them cost ~30s per Reel
+            # before the first 'İleri' was even pressed (2026-08-19). The patience belongs
+            # on 'İleri' itself, which is the control Instagram holds back while the
+            # video is processed.
+            if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=CAPTION_PROBE_MS) is not None:
                 logger.info(f"[IG WEB] Caption adimina ulasildi ({step} 'İleri').")
                 return True
-            if not self._click(InstagramWebSelectors.NEXT_BUTTONS, "İleri"):
+            if not self._click(InstagramWebSelectors.NEXT_BUTTONS, "İleri", timeout_ms=STEP_WAIT_MS):
                 break
-            time.sleep(1.2)
+            time.sleep(1.0)
 
-        if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=2000) is not None:
+        if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=STEP_WAIT_MS) is not None:
             return True
         self.capture_error_snapshot("caption_step_not_reached")
         return False
@@ -140,7 +188,16 @@ class InstagramWebObserver:
         if hashtags:
             tags = " ".join(t if t.startswith("#") else f"#{t}" for t in hashtags)
             text = f"{text}\n\n{tags}".strip()
-        text = text[:2200]   # Instagram caption limit
+        text = text[:2199]   # Instagram caption limit, minus the trailing space below
+
+        # Instagram opens a hashtag autocomplete for the token under the cursor, and the
+        # caption ends in a hashtag -- so after typing, a suggestion list ("#airpods",
+        # "#aikido", ...) stays open over the form. It covered the AI-label switch on
+        # 2026-08-19 and every click on it was intercepted, which read as the toggle
+        # failing. A trailing space ends the token so no suggestion is active, and moving
+        # focus off the field closes anything that is still showing. Tab only moves focus;
+        # Escape is deliberately avoided because in this dialog it asks to discard the post.
+        text = text + " "
 
         try:
             loc.click(timeout=3000)
@@ -149,7 +206,9 @@ class InstagramWebObserver:
                 loc.fill(text)
             except Exception:
                 self.page.keyboard.type(text)
-            time.sleep(0.5)
+            time.sleep(0.4)
+            self.page.keyboard.press("Tab")
+            time.sleep(0.6)
             return True
         except Exception as e:
             logger.warning(f"[IG WEB] Caption yazilamadi: {e}")
@@ -167,16 +226,21 @@ class InstagramWebObserver:
         hashed class names, so the row is located by its visible text and the switch is
         then taken from within that row -- text and role, never the hashed classes.
         """
+        # Both strategies require the row to actually contain a switch. Without that,
+        # `.last` resolves to the innermost div around the label text -- which holds no
+        # switch -- and "İçeriği planla" also matches the composer entry button sitting
+        # behind the dialog on /scheduled_content/. Confirmed against the real row markup
+        # (2026-08-19): <div><div><span>LABEL</span></div><div>...<input role="switch"></div></div>.
+        switch_sel = InstagramWebSelectors.SWITCH_INPUTS[0]
         for text in label_texts:
             for row_sel in (
-                f"div:has(> div > div > span:text-is('{text}'))",
-                f"div:has(span:text-is('{text}'))",
+                f"div:has(> div > div > span:text-is('{text}')):has({switch_sel})",
+                f"div:has(span:text-is('{text}')):has({switch_sel})",
             ):
                 try:
                     row = self.page.locator(row_sel).last
-                    if not row.is_visible(timeout=1200):
-                        continue
-                    sw = row.locator(InstagramWebSelectors.SWITCH_INPUTS[0]).last
+                    row.wait_for(state="visible", timeout=SWITCH_WAIT_MS)
+                    sw = row.locator(switch_sel).last
                     if sw.count() > 0:
                         return sw
                 except Exception:
@@ -210,11 +274,33 @@ class InstagramWebObserver:
             return True
 
         try:
-            sw.click(timeout=3000)
-            time.sleep(0.8)
-        except Exception as e:
-            logger.warning(f"[IG WEB] '{what}' tiklanamadi: {e}")
+            sw.scroll_into_view_if_needed(timeout=2000)
+        except Exception:
+            pass
+
+        clicked = False
+        for attempt in (1, 2):
+            try:
+                sw.click(timeout=3000)
+                clicked = True
+                break
+            except Exception as e:
+                if attempt == 1:
+                    # Usually a popover (hashtag suggestions) intercepting the click. Move
+                    # focus off whatever owns it and try once more.
+                    logger.info(f"[IG WEB] '{what}' ilk tiklama engellendi ({type(e).__name__}); ustteki katman kapatilip tekrar denenecek.")
+                    try:
+                        self.page.keyboard.press("Tab")
+                    except Exception:
+                        pass
+                    time.sleep(0.6)
+                    sw = self._switch_near_text(label_texts) or sw
+                else:
+                    logger.warning(f"[IG WEB] '{what}' tiklanamadi: {e}")
+                    self.capture_error_snapshot(f"toggle_click_failed_{what}")
+        if not clicked:
             return False
+        time.sleep(0.8)
 
         state = self._is_switch_on(self._switch_near_text(label_texts) or sw)
         if state is desired:
@@ -262,8 +348,12 @@ class InstagramWebObserver:
         return any(m in body for m in InstagramWebSelectors.TIME_TOO_SOON_MARKERS)
 
     def set_time(self, hour: int, minute: int) -> bool:
-        """Fill the Hours/Minutes spinbuttons and read them back."""
-        ok = True
+        """Fill the Hours/Minutes spinbuttons and read them back.
+
+        These are Meta spinbuttons: <input role="spinbutton" aria-valuenow="14" value="">
+        with an aria-hidden <label> painting the digits. The typed value lands in
+        aria-valuenow, not value, so that is what is read back (captured 2026-08-19).
+        """
         for selectors, value, what in (
             (InstagramWebSelectors.HOUR_INPUTS, hour, "Saat"),
             (InstagramWebSelectors.MINUTE_INPUTS, minute, "Dakika"),
@@ -273,16 +363,52 @@ class InstagramWebObserver:
                 logger.warning(f"[IG WEB] '{what}' alani bulunamadi.")
                 self.capture_error_snapshot("time_input_not_found")
                 return False
+
+            if not self._write_spinbutton(loc, value, what):
+                self.capture_error_snapshot(f"time_set_failed_{what}")
+                return False
+
+        return self.verify_time(hour, minute)
+
+    def _write_spinbutton(self, loc: Any, value: int, what: str) -> bool:
+        """Two ways in, each read back before it is believed: typed digits, then fill()."""
+        wanted = f"{value:02d}"
+
+        def current() -> Optional[int]:
+            try:
+                now = loc.get_attribute("aria-valuenow")
+                return int(str(now)) if now is not None and str(now).strip() != "" else None
+            except Exception:
+                return None
+
+        if current() == value:
+            return True
+
+        # 1. Focus and type the digits, as a person would.
+        try:
             try:
                 loc.click(timeout=2500)
-                self.page.keyboard.press("Control+A")
-                self.page.keyboard.type(f"{value:02d}")
-                time.sleep(0.4)
-            except Exception as e:
-                logger.warning(f"[IG WEB] '{what}' yazilamadi: {e}")
-                ok = False
+            except Exception:
+                loc.focus()
+            self.page.keyboard.press("Control+A")
+            self.page.keyboard.type(wanted)
+            time.sleep(0.5)
+            if current() == value:
+                return True
+        except Exception as e:
+            logger.debug(f"[IG WEB] {what}: yazarak ayarlanamadi: {e}")
 
-        return ok and self.verify_time(hour, minute)
+        # 2. Set the value through the input itself.
+        try:
+            loc.fill(wanted)
+            time.sleep(0.5)
+            if current() == value:
+                return True
+        except Exception as e:
+            logger.debug(f"[IG WEB] {what}: fill ile ayarlanamadi: {e}")
+
+        logger.warning(f"[IG WEB] '{what}' {wanted} yapilamadi (aria-valuenow={current()}).")
+        return False
 
     def verify_time(self, hour: int, minute: int) -> bool:
         """Read back aria-valuenow rather than trusting the typing."""
@@ -315,7 +441,7 @@ class InstagramWebObserver:
         day cell cannot be resolved, DOM evidence is captured and NEEDS_USER_HTML is
         reported rather than clicking a guessed cell and scheduling the wrong day.
         """
-        if self.verify_date(target):
+        if self.verify_date(target, strict=False):
             return True, "DATE_ALREADY_CORRECT"
 
         btn = self._first_visible(InstagramWebSelectors.DATE_PICKER_BUTTONS, timeout_ms=2000)
@@ -375,8 +501,7 @@ class InstagramWebObserver:
         for sel in InstagramWebSelectors.MONTH_HEADER:
             try:
                 loc = self.page.locator(sel).first
-                if not loc.is_visible(timeout=1200):
-                    continue
+                loc.wait_for(state="visible", timeout=1200)
                 text = (loc.inner_text() or "").strip()
             except Exception:
                 continue
@@ -400,15 +525,14 @@ class InstagramWebObserver:
             sel = template.format(day=day)
             try:
                 loc = self.page.locator(sel).first
-                if not loc.is_visible(timeout=1000):
-                    continue
+                loc.wait_for(state="visible", timeout=1000)
                 loc.click(timeout=2500)
                 return True
             except Exception:
                 continue
         return False
 
-    def verify_date(self, target: datetime.datetime) -> bool:
+    def verify_date(self, target: datetime.datetime, strict: bool = True) -> bool:
         """Confirm the date button already shows the target day.
 
         Instagram defaults to today, so same-day slots need no interaction. A different
@@ -426,14 +550,18 @@ class InstagramWebObserver:
         if wanted in shown:
             logger.info(f"[IG WEB] Tarih dogrulandi: {shown}")
             return True
-        logger.warning(f"[IG WEB] Tarih uyusmuyor: beklenen '{wanted}', ekranda '{shown}'")
+        # Only a warning when the caller says so. select_date() calls this first to see
+        # whether the picker is needed at all, and at that moment the field still shows
+        # today -- logging that as a mismatch made a normal run read like a failure.
+        log = logger.warning if strict else logger.info
+        log(f"[IG WEB] Tarih henuz '{shown}', hedef '{wanted}'" + ("" if strict else " -- secici aciliyor."))
         return False
 
     # ------------------------------------------------------------------
     # submit
     # ------------------------------------------------------------------
 
-    def click_schedule_and_verify(self, timeout_seconds: int = 30) -> Tuple[bool, str]:
+    def click_schedule_and_verify(self, timeout_seconds: int = SCHEDULE_CONFIRM_TIMEOUT_SECONDS) -> Tuple[bool, str]:
         """Press 'Planla', but only after the schedule toggle is verified ON.
 
         With the toggle OFF the same primary control reads 'Paylaş' and posts
@@ -473,21 +601,95 @@ class InstagramWebObserver:
                 self.capture_error_snapshot("primary_button_is_share_now")
                 return False, "PUBLISH_NOW_BUTTON_REFUSED"
 
+        # Stale-state guard: if the success wording is ALREADY on the page before the
+        # click, a later sighting of it proves nothing about this Reel. Refuse rather than
+        # submit into a state that cannot be verified.
+        try:
+            pre = (self.page.inner_text("body") or "").lower()
+        except Exception:
+            pre = ""
+        if self._has_success_marker(pre):
+            self.capture_error_snapshot("success_marker_present_before_submit")
+            logger.error("[IG WEB] Gonderimden ONCE sayfada basari metni var -- onay guvenilir olamaz, tiklanmayacak.")
+            return False, "STALE_SUCCESS_STATE_BEFORE_SUBMIT"
+
         try:
             btn.click(timeout=4000)
         except Exception as e:
             return False, f"SCHEDULE_CLICK_FAILED: {e}"
 
+        # From here on the submit HAS happened. Whatever the read-back says, this Reel
+        # must never be submitted again by a retry -- that is how a post ends up twice on
+        # the account, and this system may not delete the extra one.
+        #
+        # Instagram uploads and processes the video after 'Planla', then shows a dialog
+        # titled "Reels videosu planlandı" (first with a spinner, then a checkmark) and a
+        # "Bitti" button. On 2026-08-19 that took about a minute; the old 30s window read
+        # a successful schedule as a failure.
         start = time.time()
         while time.time() - start < timeout_seconds:
             try:
                 body = (self.page.inner_text("body") or "").lower()
-                if any(m in body for m in InstagramWebSelectors.SCHEDULE_SUCCESS_MARKERS):
-                    logger.info("[IG WEB] Planlama onaylandi.")
+                # Both halves are required: the success phrase AND the dialog's own
+                # "Bitti" button on screen. The phrase alone was fooled once.
+                if self._has_success_marker(body) and self._success_dialog_visible():
+                    logger.info("[IG WEB] Planlama onaylandi (basari penceresi + Bitti gorundu).")
+                    self.capture_success_evidence()
+                    self._close_success_dialog()
                     return True, "INSTAGRAM_SCHEDULED"
             except Exception:
                 pass
-            time.sleep(1.5)
+            time.sleep(2.0)
 
         self.capture_error_snapshot("schedule_confirmation_not_verified")
-        return False, "SCHEDULE_CONFIRMATION_NOT_VERIFIED"
+        return False, "SUBMITTED_CONFIRMATION_TIMEOUT"
+
+    @staticmethod
+    def _has_success_marker(lower_body: str) -> bool:
+        return any(m in lower_body for m in InstagramWebSelectors.SCHEDULE_SUCCESS_MARKERS)
+
+    def _success_dialog_visible(self) -> bool:
+        for sel in InstagramWebSelectors.SUCCESS_DIALOG_DONE_BUTTONS:
+            try:
+                if self.page.locator(sel).first.is_visible(timeout=500):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def capture_success_evidence(self) -> None:
+        """
+        One screenshot per confirmed schedule. Failures already leave evidence; a false
+        success leaves none, which is exactly what made the missing 14th post on
+        2026-08-19 undiagnosable. Cheap insurance: a PNG per Reel.
+        """
+        try:
+            # Same folder capture_error_snapshot uses; this class has no screenshots_dir
+            # attribute, and referencing one made the first live capture fail silently.
+            shots = Path("screenshots") / "errors"
+            shots.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.page.screenshot(path=str(shots / f"ok_ig_scheduled_{ts}.png"))
+        except Exception as e:
+            logger.debug(f"[IG WEB] basari kaniti alinamadi: {e}")
+
+    def _close_success_dialog(self) -> None:
+        """
+        Press "Bitti" on the success dialog so the next Reel starts from a clean page.
+        Captured 2026-08-19: <div role="button" tabindex="0">Bitti</div>, hashed classes
+        only -- matched by role and exact text. Missing it is harmless (the next Reel
+        reloads the page anyway), so this never fails the schedule.
+        """
+        # Let the spinner turn into the checkmark before dismissing.
+        time.sleep(3.0)
+        for sel in InstagramWebSelectors.SUCCESS_DIALOG_DONE_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                loc.wait_for(state="visible", timeout=5000)
+                loc.click(timeout=3000)
+                logger.info("[IG WEB] Basari penceresi 'Bitti' ile kapatildi.")
+                time.sleep(1.0)
+                return
+            except Exception:
+                continue
+        logger.info("[IG WEB] 'Bitti' bulunamadi; sonraki Reel sayfayi zaten yeniden yukleyecek.")
