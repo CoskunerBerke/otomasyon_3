@@ -108,15 +108,42 @@ class FakeObserver:
         self.snapshots.append(tag)
 
 
+class FakeLocator:
+    def __init__(self, visible_fn):
+        self._visible_fn = visible_fn
+
+    @property
+    def first(self):
+        return self
+
+    def is_visible(self, timeout=None):
+        return self._visible_fn()
+
+
 class FakePage:
-    def __init__(self, goto_fails=False):
+    """
+    Fake page whose composer entry point appears only after `ready_after` probes,
+    imitating instagram.com mounting on a cold Chrome.
+    """
+
+    def __init__(self, goto_fails=False, ready_after=0, never_ready=False):
         self.goto_fails = goto_fails
+        self.ready_after = ready_after
+        self.never_ready = never_ready
+        self.probes = 0
         self.url = None
 
     def goto(self, url, **kwargs):
         if self.goto_fails:
             raise RuntimeError("navigation blocked")
         self.url = url
+
+    def locator(self, selector):
+        def visible():
+            self.probes += 1
+            return not self.never_ready and self.probes > self.ready_after
+
+        return FakeLocator(visible)
 
 
 @pytest.fixture
@@ -132,11 +159,11 @@ def _future_slot(days=3):
 
 # ---------------------------------------------------------------- composer flow
 
-def _publish(video, observer, slot=None):
+def _publish(video, observer, slot=None, page=None):
     pub = InstagramWebPublisher(browser_manager=object())
     return pub._run_composer(
         obs=observer,
-        page=FakePage(),
+        page=page if page is not None else FakePage(),
         video_path=video,
         caption="caption",
         hashtags=["#history"],
@@ -415,3 +442,37 @@ def test_a_cloud_delivered_week_reads_as_finished_under_the_web_route(tmp_path):
     assert pipe.all_platform_done(manifest.week_id, manifest.reel_ids(), "instagram")
     assert pipe._is_batch_finished(manifest)
     assert pipe._find_unfinished_week_id() is None
+
+
+# ---------------------------------------------------------------- cold start
+
+def test_a_slow_first_load_is_waited_out(video):
+    """
+    The weekly run opens the Instagram Chrome cold -- that profile sits unused until this
+    phase -- so the composer entry point is routinely late. Flow failed exactly this way
+    on 2026-08-19 by reading "late" as "missing".
+    """
+    obs = FakeObserver()
+    page = FakePage(ready_after=3)
+
+    status, error = _publish(video, obs, page=page)
+
+    assert status == "SCHEDULED", error
+    assert page.probes > 3, "the publisher should have kept polling while the page mounted"
+    assert obs.steps[0] == "open_composer"
+
+
+def test_a_page_that_never_mounts_is_retryable_and_runs_no_steps(video, monkeypatch):
+    import automation.publishing.instagram_web_publisher as mod
+
+    monkeypatch.setattr(mod, "APP_READY_TIMEOUT_SECONDS", 2)
+
+    obs = FakeObserver()
+    page = FakePage(never_ready=True)
+    status, error = _publish(video, obs, page=page)
+
+    assert status == "FAILED_RETRYABLE"
+    assert "PAGE_NOT_READY" in error
+    # Nothing may be attempted against a page that never became interactive.
+    assert obs.steps == []
+    assert obs.snapshots, "a readiness failure must leave DOM evidence behind"

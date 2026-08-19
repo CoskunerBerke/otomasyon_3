@@ -27,10 +27,19 @@ from typing import Any, List, Optional, Tuple
 
 from .instagram_web_browser import InstagramWebBrowserManager
 from .instagram_web_observer import InstagramWebObserver
+from .instagram_web_selectors import InstagramWebSelectors
 
 logger = logging.getLogger("ReelsAIFactory.InstagramWebPublisher")
 
 SCHEDULED_CONTENT_URL = "https://www.instagram.com/scheduled_content/"
+
+# How long to let instagram.com finish mounting before deciding the composer entry point
+# is not there. The weekly run usually opens this Chrome cold -- the profile sits unused
+# until the Instagram phase -- and instagram.com paints its shell well before the page is
+# interactive. Flow failed exactly this way on 2026-08-19: a button that was merely late
+# was reported as missing. 45s is generous on purpose; it costs nothing when the page is
+# quick, and the alternative is failing all 14 Reels on a slow first load.
+APP_READY_TIMEOUT_SECONDS = 45
 
 
 class BaseInstagramWebPublisher:
@@ -81,6 +90,26 @@ class InstagramWebPublisher(BaseInstagramWebPublisher):
             obs = InstagramWebObserver(page)
             return self._run_composer(obs, page, video_path, caption, hashtags, target, reel_id)
 
+    @staticmethod
+    def _wait_for_page_ready(page: Any, timeout_seconds: int) -> bool:
+        """
+        Wait until the composer entry point is actually on screen.
+
+        goto(wait_until="domcontentloaded") returns when the HTML is parsed, which on a
+        cold Chrome is long before instagram.com is interactive. Looking for the button
+        in that window finds nothing and is indistinguishable from a changed UI.
+        """
+        deadline = time.time() + timeout_seconds
+        selector = InstagramWebSelectors.OPEN_COMPOSER_BUTTONS[0]
+        while time.time() < deadline:
+            try:
+                if page.locator(selector).first.is_visible(timeout=1000):
+                    return True
+            except Exception:
+                pass
+            time.sleep(1.0)
+        return False
+
     def _run_composer(
         self,
         obs: InstagramWebObserver,
@@ -100,6 +129,13 @@ class InstagramWebPublisher(BaseInstagramWebPublisher):
             page.goto(SCHEDULED_CONTENT_URL, wait_until="domcontentloaded", timeout=30000)
         except Exception as e:
             return "FAILED_RETRYABLE", f"Could not open {SCHEDULED_CONTENT_URL}: {e}"
+
+        if not self._wait_for_page_ready(page, APP_READY_TIMEOUT_SECONDS):
+            obs.capture_error_snapshot(f"{reel_id}_page_never_became_ready")
+            return "FAILED_RETRYABLE", (
+                "PAGE_NOT_READY: instagram.com/scheduled_content/ did not finish loading "
+                f"within {APP_READY_TIMEOUT_SECONDS}s (the composer entry point never appeared)"
+            )
 
         steps = [
             ("OPEN_COMPOSER", lambda: obs.open_composer()),
