@@ -24,6 +24,7 @@ logger = logging.getLogger("ReelsAIFactory.InstagramWebObserver")
 # milliseconds and would read a slow step as a broken one -- the failure mode that cost
 # this project three separate outages in one day (Flow, YouTube Studio, TikTok).
 STEP_WAIT_MS = 15000
+SWITCH_WAIT_MS = 4000
 UPLOAD_SETTLE_SECONDS = 5.0
 
 TR_MONTHS = {
@@ -179,7 +180,16 @@ class InstagramWebObserver:
         if hashtags:
             tags = " ".join(t if t.startswith("#") else f"#{t}" for t in hashtags)
             text = f"{text}\n\n{tags}".strip()
-        text = text[:2200]   # Instagram caption limit
+        text = text[:2199]   # Instagram caption limit, minus the trailing space below
+
+        # Instagram opens a hashtag autocomplete for the token under the cursor, and the
+        # caption ends in a hashtag -- so after typing, a suggestion list ("#airpods",
+        # "#aikido", ...) stays open over the form. It covered the AI-label switch on
+        # 2026-08-19 and every click on it was intercepted, which read as the toggle
+        # failing. A trailing space ends the token so no suggestion is active, and moving
+        # focus off the field closes anything that is still showing. Tab only moves focus;
+        # Escape is deliberately avoided because in this dialog it asks to discard the post.
+        text = text + " "
 
         try:
             loc.click(timeout=3000)
@@ -188,7 +198,9 @@ class InstagramWebObserver:
                 loc.fill(text)
             except Exception:
                 self.page.keyboard.type(text)
-            time.sleep(0.5)
+            time.sleep(0.4)
+            self.page.keyboard.press("Tab")
+            time.sleep(0.6)
             return True
         except Exception as e:
             logger.warning(f"[IG WEB] Caption yazilamadi: {e}")
@@ -206,15 +218,21 @@ class InstagramWebObserver:
         hashed class names, so the row is located by its visible text and the switch is
         then taken from within that row -- text and role, never the hashed classes.
         """
+        # Both strategies require the row to actually contain a switch. Without that,
+        # `.last` resolves to the innermost div around the label text -- which holds no
+        # switch -- and "İçeriği planla" also matches the composer entry button sitting
+        # behind the dialog on /scheduled_content/. Confirmed against the real row markup
+        # (2026-08-19): <div><div><span>LABEL</span></div><div>...<input role="switch"></div></div>.
+        switch_sel = InstagramWebSelectors.SWITCH_INPUTS[0]
         for text in label_texts:
             for row_sel in (
-                f"div:has(> div > div > span:text-is('{text}'))",
-                f"div:has(span:text-is('{text}'))",
+                f"div:has(> div > div > span:text-is('{text}')):has({switch_sel})",
+                f"div:has(span:text-is('{text}')):has({switch_sel})",
             ):
                 try:
                     row = self.page.locator(row_sel).last
-                    row.wait_for(state="visible", timeout=1200)
-                    sw = row.locator(InstagramWebSelectors.SWITCH_INPUTS[0]).last
+                    row.wait_for(state="visible", timeout=SWITCH_WAIT_MS)
+                    sw = row.locator(switch_sel).last
                     if sw.count() > 0:
                         return sw
                 except Exception:
@@ -248,11 +266,33 @@ class InstagramWebObserver:
             return True
 
         try:
-            sw.click(timeout=3000)
-            time.sleep(0.8)
-        except Exception as e:
-            logger.warning(f"[IG WEB] '{what}' tiklanamadi: {e}")
+            sw.scroll_into_view_if_needed(timeout=2000)
+        except Exception:
+            pass
+
+        clicked = False
+        for attempt in (1, 2):
+            try:
+                sw.click(timeout=3000)
+                clicked = True
+                break
+            except Exception as e:
+                if attempt == 1:
+                    # Usually a popover (hashtag suggestions) intercepting the click. Move
+                    # focus off whatever owns it and try once more.
+                    logger.info(f"[IG WEB] '{what}' ilk tiklama engellendi ({type(e).__name__}); ustteki katman kapatilip tekrar denenecek.")
+                    try:
+                        self.page.keyboard.press("Tab")
+                    except Exception:
+                        pass
+                    time.sleep(0.6)
+                    sw = self._switch_near_text(label_texts) or sw
+                else:
+                    logger.warning(f"[IG WEB] '{what}' tiklanamadi: {e}")
+                    self.capture_error_snapshot(f"toggle_click_failed_{what}")
+        if not clicked:
             return False
+        time.sleep(0.8)
 
         state = self._is_switch_on(self._switch_near_text(label_texts) or sw)
         if state is desired:
@@ -300,8 +340,12 @@ class InstagramWebObserver:
         return any(m in body for m in InstagramWebSelectors.TIME_TOO_SOON_MARKERS)
 
     def set_time(self, hour: int, minute: int) -> bool:
-        """Fill the Hours/Minutes spinbuttons and read them back."""
-        ok = True
+        """Fill the Hours/Minutes spinbuttons and read them back.
+
+        These are Meta spinbuttons: <input role="spinbutton" aria-valuenow="14" value="">
+        with an aria-hidden <label> painting the digits. The typed value lands in
+        aria-valuenow, not value, so that is what is read back (captured 2026-08-19).
+        """
         for selectors, value, what in (
             (InstagramWebSelectors.HOUR_INPUTS, hour, "Saat"),
             (InstagramWebSelectors.MINUTE_INPUTS, minute, "Dakika"),
@@ -311,16 +355,52 @@ class InstagramWebObserver:
                 logger.warning(f"[IG WEB] '{what}' alani bulunamadi.")
                 self.capture_error_snapshot("time_input_not_found")
                 return False
+
+            if not self._write_spinbutton(loc, value, what):
+                self.capture_error_snapshot(f"time_set_failed_{what}")
+                return False
+
+        return self.verify_time(hour, minute)
+
+    def _write_spinbutton(self, loc: Any, value: int, what: str) -> bool:
+        """Two ways in, each read back before it is believed: typed digits, then fill()."""
+        wanted = f"{value:02d}"
+
+        def current() -> Optional[int]:
+            try:
+                now = loc.get_attribute("aria-valuenow")
+                return int(str(now)) if now is not None and str(now).strip() != "" else None
+            except Exception:
+                return None
+
+        if current() == value:
+            return True
+
+        # 1. Focus and type the digits, as a person would.
+        try:
             try:
                 loc.click(timeout=2500)
-                self.page.keyboard.press("Control+A")
-                self.page.keyboard.type(f"{value:02d}")
-                time.sleep(0.4)
-            except Exception as e:
-                logger.warning(f"[IG WEB] '{what}' yazilamadi: {e}")
-                ok = False
+            except Exception:
+                loc.focus()
+            self.page.keyboard.press("Control+A")
+            self.page.keyboard.type(wanted)
+            time.sleep(0.5)
+            if current() == value:
+                return True
+        except Exception as e:
+            logger.debug(f"[IG WEB] {what}: yazarak ayarlanamadi: {e}")
 
-        return ok and self.verify_time(hour, minute)
+        # 2. Set the value through the input itself.
+        try:
+            loc.fill(wanted)
+            time.sleep(0.5)
+            if current() == value:
+                return True
+        except Exception as e:
+            logger.debug(f"[IG WEB] {what}: fill ile ayarlanamadi: {e}")
+
+        logger.warning(f"[IG WEB] '{what}' {wanted} yapilamadi (aria-valuenow={current()}).")
+        return False
 
     def verify_time(self, hour: int, minute: int) -> bool:
         """Read back aria-valuenow rather than trusting the typing."""
