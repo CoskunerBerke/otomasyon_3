@@ -98,7 +98,11 @@ INSTAGRAM_DELIVERY_MODES = (INSTAGRAM_DELIVERY_WEB, INSTAGRAM_DELIVERY_CLOUD)
 # Reading this per-mode was a real bug: with the web route selected, a week delivered via
 # the cloud (ending at MEDIA_READY) read as unfinished, so the pipeline resumed it and
 # scheduled all 14 already-delivered Reels a second time through the composer.
-INSTAGRAM_TERMINAL_STATUSES = ("MEDIA_READY",) + PLATFORM_SUCCESS_STATUSES
+# SUBMITTED_UNVERIFIED: 'Planla' was pressed, the post is almost certainly on the account,
+# only the confirmation dialog was not read in time. It is terminal on purpose -- a retry
+# would schedule the same video twice, and this system may not delete the extra copy.
+# The end-of-run summary flags it for a human look instead.
+INSTAGRAM_TERMINAL_STATUSES = ("MEDIA_READY", "SUBMITTED_UNVERIFIED") + PLATFORM_SUCCESS_STATUSES
 
 # The submit went through but the confirmation read-back was inconclusive. The video is
 # very likely correctly scheduled on the platform, so halting the whole week here does
@@ -891,6 +895,13 @@ class SimpleWeeklyPipeline:
 
             if status in PLATFORM_SUCCESS_STATUSES:
                 logger.info(f"[INSTAGRAM] {reel.reel_id} planlandı.")
+                continue
+
+            if status == "SUBMITTED_UNVERIFIED":
+                logger.warning(
+                    f"[INSTAGRAM] {reel.reel_id} gonderildi ama onay okunamadi -- "
+                    f"tekrar denenmeyecek, sonda ozetlenecek. {error}"
+                )
                 continue
 
             logger.error(f"[INSTAGRAM] {reel.reel_id} planlanamadı ({status}): {error}")

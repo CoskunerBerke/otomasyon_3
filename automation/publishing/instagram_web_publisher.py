@@ -207,6 +207,16 @@ class InstagramWebPublisher(BaseInstagramWebPublisher):
             logger.info(f"[IG WEB] {reel_id} planlandi: {target.strftime('%Y-%m-%d %H:%M')}")
             return "SCHEDULED", None
 
+        # 'Planla' was pressed and the submit went through; only the confirmation was not
+        # read in time. Re-running this Reel would schedule it a second time, so it is
+        # recorded as submitted and left for a human to confirm -- never retried.
+        # (2026-08-19: REEL-2026-0025 was in fact scheduled; the hold re-ran it.)
+        if reason == "SUBMITTED_CONFIRMATION_TIMEOUT":
+            return "SUBMITTED_UNVERIFIED", (
+                "Planla tiklandi, onay penceresi zaman asimina ugradi. Instagram'da planli "
+                "iceriklerde kontrol edin; tekrar DENENMEZ (kopya riski)."
+            )
+
         # PUBLISH_NOW_BUTTON_REFUSED and SCHEDULE_MODE_NOT_ACTIVE are refusals to click a
         # share-now control, not transient errors -- retrying would re-run the same risk.
         if reason in ("PUBLISH_NOW_BUTTON_REFUSED", "SCHEDULE_MODE_NOT_ACTIVE", "SCHEDULE_BUTTON_NOT_FOUND"):

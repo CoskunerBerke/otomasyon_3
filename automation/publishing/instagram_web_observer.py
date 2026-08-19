@@ -25,6 +25,9 @@ logger = logging.getLogger("ReelsAIFactory.InstagramWebObserver")
 # this project three separate outages in one day (Flow, YouTube Studio, TikTok).
 STEP_WAIT_MS = 15000
 SWITCH_WAIT_MS = 4000
+CAPTION_PROBE_MS = 1500
+# After 'Planla', Instagram uploads + processes before confirming; ~1 min observed live.
+SCHEDULE_CONFIRM_TIMEOUT_SECONDS = 240
 UPLOAD_SETTLE_SECONDS = 5.0
 
 TR_MONTHS = {
@@ -156,12 +159,17 @@ class InstagramWebObserver:
         must not be read as a composer that failed to advance.
         """
         for step in range(max_steps):
-            if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=STEP_WAIT_MS) is not None:
+            # Quick look for the caption box -- on the crop and filter screens it is not
+            # there, and waiting STEP_WAIT_MS for it on each of them cost ~30s per Reel
+            # before the first 'İleri' was even pressed (2026-08-19). The patience belongs
+            # on 'İleri' itself, which is the control Instagram holds back while the
+            # video is processed.
+            if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=CAPTION_PROBE_MS) is not None:
                 logger.info(f"[IG WEB] Caption adimina ulasildi ({step} 'İleri').")
                 return True
             if not self._click(InstagramWebSelectors.NEXT_BUTTONS, "İleri", timeout_ms=STEP_WAIT_MS):
                 break
-            time.sleep(1.2)
+            time.sleep(1.0)
 
         if self._first_visible(InstagramWebSelectors.CAPTION_INPUTS, timeout_ms=STEP_WAIT_MS) is not None:
             return True
@@ -433,7 +441,7 @@ class InstagramWebObserver:
         day cell cannot be resolved, DOM evidence is captured and NEEDS_USER_HTML is
         reported rather than clicking a guessed cell and scheduling the wrong day.
         """
-        if self.verify_date(target):
+        if self.verify_date(target, strict=False):
             return True, "DATE_ALREADY_CORRECT"
 
         btn = self._first_visible(InstagramWebSelectors.DATE_PICKER_BUTTONS, timeout_ms=2000)
@@ -524,7 +532,7 @@ class InstagramWebObserver:
                 continue
         return False
 
-    def verify_date(self, target: datetime.datetime) -> bool:
+    def verify_date(self, target: datetime.datetime, strict: bool = True) -> bool:
         """Confirm the date button already shows the target day.
 
         Instagram defaults to today, so same-day slots need no interaction. A different
@@ -542,14 +550,18 @@ class InstagramWebObserver:
         if wanted in shown:
             logger.info(f"[IG WEB] Tarih dogrulandi: {shown}")
             return True
-        logger.warning(f"[IG WEB] Tarih uyusmuyor: beklenen '{wanted}', ekranda '{shown}'")
+        # Only a warning when the caller says so. select_date() calls this first to see
+        # whether the picker is needed at all, and at that moment the field still shows
+        # today -- logging that as a mismatch made a normal run read like a failure.
+        log = logger.warning if strict else logger.info
+        log(f"[IG WEB] Tarih henuz '{shown}', hedef '{wanted}'" + ("" if strict else " -- secici aciliyor."))
         return False
 
     # ------------------------------------------------------------------
     # submit
     # ------------------------------------------------------------------
 
-    def click_schedule_and_verify(self, timeout_seconds: int = 30) -> Tuple[bool, str]:
+    def click_schedule_and_verify(self, timeout_seconds: int = SCHEDULE_CONFIRM_TIMEOUT_SECONDS) -> Tuple[bool, str]:
         """Press 'Planla', but only after the schedule toggle is verified ON.
 
         With the toggle OFF the same primary control reads 'Paylaş' and posts
@@ -594,16 +606,46 @@ class InstagramWebObserver:
         except Exception as e:
             return False, f"SCHEDULE_CLICK_FAILED: {e}"
 
+        # From here on the submit HAS happened. Whatever the read-back says, this Reel
+        # must never be submitted again by a retry -- that is how a post ends up twice on
+        # the account, and this system may not delete the extra one.
+        #
+        # Instagram uploads and processes the video after 'Planla', then shows a dialog
+        # titled "Reels videosu planlandı" (first with a spinner, then a checkmark) and a
+        # "Bitti" button. On 2026-08-19 that took about a minute; the old 30s window read
+        # a successful schedule as a failure.
         start = time.time()
         while time.time() - start < timeout_seconds:
             try:
                 body = (self.page.inner_text("body") or "").lower()
                 if any(m in body for m in InstagramWebSelectors.SCHEDULE_SUCCESS_MARKERS):
                     logger.info("[IG WEB] Planlama onaylandi.")
+                    self._close_success_dialog()
                     return True, "INSTAGRAM_SCHEDULED"
             except Exception:
                 pass
-            time.sleep(1.5)
+            time.sleep(2.0)
 
         self.capture_error_snapshot("schedule_confirmation_not_verified")
-        return False, "SCHEDULE_CONFIRMATION_NOT_VERIFIED"
+        return False, "SUBMITTED_CONFIRMATION_TIMEOUT"
+
+    def _close_success_dialog(self) -> None:
+        """
+        Press "Bitti" on the success dialog so the next Reel starts from a clean page.
+        Captured 2026-08-19: <div role="button" tabindex="0">Bitti</div>, hashed classes
+        only -- matched by role and exact text. Missing it is harmless (the next Reel
+        reloads the page anyway), so this never fails the schedule.
+        """
+        # Let the spinner turn into the checkmark before dismissing.
+        time.sleep(3.0)
+        for sel in InstagramWebSelectors.SUCCESS_DIALOG_DONE_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                loc.wait_for(state="visible", timeout=5000)
+                loc.click(timeout=3000)
+                logger.info("[IG WEB] Basari penceresi 'Bitti' ile kapatildi.")
+                time.sleep(1.0)
+                return
+            except Exception:
+                continue
+        logger.info("[IG WEB] 'Bitti' bulunamadi; sonraki Reel sayfayi zaten yeniden yukleyecek.")

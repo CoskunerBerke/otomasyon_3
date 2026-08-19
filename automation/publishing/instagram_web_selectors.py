@@ -98,10 +98,18 @@ class InstagramWebSelectors:
         "share now",
     ]
 
+    # The success dialog: title "Reels videosu planlandı", body "Reels videon planlandı."
+    # (captured 2026-08-19). Both contain the first marker.
     SCHEDULE_SUCCESS_MARKERS: List[str] = [
         "planlandı",
         "scheduled",
         "gönderin planlandı",
+    ]
+
+    # Its "Bitti" button: <div role="button" tabindex="0">Bitti</div>, hashed classes only.
+    SUCCESS_DIALOG_DONE_BUTTONS: List[str] = [
+        "div[role='button']:text-is('Bitti'), div[role='button']:text-is('Done')",
+        "div[role='dialog'] div[role='button']:has-text('Bitti'), div[role='dialog'] div[role='button']:has-text('Done')",
     ]
 
     # Instagram refuses a slot that is too close to now, showing
