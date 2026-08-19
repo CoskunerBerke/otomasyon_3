@@ -250,6 +250,22 @@ class TikTokSelectors:
         "continue editing",
     ]
 
+    # A DELETE confirmation is a different dialog with the same button label, and TikTok
+    # shows it over the same screens: "Bu gönderi silinsin mi? Videonuz ... ve tum
+    # duzenlemeler kalici olarak silinecek." with [Simdi degil] [Sil]. Its [Sil] destroys
+    # a post -- exactly what CLAUDE.md forbids this system from ever doing automatically.
+    #
+    # The banner check reads the whole page, so a stale "kaydedilmedi" bar anywhere would
+    # authorise a click that then lands on THIS dialog's [Sil]. Whenever any of these
+    # markers is present, no discard is attempted at all and a human is asked to look.
+    DESTRUCTIVE_DELETE_CONFIRM_MARKERS: List[str] = [
+        "silinsin mi",
+        "kalıcı olarak silinecek",
+        "kalici olarak silinecek",
+        "permanently deleted",
+        "delete this post",
+    ]
+
     # Discards the UNSAVED editing session only. This is not published content and not a
     # scheduled post -- worst case the Reel is uploaded again, which the idempotency
     # checks already handle. 'Devam' is deliberately NOT used: it would reopen the old

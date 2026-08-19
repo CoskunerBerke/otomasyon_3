@@ -204,6 +204,20 @@ class TikTokUIObserver:
         if not any(m in page_text for m in TikTokSelectors.UNSAVED_DRAFT_BANNER_MARKERS):
             return False
 
+        # A delete confirmation carries its own [Sil], and this method matches buttons by
+        # label across the page -- so with such a dialog up, the click meant for a resume
+        # banner would delete a post instead. Never guess between them: refuse and let a
+        # human decide, per CLAUDE.md's ban on automatic removal of platform content.
+        hit = next((m for m in TikTokSelectors.DESTRUCTIVE_DELETE_CONFIRM_MARKERS if m in page_text), None)
+        if hit:
+            self.capture_error_snapshot("tiktok_delete_confirm_present")
+            logger.error(
+                f"[TIKTOK SAFETY] Ekranda bir SILME onayi var ('{hit}'). 'Sil' butonuna "
+                f"DOKUNULMAYACAK -- kaydedilmemis duzenleme bandi temizlenmiyor. "
+                f"Bu pencereyi elle kapatin ('Simdi degil')."
+            )
+            return False
+
         for sel in TikTokSelectors.UNSAVED_DRAFT_DISCARD_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
