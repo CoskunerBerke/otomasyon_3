@@ -32,9 +32,10 @@ DELETE_DIALOG = (
 
 
 class FakeLocator:
-    def __init__(self, recorder, label):
+    def __init__(self, recorder, label, text=""):
         self.recorder = recorder
         self.label = label
+        self.text = text
 
     @property
     def first(self):
@@ -46,20 +47,34 @@ class FakeLocator:
     def is_enabled(self):
         return True
 
+    def inner_text(self):
+        return self.text
+
     def click(self, timeout=None):
         self.recorder.append(self.label)
 
 
 class FakePage:
-    def __init__(self, body_text):
+    """
+    Resolves selectors the way the real modal footer would: the cancel selectors reach
+    the secondary button, and a bare "Sil" match reaches the destructive primary one.
+    """
+
+    def __init__(self, body_text, has_cancel=True):
         self.body_text = body_text
+        self.has_cancel = has_cancel
         self.clicks = []
 
     def inner_text(self, selector):
         return self.body_text
 
     def locator(self, selector):
-        return FakeLocator(self.clicks, selector)
+        if "Şimdi değil" in selector or "Not now" in selector:
+            if not self.has_cancel:
+                return FakeLocator(self.clicks, "MISSING", text="")
+            return FakeLocator(self.clicks, "CANCEL", text="Şimdi değil")
+        # Anything else in this dialog is the primary [Sil].
+        return FakeLocator(self.clicks, "DELETE", text="Sil")
 
     def screenshot(self, **kwargs):
         pass
@@ -71,28 +86,46 @@ class FakePage:
         return 0
 
 
-def _observer(body_text, tmp_path):
+def _observer(body_text, tmp_path, has_cancel=True):
     obs = TikTokUIObserver.__new__(TikTokUIObserver)
-    obs.page = FakePage(body_text)
+    obs.page = FakePage(body_text, has_cancel=has_cancel)
     obs.screenshots_dir = tmp_path
     return obs
 
 
-def test_a_delete_confirmation_is_never_clicked(tmp_path):
+def test_the_delete_button_is_never_clicked(tmp_path):
     """The dangerous case: both texts on screen at once."""
     obs = _observer(RESUME_BANNER + " " + DELETE_DIALOG, tmp_path)
 
-    result = obs.dismiss_unsaved_draft_banner_if_present()
+    obs.dismiss_unsaved_draft_banner_if_present()
 
-    assert result is False
-    assert obs.page.clicks == [], "no button may be clicked while a delete dialog is up"
+    assert "DELETE" not in obs.page.clicks, "the destructive button must never be clicked"
 
 
-def test_a_delete_confirmation_alone_is_left_alone(tmp_path):
+def test_the_dialog_is_cancelled_rather_than_left_on_screen(tmp_path):
+    """Cancelling removes nothing and unblocks the page, so it needs no human."""
     obs = _observer(DELETE_DIALOG, tmp_path)
 
+    obs.dismiss_unsaved_draft_banner_if_present()
+
+    assert obs.page.clicks == ["CANCEL"]
+
+
+def test_a_dialog_appearing_without_a_resume_banner_is_still_handled(tmp_path):
+    """It shows up on its own after a schedule; the banner test must not skip past it."""
+    obs = _observer(DELETE_DIALOG, tmp_path)
+
+    obs.dismiss_unsaved_draft_banner_if_present()
+
+    assert obs.page.clicks == ["CANCEL"]
+
+
+def test_without_a_cancel_button_nothing_is_clicked(tmp_path):
+    """No safe exit means stop and ask -- never fall back to the other button."""
+    obs = _observer(DELETE_DIALOG, tmp_path, has_cancel=False)
+
     assert obs.dismiss_unsaved_draft_banner_if_present() is False
-    assert obs.page.clicks == []
+    assert "DELETE" not in obs.page.clicks
 
 
 def test_a_plain_resume_banner_is_still_cleared(tmp_path):
@@ -108,6 +141,18 @@ def test_an_unrelated_page_does_nothing(tmp_path):
 
     assert obs.dismiss_unsaved_draft_banner_if_present() is False
     assert obs.page.clicks == []
+
+
+def test_cancel_selectors_pin_the_exact_label():
+    """
+    The two buttons are siblings and the destructive one is the primary, so a substring
+    match on the cancel selectors would be a real hazard.
+    """
+    for selector in TikTokSelectors.DELETE_DIALOG_CANCEL_BUTTONS:
+        assert ":text-is(" in selector, f"cancel selector must pin exact text: {selector}"
+        assert "Sil" not in selector.replace("Şimdi değil", ""), selector
+    # A build hash would break on the next TikTok deploy (Kural 31).
+    assert not any("jsx-" in s for s in TikTokSelectors.DELETE_DIALOG_CANCEL_BUTTONS)
 
 
 def test_delete_markers_cover_the_observed_dialog():

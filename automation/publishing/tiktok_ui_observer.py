@@ -191,6 +191,43 @@ class TikTokUIObserver:
         logger.warning("[TIKTOK CHECK] 'Iptal' butonu bulunamadi.")
         return False
 
+    def dismiss_delete_confirmation_if_present(self) -> bool:
+        """
+        Cancel TikTok's "Bu gönderi silinsin mi?" dialog via "Şimdi değil".
+
+        Cancelling deletes nothing: the post and its edits stay exactly as they are, and
+        the page stops being blocked. This is the safe half of a dialog whose other button
+        destroys content -- [Sil] is never clicked here, and cannot be reached by these
+        selectors, which match only the cancel wording.
+
+        Returns True if a dialog was cancelled.
+        """
+        for sel in TikTokSelectors.DELETE_DIALOG_CANCEL_BUTTONS:
+            try:
+                loc = self.page.locator(sel).first
+                if not (loc.is_visible(timeout=800) and loc.is_enabled()):
+                    continue
+
+                # Read the button back before committing. If anything other than the
+                # cancel wording is under this handle, do not click it.
+                try:
+                    label = (loc.inner_text() or "").strip().lower()
+                except Exception:
+                    label = ""
+                is_cancel = any(safe in label for safe in ("şimdi değil", "simdi degil", "not now"))
+                is_destructive = any(bad == label for bad in TikTokSelectors.DELETE_DIALOG_DESTRUCTIVE_LABELS)
+                if is_destructive or (label and not is_cancel):
+                    logger.error(f"[TIKTOK SAFETY] Beklenen 'Simdi degil' yerine '{label}' bulundu -- tiklanmadi.")
+                    continue
+
+                loc.click(timeout=2500)
+                time.sleep(1.0)
+                return True
+            except Exception:
+                continue
+
+        return False
+
     def dismiss_unsaved_draft_banner_if_present(self) -> bool:
         """
         Clear TikTok's "Düzenlemekte olduğunuz bir video kaydedilmedi" resume banner by
@@ -207,21 +244,31 @@ class TikTokUIObserver:
         except Exception:
             return False
 
-        if not any(m in page_text for m in TikTokSelectors.UNSAVED_DRAFT_BANNER_MARKERS):
-            return False
-
-        # A delete confirmation carries its own [Sil], and this method matches buttons by
-        # label across the page -- so with such a dialog up, the click meant for a resume
-        # banner would delete a post instead. Never guess between them: refuse and let a
-        # human decide, per CLAUDE.md's ban on automatic removal of platform content.
+        # Checked before the banner test bails out: this dialog appears on its own after a
+        # schedule, not only over a resume banner, and it blocks the page either way.
+        #
+        # It also carries its own [Sil], while the banner cleanup below matches buttons by
+        # label across the whole page -- so leaving it up would let that cleanup's click
+        # land on a delete button. Cancel it here, and never guess between the two.
         hit = next((m for m in TikTokSelectors.DESTRUCTIVE_DELETE_CONFIRM_MARKERS if m in page_text), None)
         if hit:
+            # Cancel it rather than leaving it on screen. "Şimdi değil" removes nothing --
+            # it dismisses the dialog and leaves the post untouched -- so taking that exit
+            # is safe and unblocks the page. Only [Sil] is forbidden, and it is never a
+            # candidate here: these selectors can resolve to no other wording.
+            if self.dismiss_delete_confirmation_if_present():
+                logger.info("[TIKTOK] Silme onayi 'Simdi degil' ile guvenle kapatildi.")
+                return False
+
             self.capture_error_snapshot("tiktok_delete_confirm_present")
             logger.error(
-                f"[TIKTOK SAFETY] Ekranda bir SILME onayi var ('{hit}'). 'Sil' butonuna "
-                f"DOKUNULMAYACAK -- kaydedilmemis duzenleme bandi temizlenmiyor. "
+                f"[TIKTOK SAFETY] Ekranda bir SILME onayi var ('{hit}') ve 'Simdi degil' "
+                f"butonu bulunamadi. 'Sil' butonuna DOKUNULMAYACAK. "
                 f"Bu pencereyi elle kapatin ('Simdi degil')."
             )
+            return False
+
+        if not any(m in page_text for m in TikTokSelectors.UNSAVED_DRAFT_BANNER_MARKERS):
             return False
 
         for sel in TikTokSelectors.UNSAVED_DRAFT_DISCARD_BUTTONS:

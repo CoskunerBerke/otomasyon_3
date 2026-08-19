@@ -266,6 +266,36 @@ class TikTokSelectors:
         "delete this post",
     ]
 
+    # The SAFE way out of that delete dialog. "Şimdi değil" cancels it -- nothing is
+    # removed, the post stays exactly as it is -- so clicking it is not a destructive
+    # action and needs no human. Its sibling [Sil] is the one that must never be touched.
+    #
+    # Real DOM, captured 2026-08-19:
+    #   <div class="jsx-1150920910 common-modal-footer">
+    #     <button class="TUXButton ... TUXButton--secondary" aria-disabled="false">
+    #       <div class="TUXButton-content"><div class="TUXButton-label">Şimdi değil</div></div>
+    #     </button>
+    #     <button class="TUXButton ... TUXButton--primary" aria-disabled="false">
+    #       <div class="TUXButton-content"><div class="TUXButton-label">Sil</div></div>
+    #     </button>
+    #   </div>
+    #
+    # The two are siblings differing only by label and by primary/secondary -- and the
+    # DESTRUCTIVE one is the primary. So both strategies below pin the exact label text
+    # with :text-is (never a substring), which cannot resolve to "Sil". The jsx-* class is
+    # a build hash and is deliberately not used (Kural 31); TUXButton-label and
+    # common-modal-footer are stable design-system names.
+    DELETE_DIALOG_CANCEL_BUTTONS: List[str] = [
+        "button:has(div.TUXButton-label:text-is('Şimdi değil')), "
+        "button:has(div.TUXButton-label:text-is('Not now'))",
+        ".common-modal-footer button:has(div:text-is('Şimdi değil')), "
+        ".common-modal-footer button:has(div:text-is('Not now'))",
+    ]
+
+    # Never resolve to this one. Kept as a named constant so the guard can assert it is
+    # not what it is about to click.
+    DELETE_DIALOG_DESTRUCTIVE_LABELS: List[str] = ["sil", "delete"]
+
     # Discards the UNSAVED editing session only. This is not published content and not a
     # scheduled post -- worst case the Reel is uploaded again, which the idempotency
     # checks already handle. 'Devam' is deliberately NOT used: it would reopen the old
