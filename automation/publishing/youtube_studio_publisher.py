@@ -24,6 +24,17 @@ logger = logging.getLogger("ReelsAIFactory.YouTubeStudioPublisher")
 # content check first. The last entry is 0: no sleep after the final attempt.
 VERIFY_BACKOFF_SECONDS = (10.0, 20.0, 30.0, 0.0)
 
+def _verified_date_time(scheduled_at_local: str):
+    """The (date, time) strings recorded on a verified schedule, or (None, None)."""
+    import datetime as _dt
+
+    try:
+        dt = _dt.datetime.fromisoformat(scheduled_at_local)
+        return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+    except Exception:
+        return None, None
+
+
 def parse_schedule_datetime(scheduled_at_local: str) -> Tuple[str, str]:
     """
     Parses a local schedule datetime string (ISO or space separated)
@@ -149,6 +160,45 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
 
                 target_remote_id = record.remote_id or (existing_disk_rec.remote_id if existing_disk_rec else None)
 
+                why = "NOT_CHECKED"
+                if has_remote_evidence:
+                    # Ask what is left to do before resuming anything. A Reel whose schedule
+                    # went through but whose verification was inconclusive comes back here
+                    # with remote evidence -- and there is no draft to reopen, because the
+                    # video is already scheduled. Hunting for "Taslağı düzenle" on a
+                    # scheduled video finds nothing and reports NEEDS_USER_HTML about a
+                    # button that is correctly absent (2026-08-19: 5 Reels looped this way
+                    # for the whole 30-minute window while all 5 were scheduled).
+                    #
+                    # This runs whether or not a remote_id was captured: verification matches
+                    # on title too, and the Reel that never got an id is exactly the one with
+                    # no other way back.
+                    exp_date, exp_time = parse_schedule_datetime(record.scheduled_at_local)
+                    already_scheduled, why = observer.verify_remote_scheduled_status(
+                        remote_id=target_remote_id or "",
+                        target_title=record.title,
+                        expected_date_str=exp_date,
+                        expected_time_str=exp_time,
+                        channel_id=self.config.youtube_expected_channel_id
+                    )
+                    if already_scheduled:
+                        resolved_id = target_remote_id or observer.capture_video_id_and_url()[0]
+                        logger.info(
+                            f"[{record.reel_id}] Zaten planlanmis (remote_id: {resolved_id}); "
+                            f"acilacak taslak yok, dogrulama tamamlandi."
+                        )
+                        v_date, v_time = _verified_date_time(record.scheduled_at_local)
+                        record.mark_scheduled(
+                            remote_id=resolved_id,
+                            remote_url=record.remote_url or (
+                                f"https://youtube.com/shorts/{resolved_id}" if resolved_id else None
+                            ),
+                            verified_date=v_date,
+                            verified_time=v_time
+                        )
+                        self.repo.save_publish_record(record)
+                        return record
+
                 if has_remote_evidence and target_remote_id:
                     # STRICT RESUME: Upload is FORBIDDEN!
                     logger.info(f"[{record.reel_id}] [UPLOAD SKIPPED] Existing YouTube remote video detected (remote_id: {target_remote_id}). Resume mode enabled.")
@@ -158,14 +208,22 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
 
                     # Open Draft Wizard stepper via 'Taslağı düzenle' (YOUTUBE_DRAFT_WIZARD_READY)
                     if not observer.enter_existing_draft_wizard():
-                        record.mark_failed("Could not open draft stepper wizard via 'Taslağı düzenle'.", status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED)
+                        record.mark_failed(
+                            f"Could not open draft stepper wizard via 'Taslağı düzenle' "
+                            f"(remote status: {why}).",
+                            status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
+                        )
                         return record
 
                 elif has_remote_evidence:
                     # Fallback title search if remote_id wasn't populated but draft exists
                     logger.info(f"[{record.reel_id}] [RESUME_EXISTING_YOUTUBE_DRAFT] Found existing draft record for '{record.title}'. Resuming without upload.")
                     if not observer.find_and_open_existing_draft(record.title, record.reel_id, channel_id=self.config.youtube_expected_channel_id):
-                        record.mark_failed("[HARD UPLOAD GUARD] Record in resume state but draft wizard could not be opened.", status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED)
+                        record.mark_failed(
+                            f"[HARD UPLOAD GUARD] Record in resume state but draft wizard could not be "
+                            f"opened, and the video is not scheduled either (remote status: {why}).",
+                            status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
+                        )
                         return record
 
                     # Capture video ID if visible
@@ -282,15 +340,7 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                     self.repo.save_publish_record(record)
                     return record
 
-                # Extract verified date/time for mark_scheduled
-                import datetime as _dt
-                try:
-                    _sched_dt = _dt.datetime.fromisoformat(record.scheduled_at_local)
-                    _v_date = _sched_dt.strftime("%Y-%m-%d")
-                    _v_time = _sched_dt.strftime("%H:%M")
-                except Exception:
-                    _v_date = None
-                    _v_time = None
+                _v_date, _v_time = _verified_date_time(record.scheduled_at_local)
 
                 record.mark_scheduled(
                     remote_id=target_vid_id,
