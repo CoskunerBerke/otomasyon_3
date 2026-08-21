@@ -54,6 +54,12 @@ MONTH_MAP = {
     "ara": 12, "aralık": 12, "dec": 12, "december": 12
 }
 
+# How long to let YouTube fill in the video-link element after an upload. It is not
+# there the instant the upload finishes, and a single immediate read captured the id for
+# some Reels and not others in the same batch.
+VIDEO_ID_WAIT_SECONDS = 20.0
+
+
 class YouTubeStudioUIObserver:
     """Interacts with visible DOM elements of YouTube Studio Web UI."""
 
@@ -136,10 +142,31 @@ class YouTubeStudioUIObserver:
 
         return True, expected_handle, f"YouTube Channel assumed active ({expected_handle})"
 
-    def capture_video_id_and_url(self) -> Tuple[Optional[str], Optional[str]]:
+    def capture_video_id_and_url(
+        self, wait_seconds: float = VIDEO_ID_WAIT_SECONDS
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         Extract the video link and 11-char video ID from the upload wizard or active URL.
+
+        Polls, because the "Video bağlantısı" element is not in the wizard the instant an
+        upload finishes -- YouTube fills it in once the video has an id to link to. Reading
+        once caught it for some Reels and not others: on 2026-08-21 the first 7 of a
+        14-Reel batch captured an id and the last 7 came back empty, which then failed
+        verification with "Remote YouTube video ID is missing".
         """
+        deadline = time.time() + max(0.0, wait_seconds)
+        while True:
+            video_id, video_url = self._read_video_id_once()
+            if video_id or time.time() >= deadline:
+                if video_id:
+                    logger.info(f"[REMOTE_ID_CAPTURED] Captured YouTube Video ID: {video_id} ({video_url})")
+                else:
+                    logger.warning(f"[REMOTE_ID] Video ID {wait_seconds:.0f}s icinde okunamadi.")
+                return video_id, video_url
+            time.sleep(1.0)
+
+    def _read_video_id_once(self) -> Tuple[Optional[str], Optional[str]]:
+        """One pass over the URL and the wizard's video-link element."""
         video_id = None
         video_url = None
 
@@ -168,9 +195,6 @@ class YouTubeStudioUIObserver:
                         break
             except Exception:
                 pass
-
-        if video_id:
-            logger.info(f"[REMOTE_ID_CAPTURED] Captured YouTube Video ID: {video_id} ({video_url})")
 
         return video_id, video_url
 
@@ -2051,7 +2075,8 @@ class YouTubeStudioUIObserver:
         target_title: str = "Japanese Zen Temple",
         expected_date_str: str = "16",
         expected_time_str: str = "19:30",
-        channel_id: Optional[str] = "UCahsmsqzTCtwTDDtvCurtBA"
+        channel_id: Optional[str] = "UCahsmsqzTCtwTDDtvCurtBA",
+        require_date_match: bool = False,
     ) -> Tuple[bool, str]:
         """
         Navigate to Content list and verify video row shows 'Planlandı' / 'Scheduled'
@@ -2093,6 +2118,13 @@ class YouTubeStudioUIObserver:
                         is_target = bool((r_id and r_id in txt) or (clean_title and clean_title in txt))
                         if not is_target:
                             continue
+
+                        # With no id to match on, the title alone is not enough: the same
+                        # concept can carry the same title in an earlier week. Requiring
+                        # this Reel's own scheduled date makes the match specific again.
+                        if require_date_match and expected_date_str:
+                            if expected_date_str.lower() not in txt:
+                                continue
 
                         if "planlandı" in txt or "scheduled" in txt:
                             if "gizli" in txt or "taslak" in txt or "draft" in txt:

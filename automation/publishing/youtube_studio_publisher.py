@@ -302,12 +302,52 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                 # 9. Verify scheduled status in content list
                 target_vid_id = record.remote_id or target_remote_id
                 if not target_vid_id:
+                    # The submit already went through; only the id was never read. Try
+                    # once more now that YouTube has had the whole wizard to fill it in.
+                    late_id, late_url = observer.capture_video_id_and_url()
+                    if late_id:
+                        record.remote_id = target_vid_id = late_id
+                        record.remote_url = record.remote_url or late_url or f"https://youtube.com/shorts/{late_id}"
+                        self.repo.save_publish_record(record)
+
+                expected_date_str, expected_time_str = parse_schedule_datetime(record.scheduled_at_local)
+
+                if not target_vid_id:
+                    # Still no id. Verify by title AND scheduled date instead of giving up:
+                    # a title alone could match the same concept from an earlier week, but
+                    # a title on this Reel's own date is this Reel. Refusing outright left
+                    # 7 of 14 correctly scheduled Reels recorded as failures on 2026-08-21.
+                    logger.warning(
+                        f"[{record.reel_id}] Video ID okunamadi -- baslik + tarih ile dogrulanacak."
+                    )
+                    is_sched, s_msg = observer.verify_remote_scheduled_status(
+                        remote_id="",
+                        target_title=record.title,
+                        expected_date_str=expected_date_str,
+                        expected_time_str=expected_time_str,
+                        channel_id=self.config.youtube_expected_channel_id,
+                        require_date_match=True,
+                    )
+                    if is_sched:
+                        v_date, v_time = _verified_date_time(record.scheduled_at_local)
+                        record.mark_scheduled(
+                            remote_id=None, remote_url=record.remote_url,
+                            verified_date=v_date, verified_time=v_time,
+                        )
+                        record.last_error = (
+                            "Planlandi ve baslik+tarih ile dogrulandi; video ID okunamadi "
+                            "(MANUAL_REMOTE_ID_LOOKUP_OPTIONAL)."
+                        )
+                        self.repo.save_publish_record(record)
+                        return record
+
                     record.mark_failed(
-                        "Remote YouTube video ID is missing; refusing to guess or verify the wrong draft.",
+                        f"Remote YouTube video ID is missing and title+date verification "
+                        f"did not find it either ({s_msg}).",
                         status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
                     )
+                    self.repo.save_publish_record(record)
                     return record
-                expected_date_str, expected_time_str = parse_schedule_datetime(record.scheduled_at_local)
 
                 # Bounded remote verification: eventual consistency on YouTube's side means
                 # a schedule that just succeeded may not be reflected in the content list

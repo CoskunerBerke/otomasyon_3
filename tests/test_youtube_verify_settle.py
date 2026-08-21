@@ -148,3 +148,74 @@ def test_publisher_retries_outlast_a_content_check(tmp_path):
     # Growing gaps: a quick check should not pay the full wait.
     non_zero = [s for s in VERIFY_BACKOFF_SECONDS if s]
     assert non_zero == sorted(non_zero), "backoff should grow, not shrink"
+
+
+# ---------------------------------------------------------------- missing video id
+
+def test_video_id_capture_polls_rather_than_reading_once():
+    """
+    2026-08-21: the first 7 Reels of a 14-Reel batch captured a video id and the last 7
+    came back empty, then failed verification with "Remote YouTube video ID is missing".
+    The link element is not in the wizard the instant an upload finishes.
+    """
+    from automation.publishing.youtube_studio_ui_observer import VIDEO_ID_WAIT_SECONDS
+
+    assert VIDEO_ID_WAIT_SECONDS >= 10
+    src = (Path(__file__).resolve().parents[1] / "automation" / "publishing"
+           / "youtube_studio_ui_observer.py").read_text(encoding="utf-8")
+    body = src[src.index("def capture_video_id_and_url"):src.index("def _read_video_id_once")]
+    assert "while True" in body and "time.sleep" in body, "capture must poll"
+
+
+def test_a_late_video_id_is_still_captured(tmp_path, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    obs = YouTubeStudioUIObserver.__new__(YouTubeStudioUIObserver)
+    obs.screenshots_dir = tmp_path
+    calls = {"n": 0}
+
+    def late(_self):
+        calls["n"] += 1
+        if calls["n"] < 4:
+            return None, None
+        return "abc12345678", "https://youtu.be/abc12345678"
+
+    monkeypatch.setattr(YouTubeStudioUIObserver, "_read_video_id_once", late)
+    vid, url = obs.capture_video_id_and_url(wait_seconds=10)
+
+    assert vid == "abc12345678"
+    assert calls["n"] >= 4
+
+
+def test_a_missing_id_is_verified_by_title_and_date_instead_of_failing():
+    """Refusing outright recorded 7 correctly scheduled Reels as failures."""
+    src = (Path(__file__).resolve().parents[1] / "automation" / "publishing"
+           / "youtube_studio_publisher.py").read_text(encoding="utf-8")
+    block = src[src.index("# 9. Verify scheduled status"):]
+    block = block[:block.index("# Extract verified") if "# Extract verified" in block else 4000]
+
+    assert "require_date_match=True" in block, "title-only matching would hit an earlier week"
+    assert "mark_scheduled(" in block, "a verified schedule must be recorded as scheduled"
+
+
+def test_title_only_matching_requires_the_date(tmp_path, monkeypatch):
+    """The same concept carries the same title in a later week; the date separates them."""
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    wrong_week = FakeRow(["pompeii: buried, then found again  planlandı  17 Ağu 2026"])
+    obs = _observer([wrong_week], tmp_path)
+    ok, msg = obs.verify_remote_scheduled_status(
+        remote_id="", target_title="Pompeii: Buried, Then Found Again",
+        expected_date_str="24 Ağu 2026", expected_time_str="19:30",
+        channel_id="UCtest", require_date_match=True,
+    )
+    assert not ok, "a different week's row must not satisfy this Reel's verification"
+
+    right_week = FakeRow(["pompeii: buried, then found again  planlandı  24 Ağu 2026"])
+    obs2 = _observer([right_week], tmp_path)
+    ok2, _ = obs2.verify_remote_scheduled_status(
+        remote_id="", target_title="Pompeii: Buried, Then Found Again",
+        expected_date_str="24 Ağu 2026", expected_time_str="19:30",
+        channel_id="UCtest", require_date_match=True,
+    )
+    assert ok2
