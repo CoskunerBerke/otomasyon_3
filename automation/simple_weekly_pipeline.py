@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("ReelsAIFactory.SimpleWeeklyPipeline")
 
+from automation.brands import Brand, get_brand
 from automation.config import load_config, AppConfig
 from automation.publishing.config import PublishingConfig, load_publishing_config
 from automation.publishing.models import Platform, PlatformPublicationStatus, PublishRecord
@@ -55,10 +56,13 @@ from automation.content.content_modes import (
     SILENT_STEP_BY_STEP,
     is_live_eligible_mode,
     requires_audio,
+    HIDDEN_BUILD_STORY,
+    LIVE_ELIGIBLE_CONTENT_MODES,
 )
 from automation.content.engine import ContentEngine
 from automation.content.prompt_engine import PromptEngine, ReelConceptPlan
 from automation.content.story_concepts import STORY_CONCEPTS
+from automation.content.hidden_build_concepts import HIDDEN_BUILD_CONCEPTS
 from automation.quality.validator import VideoValidator
 from automation.media_handoff import handoff_reel_to_cloud
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
@@ -145,20 +149,30 @@ class SimpleWeeklyPipeline:
         cloud_client: Optional[LocalWorkerCloudClient] = None,
         stuck_wait_minutes: int = 30,
         stuck_retry_seconds: int = 300,
-        content_mode: str = SILENT_STEP_BY_STEP,
-        instagram_delivery: str = INSTAGRAM_DELIVERY_WEB,
+        content_mode: Optional[str] = None,
+        instagram_delivery: Optional[str] = None,
         ig_web_publisher: Optional[BaseInstagramWebPublisher] = None,
+        brand: Optional[Brand] = None,
     ):
         self.base_dir = (base_dir or Path(".").resolve())
         self.dry_run = dry_run
         self.week_id = week_id
         self.start_date = start_date
-        if not is_live_eligible_mode(content_mode):
-            raise ValueError(f"Unknown content_mode '{content_mode}' -- register it in automation.content.content_modes first.")
+        # Which channel this run belongs to. Everything brand-specific -- ids, accounts,
+        # browsers, content mode -- comes from here, and the default brand reproduces the
+        # pre-brand behaviour exactly.
+        self.brand = brand or get_brand()
+
         # Only used when PLAN creates a fresh manifest. A resumed manifest keeps the mode
         # it was locked with, so a rerun can never silently re-mode a week mid-flight.
-        self.content_mode = content_mode
+        # Falling back to the brand's own mode means a brand cannot be run in another
+        # brand's format by forgetting a flag. Resolved before validation so the fallback
+        # is what gets validated.
+        self.content_mode = content_mode or self.brand.content_mode
+        if not is_live_eligible_mode(self.content_mode):
+            raise ValueError(f"Unknown content_mode '{self.content_mode}' -- register it in automation.content.content_modes first.")
 
+        instagram_delivery = instagram_delivery or self.brand.instagram_delivery
         if instagram_delivery not in INSTAGRAM_DELIVERY_MODES:
             raise ValueError(
                 f"Unknown instagram_delivery '{instagram_delivery}' -- expected one of {INSTAGRAM_DELIVERY_MODES}."
@@ -184,9 +198,11 @@ class SimpleWeeklyPipeline:
             )
 
         try:
-            self.pub_config = load_publishing_config(base_dir=self.base_dir)
+            self.pub_config = self.brand.apply_to_publishing_config(
+                load_publishing_config(base_dir=self.base_dir)
+            )
         except Exception:
-            self.pub_config = PublishingConfig()
+            self.pub_config = self.brand.apply_to_publishing_config(PublishingConfig())
 
         # Injected for tests / explicit wiring. Never eagerly constructed here -- each
         # phase lazily builds only the client(s) it needs, so GENERATE never imports a
@@ -228,9 +244,11 @@ class SimpleWeeklyPipeline:
                     used.add(m.group(1))
 
         allocated: List[str] = []
-        num = 11
+        # The second brand starts its numbering at 1: its ids carry a prefix, so they can
+        # never collide with the original series regardless of where that has reached.
+        num = 11 if not self.brand.id_prefix else 1
         while len(allocated) < count:
-            candidate = f"REEL-2026-{num:04d}"
+            candidate = self.brand.reel_id(num)
             num += 1
             if candidate not in used:
                 allocated.append(candidate)
@@ -261,6 +279,10 @@ class SimpleWeeklyPipeline:
         for week_dir in sorted(self.batch_repo.batches_dir.iterdir(), reverse=True):
             if not week_dir.is_dir():
                 continue
+            # Only this brand's weeks. Resuming another channel's batch would generate
+            # and publish its Reels into the wrong account.
+            if not self.brand.owns_week_id(week_dir.name):
+                continue
             manifest = self.batch_repo.load_manifest(week_dir.name)
             if manifest and not self._is_batch_finished(manifest):
                 return manifest.week_id
@@ -286,6 +308,10 @@ class SimpleWeeklyPipeline:
 
         for week_dir in sorted(self.batch_repo.batches_dir.iterdir()):
             if not week_dir.is_dir():
+                continue
+            # A brand's calendar is its own: the other channel's schedule must not push
+            # this one's start date, and vice versa.
+            if not self.brand.owns_week_id(week_dir.name):
                 continue
             manifest = self.batch_repo.load_manifest(week_dir.name)
             if manifest is None:
@@ -358,7 +384,7 @@ class SimpleWeeklyPipeline:
                 self.week_id = resumable
 
         start_date = self._resolve_start_date()
-        week_id = self.week_id or generate_week_id(start_date)
+        week_id = self.week_id or self.brand.week_id(generate_week_id(start_date))
         self.week_id = week_id
 
         existing = self.batch_repo.load_manifest(week_id)
@@ -459,6 +485,8 @@ class SimpleWeeklyPipeline:
         """
         if reel.content_mode == NARRATIVE_AMBIENT_STORY:
             library, builder = STORY_CONCEPTS, PromptEngine.build_story_concept_plan
+        elif reel.content_mode == HIDDEN_BUILD_STORY:
+            library, builder = HIDDEN_BUILD_CONCEPTS, PromptEngine.build_hidden_build_plan
         else:
             library, builder = CATEGORIES, PromptEngine.build_concept_plan
 
@@ -736,6 +764,10 @@ class SimpleWeeklyPipeline:
         )
 
     def _run_platform_phase(self, manifest: BatchManifest, platform: str) -> PhaseResult:
+        # A brand whose accounts are still placeholders must never reach a publisher: the
+        # ACCOUNT_MISMATCH guard would be comparing against a placeholder expectation.
+        if not self.dry_run:
+            self.brand.ensure_publishable()
         """Shared sequential/fail-fast loop for YouTube and TikTok."""
         if manifest.status != "LOCKED":
             return PhaseResult(False, platform.upper(), "Manifest LOCKED değil, platform yayını başlayamaz.", {})
@@ -862,6 +894,9 @@ class SimpleWeeklyPipeline:
         phase = "INSTAGRAM_WEB"
         if manifest.status != "LOCKED":
             return PhaseResult(False, phase, "Manifest LOCKED değil, planlama başlayamaz.", {})
+
+        if not self.dry_run:
+            self.brand.ensure_publishable()
 
         self._init_ig_web_publisher_if_needed()
         self.batch_repo.ensure_progress_entries(manifest.week_id, manifest.reel_ids())
@@ -1276,6 +1311,15 @@ def main():
     parser.add_argument("--vault-path", type=str, default=None, help="Path to Obsidian vault")
     parser.add_argument("--phase", type=str, default=None, choices=["generate", "validate", "lock", "youtube", "tiktok", "instagram"], help="Debug only: run a single phase")
     parser.add_argument(
+        "--brand",
+        type=str,
+        default=None,
+        help=(
+            "Which channel to run. Defaults to the original series. Each brand keeps its "
+            "own week ids, Reel ids, accounts, Chrome profiles and content mode."
+        ),
+    )
+    parser.add_argument(
         "--instagram-delivery",
         type=str,
         default=INSTAGRAM_DELIVERY_WEB,
@@ -1290,8 +1334,8 @@ def main():
     parser.add_argument(
         "--content-mode",
         type=str,
-        default=SILENT_STEP_BY_STEP,
-        choices=[SILENT_STEP_BY_STEP, NARRATIVE_AMBIENT_STORY],
+        default=None,
+        choices=sorted(LIVE_ELIGIBLE_CONTENT_MODES),
         help="Content mode for a NEW week. Ignored when resuming an existing manifest.",
     )
 
@@ -1312,6 +1356,7 @@ def main():
         start_date=start_date,
         content_mode=args.content_mode,
         instagram_delivery=args.instagram_delivery,
+        brand=get_brand(args.brand),
     )
 
     success, results, manifest = pipeline.run(phase=args.phase)

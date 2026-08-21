@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from automation.simple_weekly_pipeline import SimpleWeeklyPipeline
+from automation.simple_weekly_pipeline import INSTAGRAM_DELIVERY_CLOUD, INSTAGRAM_DELIVERY_WEB
 from automation.orchestration.batch_manifest import BatchRepository, BatchReel, BatchManifest
 from automation.orchestration.state_repository import StateRepository
 from automation.orchestration.models import ReelState, ReelProvenance
@@ -88,6 +89,11 @@ def _make_pipeline(tmp_path, dry_run=False, week_id="2026-W99", **kwargs):
         cloud_client=_ok_cloud_client(),
         stuck_wait_minutes=0,
         stuck_retry_seconds=0,
+        # These tests drive the CLOUD Instagram route: they inject a cloud client and
+        # schedule into past dates, which the composer route correctly refuses. The web
+        # route is the production default and is covered end-to-end in
+        # test_instagram_web_delivery.py, plus once here in the test below.
+        instagram_delivery=INSTAGRAM_DELIVERY_CLOUD,
     )
     defaults.update(kwargs)
     return SimpleWeeklyPipeline(**defaults), dl_dir
@@ -840,3 +846,25 @@ def test_stuck_platform_recovers_within_window(tmp_path):
     yt = next(r for r in results if r.phase == "YOUTUBE")
     assert yt.success is True
     assert phase_calls["n"] >= 2   # failed once, retried inside the hold window
+
+
+def test_default_web_delivery_also_completes_the_week(tmp_path):
+    """
+    The production default is the composer route. The tests above pin the cloud route
+    deliberately, so this one keeps the default covered inside the full phase run --
+    otherwise a break in the default would show up only on a live channel.
+    """
+    from automation.publishing.instagram_web_publisher import MockInstagramWebPublisher
+
+    publisher = MockInstagramWebPublisher()
+    pipeline, success, results, manifest = _run_full_happy_path(
+        tmp_path,
+        week_id="2026-W98",
+        instagram_delivery=INSTAGRAM_DELIVERY_WEB,
+        ig_web_publisher=publisher,
+    )
+
+    assert success is True, [r.message for r in results if not r.success]
+    assert len(publisher.scheduled) == 14
+    progress = pipeline.batch_repo.load_progress(manifest.week_id)
+    assert all(progress[r.reel_id]["instagram"]["status"] == "SCHEDULED" for r in manifest.reels)

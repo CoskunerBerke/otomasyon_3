@@ -6,7 +6,7 @@ and robust visual continuity across all three 10-second segments.
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 from .concepts import ConceptDefinition
-from .content_modes import NARRATIVE_AMBIENT_STORY, SILENT_STEP_BY_STEP
+from .content_modes import HIDDEN_BUILD_STORY, NARRATIVE_AMBIENT_STORY, SILENT_STEP_BY_STEP
 from .duration_rules import (
     DEFAULT_VIDEO_DURATION,
     DEFAULT_SEGMENT_DURATION,
@@ -14,6 +14,8 @@ from .duration_rules import (
     sanitize_video_duration
 )
 from .segment_planner import ContinuityContext, SegmentPlan, SegmentPlanner
+from .hidden_build_concepts import HiddenBuildConcept
+from .hidden_build_planner import HiddenBuildPlanner
 from .story_concepts import StoryConcept
 from .story_planner import StoryPlanner
 
@@ -176,6 +178,65 @@ class PromptEngine:
             diversity_score=diversity_score,
             pipeline_version=3,
             content_mode=NARRATIVE_AMBIENT_STORY,
+            final_duration_seconds=30,
+            segment_count=len(segments),
+            segment_duration_seconds=duration_seconds,
+            continuity=continuity,
+            segments=segments
+        )
+
+    @classmethod
+    def build_hidden_build_plan(
+        cls,
+        concept: HiddenBuildConcept,
+        env: str,
+        arch: str,
+        transformation: str,
+        camera: str,
+        lighting: str,
+        materials: str,
+        reveal: str,
+        diversity_score: float,
+        duration_seconds: int = DEFAULT_SEGMENT_DURATION
+    ) -> ReelConceptPlan:
+        """
+        Assemble a 3-beat hidden_build_story plan.
+
+        Identical ReelConceptPlan shape to the other two modes -- only content_mode and
+        the beats differ -- so nothing downstream of content needs to know this mode
+        exists.
+        """
+        continuity, segments = HiddenBuildPlanner.plan_segments(
+            concept=concept,
+            env=env,
+            arch=arch,
+            transformation=transformation,
+            camera=camera,
+            lighting=lighting,
+            materials=materials,
+            reveal=reveal,
+            duration_per_segment=duration_seconds
+        )
+
+        topic_key = f"{concept.id_slug}-hidden".lower().replace(" ", "-")
+
+        return ReelConceptPlan(
+            concept_def=concept,
+            title=concept.default_title,
+            topic_description=concept.topic_description,
+            topic_key=topic_key,
+            category=concept.category_group,
+            environment=env,
+            architecture=arch,
+            transformation=transformation,
+            camera_style=camera,
+            lighting=lighting,
+            materials=materials,
+            reveal=reveal,
+            prompt=segments[0].prompt,
+            diversity_score=diversity_score,
+            pipeline_version=3,
+            content_mode=HIDDEN_BUILD_STORY,
             final_duration_seconds=30,
             segment_count=len(segments),
             segment_duration_seconds=duration_seconds,

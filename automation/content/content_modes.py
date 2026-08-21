@@ -27,6 +27,13 @@ SILENT_STEP_BY_STEP = "silent_global_step_by_step"
 # no dialogue -- see StoryPlanner.NEGATIVE_EXCLUSIONS, which keeps banning both.
 NARRATIVE_AMBIENT_STORY = "narrative_ambient_story"
 
+# 2026-08-21: the second channel's mode. Same 30s three-beat skeleton, but the subject is
+# a staged transformation -- an unexpected object buried in a yard and revealed as
+# something nobody expects -- and people are ON SCREEN by design. A recurring craftsman
+# carries every Reel, so unlike the other two modes this one must hold a human face
+# consistent across segments; see HiddenBuildPlanner.CRAFTSMAN.
+HIDDEN_BUILD_STORY = "hidden_build_story"
+
 
 @dataclass(frozen=True)
 class ContentModeSpec:
@@ -51,6 +58,13 @@ _REGISTRY: Dict[str, ContentModeSpec] = {
         segment_count=3,
         live_eligible=True,
         description="30s dramatised real-history story with Flow's native ambient audio.",
+    ),
+    HIDDEN_BUILD_STORY: ContentModeSpec(
+        mode=HIDDEN_BUILD_STORY,
+        audio_policy=AUDIO_REQUIRED,
+        segment_count=3,
+        live_eligible=True,
+        description="30s buried-object transformation story with a recurring craftsman.",
     ),
 }
 

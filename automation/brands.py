@@ -1,0 +1,216 @@
+"""
+Brand registry -- which channel a weekly run belongs to, and everything that differs
+between channels.
+
+This factory runs more than one channel. Each brand has its own accounts, its own Chrome
+profiles, its own content mode, and its own inventory; nothing may leak between them.
+The failure this exists to prevent is the worst one available here: publishing brand B's
+video to brand A's audience, which cannot be undone because this system may not delete
+remote content.
+
+Two rules hold the design together.
+
+1. The default brand reproduces the pre-brand behaviour EXACTLY -- same week ids, same
+   Reel ids, same workspace paths, same accounts, same ports. A run that does not name a
+   brand behaves as it always did, because the 14-Reel series that is already live on
+   three platforms must not shift by a single filename.
+
+2. A brand whose accounts are not configured yet FAILS CLOSED. Placeholder handles are
+   rejected before any browser opens, so a half-set-up brand can never fall back to
+   another brand's channel. The ACCOUNT_MISMATCH guards in the publishers stay exactly as
+   they are; this module feeds them the right expectation, it does not weaken them.
+
+Isolation is by id prefix rather than by directory nesting. A brand's weeks are named
+"<prefix>2026-W36" and its Reels "<prefix>REEL-2026-0001", so every existing path,
+repository and state file keeps working untouched while the two brands' inventories can
+never collide or resume each other.
+"""
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional
+import os
+
+from automation.content.content_modes import (
+    HIDDEN_BUILD_STORY,
+    NARRATIVE_AMBIENT_STORY,
+    is_live_eligible_mode,
+)
+
+# Marks an account that has not been set up yet. Any brand still carrying one of these
+# refuses to publish -- see Brand.ensure_publishable.
+UNCONFIGURED = "UNCONFIGURED"
+
+
+def _profile_root() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "ReelsAIFactory"
+    return Path.home() / ".reels_ai_factory"
+
+
+@dataclass(frozen=True)
+class Brand:
+    """One channel identity: what it publishes, where, and as whom."""
+
+    brand_id: str
+    display_name: str
+    content_mode: str
+
+    # Prepended to week ids and Reel ids. Empty for the default brand, which must keep
+    # producing "2026-W36" and "REEL-2026-0001" exactly as before.
+    id_prefix: str
+
+    # Account identities. These become the ACCOUNT_MISMATCH expectations.
+    youtube_handle: str
+    youtube_channel_id: Optional[str]
+    tiktok_username: str
+
+    # Each brand needs its own logged-in Chrome, so the profiles and CDP ports differ.
+    # Flow (9222) is deliberately shared: generation is account-agnostic and both brands
+    # draw from the same Flow credits.
+    youtube_port: int
+    tiktok_port: int
+    instagram_port: int
+    profile_suffix: str
+
+    # Instagram delivery is per-brand: the first channel was handed to the cloud worker
+    # before the composer route existed.
+    instagram_delivery: str = "web"
+
+    @property
+    def youtube_profile_dir(self) -> Path:
+        return _profile_root() / f"youtube-studio-profile{self.profile_suffix}"
+
+    @property
+    def tiktok_profile_dir(self) -> Path:
+        return _profile_root() / f"tiktok-profile{self.profile_suffix}"
+
+    @property
+    def instagram_profile_dir(self) -> Path:
+        return _profile_root() / f"instagram-profile{self.profile_suffix}"
+
+    def week_id(self, iso_week_id: str) -> str:
+        """'2026-W36' -> the brand's own week id."""
+        return f"{self.id_prefix}{iso_week_id}"
+
+    def owns_week_id(self, week_id: str) -> bool:
+        """
+        Whether a week belongs to this brand.
+
+        The default brand has no prefix, so it must additionally reject anything carrying
+        another brand's prefix -- otherwise it would claim every week on disk and could
+        resume, or schedule into, a different channel's batch.
+        """
+        if self.id_prefix:
+            return week_id.startswith(self.id_prefix)
+        return not any(
+            b.id_prefix and week_id.startswith(b.id_prefix) for b in BRANDS.values()
+        )
+
+    def reel_id(self, number: int) -> str:
+        return f"{self.id_prefix}REEL-2026-{number:04d}"
+
+    def owns_reel_id(self, reel_id: str) -> bool:
+        if self.id_prefix:
+            return reel_id.startswith(self.id_prefix)
+        return not any(
+            b.id_prefix and reel_id.startswith(b.id_prefix) for b in BRANDS.values()
+        )
+
+    def unconfigured_accounts(self) -> List[str]:
+        missing = []
+        if self.youtube_handle == UNCONFIGURED:
+            missing.append("youtube_handle")
+        if self.youtube_channel_id in (None, UNCONFIGURED):
+            missing.append("youtube_channel_id")
+        if self.tiktok_username == UNCONFIGURED:
+            missing.append("tiktok_username")
+        return missing
+
+    def ensure_publishable(self) -> None:
+        """
+        Raise before anything opens a browser if this brand is not fully set up.
+
+        Publishing with a placeholder expectation is the one thing that could put a video
+        on the wrong channel, so it is refused loudly rather than left to a downstream
+        guard.
+        """
+        missing = self.unconfigured_accounts()
+        if missing:
+            raise ValueError(
+                f"BRAND_NOT_CONFIGURED: '{self.brand_id}' henuz yayina hazir degil. "
+                f"Eksik: {', '.join(missing)}. automation/brands.py icinde gercek hesap "
+                f"kimliklerini girin; placeholder ile yayin yapilmaz."
+            )
+        if not is_live_eligible_mode(self.content_mode):
+            raise ValueError(
+                f"BRAND_MODE_NOT_LIVE_ELIGIBLE: '{self.brand_id}' modu "
+                f"'{self.content_mode}' canli yayina uygun degil."
+            )
+
+    def apply_to_publishing_config(self, cfg):
+        """
+        Point a PublishingConfig at this brand's accounts and browsers.
+
+        Mutates in place and returns it. The default brand's values are identical to the
+        dataclass defaults, so applying it is a no-op by construction -- which is what
+        keeps the existing series byte-for-byte unchanged.
+        """
+        cfg.youtube_expected_handle = self.youtube_handle
+        cfg.youtube_expected_channel_id = self.youtube_channel_id
+        cfg.youtube_studio_debug_port = self.youtube_port
+        cfg.youtube_studio_profile_dir = self.youtube_profile_dir
+        cfg.tiktok_expected_username = self.tiktok_username
+        cfg.tiktok_debug_port = self.tiktok_port
+        cfg.tiktok_profile_dir = self.tiktok_profile_dir
+        return cfg
+
+
+# The original channel. Every value here MUST match the pre-brand defaults in
+# publishing/config.py -- this brand is the running 14-Reel series.
+BUILDVERSE = Brand(
+    brand_id="buildverse",
+    display_name="BuildVerse",
+    content_mode=NARRATIVE_AMBIENT_STORY,
+    id_prefix="",
+    youtube_handle="@BuiIdVerse",
+    youtube_channel_id="UCahsmsqzTCtwTDDtvCurtBA",
+    tiktok_username="@kitchenverse360",
+    youtube_port=9224,
+    tiktok_port=9223,
+    instagram_port=9225,
+    profile_suffix="",
+    instagram_delivery="web",
+)
+
+# The second channel: buried-object transformation stories with a recurring craftsman.
+# Accounts are placeholders until the operator supplies the real handles; until then
+# ensure_publishable() stops any live run.
+HIDDEN_BUILD = Brand(
+    brand_id="hiddenbuild",
+    display_name="Hidden Build",
+    content_mode=HIDDEN_BUILD_STORY,
+    id_prefix="HB-",
+    youtube_handle=UNCONFIGURED,
+    youtube_channel_id=UNCONFIGURED,
+    tiktok_username=UNCONFIGURED,
+    youtube_port=9234,
+    tiktok_port=9233,
+    instagram_port=9235,
+    profile_suffix="-hiddenbuild",
+    instagram_delivery="web",
+)
+
+BRANDS: Dict[str, Brand] = {b.brand_id: b for b in (BUILDVERSE, HIDDEN_BUILD)}
+
+DEFAULT_BRAND_ID = BUILDVERSE.brand_id
+
+
+def get_brand(brand_id: Optional[str] = None) -> Brand:
+    """Resolve a brand id, defaulting to the original channel."""
+    key = (brand_id or DEFAULT_BRAND_ID).strip().lower()
+    if key not in BRANDS:
+        raise ValueError(
+            f"UNKNOWN_BRAND: '{brand_id}'. Taninan markalar: {', '.join(sorted(BRANDS))}."
+        )
+    return BRANDS[key]

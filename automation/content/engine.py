@@ -7,10 +7,11 @@ import random
 from typing import List, Dict, Any, Optional
 
 from .concepts import CATEGORIES, ConceptDefinition
-from .content_modes import NARRATIVE_AMBIENT_STORY, SILENT_STEP_BY_STEP
+from .content_modes import HIDDEN_BUILD_STORY, NARRATIVE_AMBIENT_STORY, SILENT_STEP_BY_STEP
 from .diversity import calculate_diversity_score, compute_similarity
 from .prompt_engine import PromptEngine, ReelConceptPlan
 from .story_concepts import STORY_CONCEPTS
+from .hidden_build_concepts import HIDDEN_BUILD_CONCEPTS
 
 class ContentProvider(ABC):
     """Abstract interface for generating video concept plans."""
@@ -161,10 +162,29 @@ class StoryContentProvider(TemplateContentProvider):
         return ordered
 
 
+class HiddenBuildContentProvider(StoryContentProvider):
+    """
+    hidden_build_story plans, over HIDDEN_BUILD_CONCEPTS.
+
+    Subclasses the story provider rather than the base one to inherit its group
+    round-robin: without it the first slots of a week would all be "Vehicles", and a
+    channel whose whole premise is "what got buried this time" cannot open with four
+    buses in a row.
+    """
+
+    def __init__(self, categories: Optional[List[ConceptDefinition]] = None):
+        super().__init__(categories or HIDDEN_BUILD_CONCEPTS)
+
+    def _build_plan(self, **kwargs) -> ReelConceptPlan:
+        return PromptEngine.build_hidden_build_plan(**kwargs)
+
+
 def provider_for_mode(content_mode: str) -> ContentProvider:
     """Maps a content_mode to the provider that produces it."""
     if content_mode == NARRATIVE_AMBIENT_STORY:
         return StoryContentProvider()
+    if content_mode == HIDDEN_BUILD_STORY:
+        return HiddenBuildContentProvider()
     if content_mode == SILENT_STEP_BY_STEP:
         return TemplateContentProvider()
     raise ValueError(f"No content provider registered for content_mode '{content_mode}'")

@@ -85,10 +85,19 @@ def _patch_inspect(monkeypatch, has_audio, width=720, height=1280):
 
 # ---------------------------------------------------------------- mode registry
 
-def test_both_modes_are_live_eligible_and_typos_are_not():
+def test_registered_modes_are_live_eligible_and_typos_are_not():
+    from automation.content.content_modes import HIDDEN_BUILD_STORY
+
     assert is_live_eligible_mode(SILENT_STEP_BY_STEP)
     assert is_live_eligible_mode(NARRATIVE_AMBIENT_STORY)
-    assert LIVE_ELIGIBLE_CONTENT_MODES == {SILENT_STEP_BY_STEP, NARRATIVE_AMBIENT_STORY}
+    # The set is asserted whole on purpose: a mode must never become live-eligible by
+    # accident. Update this deliberately when a channel is added, as hidden_build_story
+    # was for the second brand on 2026-08-21.
+    assert LIVE_ELIGIBLE_CONTENT_MODES == {
+        SILENT_STEP_BY_STEP,
+        NARRATIVE_AMBIENT_STORY,
+        HIDDEN_BUILD_STORY,
+    }
 
     for bogus in ["narrative_story", "silent", "", None]:
         assert not is_live_eligible_mode(bogus)
