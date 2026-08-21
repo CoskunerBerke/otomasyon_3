@@ -35,6 +35,11 @@ FILE_INPUT_WAIT_SECONDS = 20.0
 
 # How long the account guard waits for TikTok to show whose session this is.
 ACCOUNT_IDENTITY_WAIT_SECONDS = 10.0
+
+# The final Schedule button sits at the bottom of a page that is still settling while
+# TikTok's content checks finish, so it can be in motion when the automation reaches it.
+SCHEDULE_BUTTON_SETTLE_MS = 10000
+SCHEDULE_CLICK_TIMEOUT_MS = 8000
 MORE_OPTIONS_PROBE_MS = 800
 
 DATE_READBACK_ATTEMPTS = 6
@@ -1867,13 +1872,29 @@ class TikTokUIObserver:
                 logger.error("=" * 50)
                 return False, "FINAL_BUTTON_NOT_READY"
 
+            # Scrolling is a convenience, not a precondition: the button is rendered and
+            # clickable where it sits. Giving it 1.5s to hold still, on a page whose layout
+            # is still shifting as the content checks finish, is how CBM-REEL-2026-0013
+            # came back FAILED on 2026-08-22 with its video uploaded, its caption written,
+            # its slot set to 28 Aug 19:30 and both checks green. Nothing was wrong except
+            # that the button moved while the automation reached for it.
             try:
                 if hasattr(submit_btn, "scroll_into_view_if_needed"):
-                    submit_btn.scroll_into_view_if_needed(timeout=1500)
-                submit_btn.click(timeout=3000)
+                    submit_btn.scroll_into_view_if_needed(timeout=SCHEDULE_BUTTON_SETTLE_MS)
+            except Exception as e:
+                logger.info(
+                    f"[TIKTOK FINAL] Scroll skipped ({type(e).__name__}); clicking where it stands."
+                )
+
+            try:
+                submit_btn.click(timeout=SCHEDULE_CLICK_TIMEOUT_MS)
                 logger.info(f"[TIKTOK FINAL] Normal click submitted on final schedule button (Attempt {attempt}).")
             except Exception as e:
-                return False, f"SCHEDULE_CLICK_FAILED: {e}"
+                # Not a verdict. The click may still have landed -- only the success check
+                # below is entitled to say -- and if it did not, this loop has another
+                # attempt left. Returning here skipped both, and turned a moving button
+                # into a failed week.
+                logger.warning(f"[TIKTOK FINAL] Click attempt {attempt} raised: {e}")
 
             time.sleep(1.5)
 

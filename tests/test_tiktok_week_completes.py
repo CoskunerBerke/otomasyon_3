@@ -193,3 +193,60 @@ def test_the_caption_verified_against_is_the_caption_written():
     """The written text and the verified text must come from the same field."""
     src = (REPO / "automation" / "publishing" / "tiktok_publisher.py").read_text(encoding="utf-8")
     assert "observer.replace_caption(record.description, record.hashtags)" in src
+
+
+# --------------------------------------------------------------------------
+# The final Schedule click, on a page that is still settling
+# --------------------------------------------------------------------------
+
+def test_the_schedule_button_is_given_time_to_stop_moving():
+    """
+    CBM-REEL-2026-0013 came back FAILED on 2026-08-22 with its video uploaded, its caption
+    written, its slot set to 28 Aug 19:30 and both of TikTok's checks green. The only
+    thing wrong was that the button was still moving -- the content checks finishing
+    reflows the page under it -- and it was given 1.5s to hold still.
+    """
+    from automation.publishing.tiktok_ui_observer import (
+        SCHEDULE_BUTTON_SETTLE_MS,
+        SCHEDULE_CLICK_TIMEOUT_MS,
+    )
+
+    assert SCHEDULE_BUTTON_SETTLE_MS >= 8000, "a reflowing page needs more than a moment"
+    assert SCHEDULE_CLICK_TIMEOUT_MS >= 5000
+
+
+def test_a_failed_scroll_does_not_cancel_the_click():
+    """Scrolling is a convenience; the button is clickable where it sits."""
+    src = (REPO / "automation" / "publishing" / "tiktok_ui_observer.py").read_text(encoding="utf-8")
+    body = src.split("def click_schedule_and_verify")[1].split("\n    def ")[0]
+
+    scroll_at = body.find("scroll_into_view_if_needed(timeout=")
+    click_at = body.find("submit_btn.click(")
+    assert scroll_at != -1 and click_at != -1
+
+    between = body[scroll_at:click_at]
+    assert "except Exception" in between, "the scroll must be caught on its own"
+    assert "return False" not in between, "a scroll that fails must not end the submit"
+
+
+def test_a_raised_click_still_gets_its_second_attempt():
+    """
+    The submit loop runs twice by design. Returning on the first exception skipped both
+    the success check -- which is the only thing entitled to say whether the click landed
+    -- and the retry.
+    """
+    src = (REPO / "automation" / "publishing" / "tiktok_ui_observer.py").read_text(encoding="utf-8")
+    body = src.split("def click_schedule_and_verify")[1].split("\n    def ")[0]
+
+    assert "SCHEDULE_CLICK_FAILED" not in body, (
+        "a raised click is no longer a verdict on its own"
+    )
+    assert "max_attempts = 2" in body, "the retry this depends on must still exist"
+
+
+def test_the_submit_still_fails_when_nothing_confirms_it():
+    """Patience must not become a false success: an unconfirmed submit still fails."""
+    src = (REPO / "automation" / "publishing" / "tiktok_ui_observer.py").read_text(encoding="utf-8")
+    body = src.split("def click_schedule_and_verify")[1].split("\n    def ")[0]
+
+    assert 'return False, "TIKTOK_SCHEDULE_CONFIRMATION_TIMEOUT"' in body
