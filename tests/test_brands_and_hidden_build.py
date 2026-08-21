@@ -163,9 +163,62 @@ def test_a_brand_scans_only_its_own_batches(tmp_path):
 # ---------------------------------------------------------------- fail closed
 
 def test_an_unconfigured_brand_refuses_to_publish():
-    assert HIDDEN_BUILD.unconfigured_accounts(), "fixture assumes accounts are still placeholders"
+    """The guard itself, on a brand built for the test -- the real ones are configured."""
+    blank = Brand(
+        brand_id="blank", display_name="Blank", content_mode=HIDDEN_BUILD_STORY, id_prefix="B-",
+        youtube_handle=UNCONFIGURED, youtube_channel_id=UNCONFIGURED, tiktok_username=UNCONFIGURED,
+        youtube_port=9264, tiktok_port=9263, instagram_port=9265, profile_suffix="-blank",
+    )
+    assert blank.unconfigured_accounts() == ["youtube_handle", "youtube_channel_id", "tiktok_username"]
     with pytest.raises(ValueError, match="BRAND_NOT_CONFIGURED"):
-        HIDDEN_BUILD.ensure_publishable()
+        blank.ensure_publishable()
+
+
+def test_every_registered_brand_is_ready_to_publish():
+    """A registered brand with a placeholder left in it would fail on a live run."""
+    for brand in BRANDS.values():
+        brand.ensure_publishable()
+
+
+def test_the_second_channel_points_at_the_right_accounts():
+    """
+    The channel id is the value that actually gates YouTube: verify_logged_in_channel
+    matches it against the Studio URL and returns before the handle is read.
+    """
+    assert HIDDEN_BUILD.youtube_channel_id == "UCcZow6RbRyK3xH-KymR_9KQ"
+    assert HIDDEN_BUILD.youtube_handle == "@craftsbyman"
+    assert HIDDEN_BUILD.tiktok_username == "@craftsbyman"
+
+
+def test_a_brand_with_no_history_starts_at_once_and_an_established_one_does_not(tmp_path):
+    """
+    A new channel has no rhythm to align to, so it starts tomorrow rather than waiting
+    for a calendar Monday. A brand that has published continues from its own last slot
+    and never reaches that branch.
+    """
+    import datetime
+    from automation.orchestration.batch_manifest import BatchManifest, BatchReel, BatchRepository
+
+    fresh = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
+                                 dry_run=True, brand=get_brand("hiddenbuild"))
+    assert fresh.find_last_scheduled_date() is None
+    assert fresh._resolve_start_date() == datetime.date.today() + datetime.timedelta(days=1)
+
+    repo = BatchRepository(tmp_path)
+    last = datetime.date.today() + datetime.timedelta(days=20)
+    reels = [BatchReel(index=1, reel_id="REEL-2026-0025",
+                       scheduled_at_local=f"{last.isoformat()} 22:00:00",
+                       scheduled_at_utc=f"{last.isoformat()} 19:00:00",
+                       generation_status="COMPLETE")]
+    repo.save_manifest(BatchManifest(week_id="2026-W40", start_date=last.isoformat(),
+                                     status="LOCKED", reels=reels))
+    repo.ensure_progress_entries("2026-W40", ["REEL-2026-0025"])
+    progress = repo.load_progress("2026-W40")
+    progress["REEL-2026-0025"]["youtube"]["status"] = "SCHEDULED"
+    repo.save_progress("2026-W40", progress)
+
+    established = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v", dry_run=True)
+    assert established._resolve_start_date() == last + datetime.timedelta(days=1)
 
 
 def test_a_configured_brand_passes_the_guard():

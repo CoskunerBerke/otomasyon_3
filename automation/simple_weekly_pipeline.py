@@ -361,8 +361,12 @@ class SimpleWeeklyPipeline:
 
         last_scheduled = self.find_last_scheduled_date()
         if last_scheduled is None:
-            logger.info("[PLAN] Hicbir platformda planlanmis video yok -- takvim kuralina donuluyor.")
-            return max(calculate_next_safe_week_start(), earliest)
+            # A brand that has never published starts as soon as it can rather than
+            # waiting for the next calendar Monday: a new channel has no rhythm to align
+            # to yet, and the slot generator handles any start day. Established brands
+            # never reach this branch -- they continue from their own last slot below.
+            logger.info(f"[PLAN] '{self.brand.brand_id}' henuz hic yayin yapmamis -- {earliest} tarihinde basliyor.")
+            return earliest
 
         day_after = last_scheduled + datetime.timedelta(days=1)
         chosen = max(day_after, earliest)
