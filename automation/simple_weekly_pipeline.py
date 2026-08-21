@@ -888,7 +888,11 @@ class SimpleWeeklyPipeline:
             # one id, because capture fell through to a browser URL still showing the
             # previous video. Recording it would tie this Reel's state to another Reel's
             # video, which CLAUDE.md's Reel ID invariant exists to prevent.
-            if status_val in PLATFORM_SUCCESS_STATUSES and res_rec.remote_id:
+            # Checked for EVERY returned id, not just successful ones. Guarding only the
+            # success path left the soft-failure write below unprotected, and on
+            # 2026-08-22 that path recorded one deleted video's id onto all seven Reels
+            # a second time -- the very collision this guard exists to stop.
+            if res_rec.remote_id:
                 clash = self._reel_already_using_remote_id(
                     manifest, platform, res_rec.remote_id, reel.reel_id
                 )

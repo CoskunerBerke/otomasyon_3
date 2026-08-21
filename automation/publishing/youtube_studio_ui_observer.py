@@ -59,6 +59,12 @@ MONTH_MAP = {
 # some Reels and not others in the same batch.
 VIDEO_ID_WAIT_SECONDS = 20.0
 
+# How long /video/<id>/edit is given to mount its editor before the video is judged
+# gone. The editor arrives well after domcontentloaded, so this has to outlast a slow
+# load -- concluding "deleted" too early would send a Reel back to a fresh upload and
+# put a second copy on the channel.
+VIDEO_EDIT_PAGE_WAIT_SECONDS = 25.0
+
 
 class YouTubeStudioUIObserver:
     """Interacts with visible DOM elements of YouTube Studio Web UI."""
@@ -292,6 +298,17 @@ class YouTubeStudioUIObserver:
         """
         Open the exact existing video draft by navigating directly to its edit URL.
         Eliminates duplicate uploads and title searches.
+
+        Returns True only once the editor for THIS video has actually mounted. A video
+        deleted from the channel still answers its own edit URL -- Studio renders an
+        error placeholder instead of the editor -- so a successful goto() says nothing
+        about whether the video is still there.
+
+        2026-08-22: seven Reels resumed onto an id whose video had been deleted by hand
+        the day before. Navigation "succeeded", the caller then hunted for
+        'Taslagi duzenle' on the error placeholder, and each Reel reported
+        NEEDS_USER_HTML about a button that was correctly absent. Nothing was uploaded
+        and four days of slots stayed empty.
         """
         self.current_remote_id = remote_id
         self._active_wizard_dialog = None
@@ -299,11 +316,30 @@ class YouTubeStudioUIObserver:
         logger.info(f"Opening exact remote video: {edit_url}")
         try:
             self.page.goto(edit_url, wait_until="domcontentloaded", timeout=25000)
-            time.sleep(2.5)
-            return True
         except Exception as e:
             logger.error(f"Failed to open exact remote video {remote_id}: {e}")
             return False
+
+        # Absence has to be waited out rather than read once -- the same impatience
+        # behind the id, schedule and caption failures of the preceding days.
+        deadline = time.time() + VIDEO_EDIT_PAGE_WAIT_SECONDS
+        while True:
+            for sel in YouTubeStudioSelectors.VIDEO_EDIT_PAGE_READY:
+                try:
+                    if self.page.locator(sel).first.is_visible(timeout=1000):
+                        return True
+                except Exception:
+                    pass
+            if time.time() >= deadline:
+                break
+            time.sleep(1.0)
+
+        logger.error(
+            f"VIDEO_EDIT_PAGE_NOT_AVAILABLE: {edit_url} did not mount its editor within "
+            f"{VIDEO_EDIT_PAGE_WAIT_SECONDS:.0f}s -- the video is deleted or not "
+            f"reachable on this channel."
+        )
+        return False
 
     def find_matching_drafts(
         self,

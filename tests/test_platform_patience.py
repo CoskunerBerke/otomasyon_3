@@ -66,7 +66,10 @@ def test_youtube_checks_before_resuming_a_draft():
     check = src.find("already_scheduled, why = observer.verify_remote_scheduled_status")
     assert check != -1
     assert check < src.find("if has_remote_evidence and target_remote_id:")
-    assert check < src.find("elif has_remote_evidence:")
+    # The title-fallback branch became a second `if` on 2026-08-22, so that a recorded
+    # video found to be deleted can clear its id and fall through to a clean upload
+    # instead of dead-ending in the resume chain.
+    assert check < src.find("if has_remote_evidence and not target_remote_id:")
 
 
 # ---------------------------------------------------------------- TikTok

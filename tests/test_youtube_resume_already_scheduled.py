@@ -117,7 +117,10 @@ def test_publisher_source_checks_before_both_resume_branches():
 
     check_at = text.find("already_scheduled, why = observer.verify_remote_scheduled_status")
     strict_resume_at = text.find("if has_remote_evidence and target_remote_id:")
-    title_search_at = text.find("elif has_remote_evidence:")
+    # A second `if` rather than an `elif` since 2026-08-22: a recorded video that turns
+    # out to be deleted clears its id mid-branch and falls through to a clean upload,
+    # which an elif-chain could not express.
+    title_search_at = text.find("if has_remote_evidence and not target_remote_id:")
 
     assert check_at != -1, "the pre-resume verification is gone"
     assert check_at < strict_resume_at, "the check must precede the strict-resume branch"

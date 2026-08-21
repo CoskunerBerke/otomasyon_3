@@ -72,6 +72,20 @@ class YouTubeStudioSelectors:
         "ytcp-button[aria-label*='Taslağı düzenle' i], ytcp-button[aria-label*='Edit draft' i]",
     ]
 
+    # --- Did /video/<id>/edit actually open this video? ------------------------
+    # A video that was deleted remotely still answers its own edit URL: Studio renders
+    # an error placeholder in place of the editor, and page.goto() succeeds either way.
+    # Navigation therefore proves nothing about whether the video is still there.
+    #
+    # Kural 31: two strategies, each a comma-grouped "match any" query -- (1) the
+    # metadata editor the edit page mounts for a real video, (2) the draft surfaces the
+    # same page shows when that video is still an unfinished upload. Neither appears on
+    # the error placeholder, so their continued absence is the signal.
+    VIDEO_EDIT_PAGE_READY: List[str] = [
+        "#title-textarea, ytcp-mention-input#title-textarea, ytcp-video-metadata-editor",
+        "ytcp-uploads-dialog, ytcp-button#edit-draft-button",
+    ]
+
     # The ONLY element that proves the real upload wizard is mounted. A normal
     # /video/<id>/edit page never contains this -- it has its own title/description
     # inputs, which is exactly why a title input must never be accepted as wizard proof.

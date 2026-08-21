@@ -161,6 +161,7 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                 target_remote_id = record.remote_id or (existing_disk_rec.remote_id if existing_disk_rec else None)
 
                 why = "NOT_CHECKED"
+                already_scheduled = False
                 if has_remote_evidence:
                     # Ask what is left to do before resuming anything. A Reel whose schedule
                     # went through but whose verification was inconclusive comes back here
@@ -202,20 +203,47 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                 if has_remote_evidence and target_remote_id:
                     # STRICT RESUME: Upload is FORBIDDEN!
                     logger.info(f"[{record.reel_id}] [UPLOAD SKIPPED] Existing YouTube remote video detected (remote_id: {target_remote_id}). Resume mode enabled.")
-                    if not observer.open_exact_remote_video(target_remote_id):
-                        record.mark_failed(f"Failed to open existing remote video {target_remote_id}", status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED)
-                        return record
-
-                    # Open Draft Wizard stepper via 'Taslağı düzenle' (YOUTUBE_DRAFT_WIZARD_READY)
-                    if not observer.enter_existing_draft_wizard():
+                    if observer.open_exact_remote_video(target_remote_id):
+                        # Open Draft Wizard stepper via 'Taslağı düzenle' (YOUTUBE_DRAFT_WIZARD_READY)
+                        if not observer.enter_existing_draft_wizard():
+                            record.mark_failed(
+                                f"Could not open draft stepper wizard via 'Taslağı düzenle' "
+                                f"(remote status: {why}).",
+                                status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
+                            )
+                            return record
+                    elif why == "NOT_CHECKED":
+                        # Never verified, so there is no second opinion on whether this
+                        # video exists. Stop rather than guess.
                         record.mark_failed(
-                            f"Could not open draft stepper wizard via 'Taslağı düzenle' "
-                            f"(remote status: {why}).",
+                            f"Failed to open existing remote video {target_remote_id}",
                             status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
                         )
                         return record
+                    else:
+                        # The recorded video is gone, and two independent checks agree:
+                        # its editor never mounted, and verify_remote_scheduled_status
+                        # above -- which matches on title as well as id, across both the
+                        # Shorts and uploads tabs -- found nothing scheduled. Keeping the
+                        # id would resume forever onto a deleted video; on 2026-08-22 that
+                        # cost seven Reels four days of empty slots. Clearing it lets this
+                        # run upload the file the normal way.
+                        logger.warning(
+                            f"[{record.reel_id}] STALE_REMOTE_ID_CLEARED: {target_remote_id} "
+                            f"artik YouTube'da yok (remote durum: {why}). Kayittan temizlendi; "
+                            f"video bastan yuklenecek."
+                        )
+                        record.remote_id = None
+                        record.remote_url = None
+                        record.remote_draft_exists = False
+                        record.upload_started = False
+                        record.status = PlatformPublicationStatus.PENDING
+                        record.last_error = ""
+                        self.repo.save_publish_record(record)
+                        has_remote_evidence = False
+                        target_remote_id = None
 
-                elif has_remote_evidence:
+                if has_remote_evidence and not target_remote_id:
                     # Fallback title search if remote_id wasn't populated but draft exists
                     logger.info(f"[{record.reel_id}] [RESUME_EXISTING_YOUTUBE_DRAFT] Found existing draft record for '{record.title}'. Resuming without upload.")
                     if not observer.find_and_open_existing_draft(record.title, record.reel_id, channel_id=self.config.youtube_expected_channel_id):
@@ -233,7 +261,7 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                         record.remote_url = v_url or f"https://youtube.com/shorts/{v_id}"
                         record.remote_draft_exists = True
                         self.repo.save_publish_record(record)
-                else:
+                elif not has_remote_evidence:
                     # 4. Upload Video File (Only when NO remote evidence exists anywhere)
                     logger.info(f"[{record.reel_id}] Uploading to YouTube Studio: {record.video_file.name}")
                     record.upload_started = True
