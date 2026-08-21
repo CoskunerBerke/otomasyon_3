@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from automation.brands import (
     BRANDS,
     BUILDVERSE,
-    HIDDEN_BUILD,
+    CRAFTSBYMAN,
     UNCONFIGURED,
     Brand,
     get_brand,
@@ -82,38 +82,38 @@ def test_an_unnamed_run_is_the_original_brand(tmp_path):
 # ---------------------------------------------------------------- isolation
 
 def test_brands_do_not_share_a_namespace():
-    assert HIDDEN_BUILD.id_prefix and HIDDEN_BUILD.id_prefix != BUILDVERSE.id_prefix
-    assert HIDDEN_BUILD.week_id("2026-W36") != BUILDVERSE.week_id("2026-W36")
-    assert HIDDEN_BUILD.reel_id(1) != BUILDVERSE.reel_id(1)
+    assert CRAFTSBYMAN.id_prefix and CRAFTSBYMAN.id_prefix != BUILDVERSE.id_prefix
+    assert CRAFTSBYMAN.week_id("2026-W36") != BUILDVERSE.week_id("2026-W36")
+    assert CRAFTSBYMAN.reel_id(1) != BUILDVERSE.reel_id(1)
 
 
 def test_neither_brand_claims_the_other_s_weeks():
     """The default brand has no prefix, so it must actively reject prefixed ids."""
     assert BUILDVERSE.owns_week_id("2026-W35")
-    assert not BUILDVERSE.owns_week_id("HB-2026-W35")
-    assert HIDDEN_BUILD.owns_week_id("HB-2026-W35")
-    assert not HIDDEN_BUILD.owns_week_id("2026-W35")
+    assert not BUILDVERSE.owns_week_id("CBM-2026-W35")
+    assert CRAFTSBYMAN.owns_week_id("CBM-2026-W35")
+    assert not CRAFTSBYMAN.owns_week_id("2026-W35")
 
 
 def test_neither_brand_claims_the_other_s_reels():
     assert BUILDVERSE.owns_reel_id("REEL-2026-0025")
-    assert not BUILDVERSE.owns_reel_id("HB-REEL-2026-0001")
-    assert HIDDEN_BUILD.owns_reel_id("HB-REEL-2026-0001")
-    assert not HIDDEN_BUILD.owns_reel_id("REEL-2026-0025")
+    assert not BUILDVERSE.owns_reel_id("CBM-REEL-2026-0001")
+    assert CRAFTSBYMAN.owns_reel_id("CBM-REEL-2026-0001")
+    assert not CRAFTSBYMAN.owns_reel_id("REEL-2026-0025")
 
 
 def test_brands_use_separate_browsers():
     """One Chrome profile cannot be signed into two channels at once."""
     ports = [
-        (BUILDVERSE.youtube_port, HIDDEN_BUILD.youtube_port),
-        (BUILDVERSE.tiktok_port, HIDDEN_BUILD.tiktok_port),
-        (BUILDVERSE.instagram_port, HIDDEN_BUILD.instagram_port),
+        (BUILDVERSE.youtube_port, CRAFTSBYMAN.youtube_port),
+        (BUILDVERSE.tiktok_port, CRAFTSBYMAN.tiktok_port),
+        (BUILDVERSE.instagram_port, CRAFTSBYMAN.instagram_port),
     ]
     for a, b in ports:
         assert a != b
-    assert BUILDVERSE.youtube_profile_dir != HIDDEN_BUILD.youtube_profile_dir
-    assert BUILDVERSE.tiktok_profile_dir != HIDDEN_BUILD.tiktok_profile_dir
-    assert BUILDVERSE.instagram_profile_dir != HIDDEN_BUILD.instagram_profile_dir
+    assert BUILDVERSE.youtube_profile_dir != CRAFTSBYMAN.youtube_profile_dir
+    assert BUILDVERSE.tiktok_profile_dir != CRAFTSBYMAN.tiktok_profile_dir
+    assert BUILDVERSE.instagram_profile_dir != CRAFTSBYMAN.instagram_profile_dir
 
 
 def test_all_ports_across_all_brands_are_unique():
@@ -152,7 +152,7 @@ def test_a_brand_scans_only_its_own_batches(tmp_path):
     repo.save_progress("2026-W35", progress)
 
     other = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
-                                 dry_run=True, brand=get_brand("hiddenbuild"))
+                                 dry_run=True, brand=get_brand("craftsbyman"))
     assert other.find_last_scheduled_date() is None, "another brand's schedule leaked in"
     assert other._find_unfinished_week_id() is None
 
@@ -185,9 +185,9 @@ def test_the_second_channel_points_at_the_right_accounts():
     The channel id is the value that actually gates YouTube: verify_logged_in_channel
     matches it against the Studio URL and returns before the handle is read.
     """
-    assert HIDDEN_BUILD.youtube_channel_id == "UCcZow6RbRyK3xH-KymR_9KQ"
-    assert HIDDEN_BUILD.youtube_handle == "@craftsbyman"
-    assert HIDDEN_BUILD.tiktok_username == "@craftsbyman"
+    assert CRAFTSBYMAN.youtube_channel_id == "UCcZow6RbRyK3xH-KymR_9KQ"
+    assert CRAFTSBYMAN.youtube_handle == "@craftsbyman"
+    assert CRAFTSBYMAN.tiktok_username == "@craftsbyman"
 
 
 def test_a_brand_with_no_history_starts_at_once_and_an_established_one_does_not(tmp_path):
@@ -200,7 +200,7 @@ def test_a_brand_with_no_history_starts_at_once_and_an_established_one_does_not(
     from automation.orchestration.batch_manifest import BatchManifest, BatchReel, BatchRepository
 
     fresh = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
-                                 dry_run=True, brand=get_brand("hiddenbuild"))
+                                 dry_run=True, brand=get_brand("craftsbyman"))
     assert fresh.find_last_scheduled_date() is None
     assert fresh._resolve_start_date() == datetime.date.today() + datetime.timedelta(days=1)
 

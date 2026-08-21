@@ -2,7 +2,7 @@
 setlocal
 
 echo ============================================================
-echo REELS AI FACTORY - HIDDEN BUILD (IKINCI KANAL)
+echo REELS AI FACTORY - CRAFTS BY MAN (IKINCI KANAL)
 echo ============================================================
 echo Target   : 14 Reels (7 Days x 2 Slots: 19:30 ^& 22:00)
 echo Start    : the day after this brand's last scheduled video
@@ -38,19 +38,19 @@ shift
 goto parse
 
 :run
-echo Running Hidden Build pipeline (%RUNARG% %EXTRA%)...
+echo Running Crafts By Man pipeline (%RUNARG% %EXTRA%)...
 echo.
-.venv\Scripts\python.exe -m automation.simple_weekly_pipeline %RUNARG% --brand hiddenbuild %EXTRA%
+.venv\Scripts\python.exe -m automation.simple_weekly_pipeline %RUNARG% --brand craftsbyman %EXTRA%
 set EXIT_CODE=%ERRORLEVEL%
 
 echo.
 if %EXIT_CODE% equ 0 (
-    echo [SUCCESS] Hidden Build weekly pipeline completed successfully.
+    echo [SUCCESS] Crafts By Man weekly pipeline completed successfully.
 ) else (
     echo [FAILED] Pipeline stopped - see terminal output above.
     echo          Re-running this same file resumes from where it stopped.
     echo          BRAND_NOT_CONFIGURED gorursen: automation\brands.py icinde
-    echo          HIDDEN_BUILD hesap bilgilerini doldurman gerekiyor.
+    echo          CRAFTSBYMAN hesap bilgilerini doldurman gerekiyor.
 )
 
 pause

@@ -8,8 +8,8 @@ untidy -- it is how a video reaches the wrong audience, which this system cannot
 Read-only: it opens browsers and reports what it finds. Nothing is uploaded, scheduled
 or published from here.
 
-    python -m automation.publishing.brand_login --brand hiddenbuild
-    python -m automation.publishing.brand_login --brand hiddenbuild --platform youtube
+    python -m automation.publishing.brand_login --brand craftsbyman
+    python -m automation.publishing.brand_login --brand craftsbyman --platform youtube
 """
 import argparse
 import logging
@@ -98,7 +98,7 @@ def run(brand_id: str, platforms: List[str]) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bir markanin kanal tarayicilarini acar (giris icin)")
-    parser.add_argument("--brand", default="hiddenbuild", choices=sorted(BRANDS))
+    parser.add_argument("--brand", default="craftsbyman", choices=sorted(BRANDS))
     parser.add_argument("--platform", default="all", choices=("all",) + PLATFORMS)
     args = parser.parse_args()
 

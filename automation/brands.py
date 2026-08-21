@@ -21,7 +21,7 @@ Two rules hold the design together.
    they are; this module feeds them the right expectation, it does not weaken them.
 
 Isolation is by id prefix rather than by directory nesting. A brand's weeks are named
-"<prefix>2026-W36" and its Reels "<prefix>REEL-2026-0001", so every existing path,
+"CBM-2026-W36" and its Reels "CBM-REEL-2026-0001", so every existing path,
 repository and state file keeps working untouched while the two brands' inventories can
 never collide or resume each other.
 """
@@ -187,22 +187,22 @@ BUILDVERSE = Brand(
 # Accounts confirmed by the operator on 2026-08-21. The channel id is what actually
 # gates YouTube -- verify_logged_in_channel matches it against the Studio URL and returns
 # before the handle is ever read -- so it is the value that must be exact here.
-HIDDEN_BUILD = Brand(
-    brand_id="hiddenbuild",
+CRAFTSBYMAN = Brand(
+    brand_id="craftsbyman",
     display_name="Crafts By Man",
     content_mode=HIDDEN_BUILD_STORY,
-    id_prefix="HB-",
+    id_prefix="CBM-",
     youtube_handle="@craftsbyman",
     youtube_channel_id="UCcZow6RbRyK3xH-KymR_9KQ",
     tiktok_username="@craftsbyman",
     youtube_port=9234,
     tiktok_port=9233,
     instagram_port=9235,
-    profile_suffix="-hiddenbuild",
+    profile_suffix="-craftsbyman",
     instagram_delivery="web",
 )
 
-BRANDS: Dict[str, Brand] = {b.brand_id: b for b in (BUILDVERSE, HIDDEN_BUILD)}
+BRANDS: Dict[str, Brand] = {b.brand_id: b for b in (BUILDVERSE, CRAFTSBYMAN)}
 
 DEFAULT_BRAND_ID = BUILDVERSE.brand_id
 

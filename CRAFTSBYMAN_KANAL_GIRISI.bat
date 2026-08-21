@@ -25,7 +25,7 @@ if exist "%~dp0.venv\Scripts\python.exe" (
     set "PYTHON_EXE=python"
 )
 
-"%PYTHON_EXE%" -m automation.publishing.brand_login --brand hiddenbuild
+"%PYTHON_EXE%" -m automation.publishing.brand_login --brand craftsbyman
 
 echo.
 pause
