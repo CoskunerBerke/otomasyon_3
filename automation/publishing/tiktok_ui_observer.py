@@ -25,6 +25,12 @@ logger = logging.getLogger("ReelsAIFactory.TikTokUIObserver")
 REMOTE_VERIFY_BACKOFF_SECONDS = (5.0, 10.0, 20.0, 0.0)
 
 MORE_OPTIONS_WAIT_SECONDS = 12.0
+
+# How long the upload area is given to mount before the file input is judged missing.
+# The publisher returns to a freshly navigated upload page for every Reel, and that page
+# builds its file input after load. Reading once and concluding "not found" stopped
+# craftsbyman's week at its twelfth Reel on 2026-08-22, with eleven already scheduled.
+FILE_INPUT_WAIT_SECONDS = 20.0
 MORE_OPTIONS_PROBE_MS = 800
 
 DATE_READBACK_ATTEMPTS = 6
@@ -307,33 +313,45 @@ class TikTokUIObserver:
         # methods below would fail with "file input not found" until it is cleared.
         self.dismiss_unsaved_draft_banner_if_present()
 
-        # Method A: Try direct input[type='file']
-        for sel in TikTokSelectors.FILE_INPUT_SELECTORS:
-            try:
-                loc = self.page.locator(sel).first
-                if loc.count() > 0:
-                    loc.set_input_files(str(video_path))
-                    logger.info(f"Set input files directly for TikTok: {video_path.name}")
-                    return True
-            except Exception as e:
-                logger.debug(f"Direct file input selector {sel} failed: {e}")
+        # Both methods are retried until the upload area has had time to mount. A single
+        # immediate pass is what stopped the twelfth Reel of an otherwise clean week:
+        # eleven videos were already scheduled, the page simply had not finished building
+        # its file input yet, and "not found" was reported as if the control were absent.
+        deadline = time.time() + FILE_INPUT_WAIT_SECONDS
+        while True:
+            # Method A: Try direct input[type='file']
+            for sel in TikTokSelectors.FILE_INPUT_SELECTORS:
+                try:
+                    loc = self.page.locator(sel).first
+                    if loc.count() > 0:
+                        loc.set_input_files(str(video_path))
+                        logger.info(f"Set input files directly for TikTok: {video_path.name}")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Direct file input selector {sel} failed: {e}")
 
-        # Method B: Native file chooser via visible 'Video seçin' button
-        for sel in TikTokSelectors.SELECT_VIDEO_BUTTONS:
-            try:
-                loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1500) and loc.is_enabled():
-                    logger.info(f"Triggering file chooser on TikTok via button: {sel}")
-                    with self.page.expect_file_chooser(timeout=6000) as fc_info:
-                        loc.click()
-                    file_chooser = fc_info.value
-                    file_chooser.set_files(str(video_path))
-                    logger.info(f"Set file via native file chooser for TikTok: {video_path.name}")
-                    return True
-            except Exception as e:
-                logger.debug(f"File chooser button selector {sel} failed: {e}")
+            # Method B: Native file chooser via visible 'Video seçin' button
+            for sel in TikTokSelectors.SELECT_VIDEO_BUTTONS:
+                try:
+                    loc = self.page.locator(sel).first
+                    if loc.is_visible(timeout=1500) and loc.is_enabled():
+                        logger.info(f"Triggering file chooser on TikTok via button: {sel}")
+                        with self.page.expect_file_chooser(timeout=6000) as fc_info:
+                            loc.click()
+                        file_chooser = fc_info.value
+                        file_chooser.set_files(str(video_path))
+                        logger.info(f"Set file via native file chooser for TikTok: {video_path.name}")
+                        return True
+                except Exception as e:
+                    logger.debug(f"File chooser button selector {sel} failed: {e}")
 
-        return False
+            if time.time() >= deadline:
+                logger.error(
+                    f"TIKTOK_FILE_INPUT_NOT_AVAILABLE: upload area did not mount within "
+                    f"{FILE_INPUT_WAIT_SECONDS:.0f}s."
+                )
+                return False
+            time.sleep(1.0)
 
     def wait_for_upload_completion(self, timeout_seconds: int = 120) -> bool:
         """Wait until TikTok Studio finishes uploading and processing the video."""

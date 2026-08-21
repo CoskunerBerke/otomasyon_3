@@ -48,6 +48,7 @@ from automation.publishing.instagram_web_publisher import (
 )
 from automation.publishing.eligibility import is_live_production_eligible, HARD_EXCLUDED_REEL_IDS
 from automation.publishing.preflight_gate import run_pre_publish_hard_gate, verify_reel_id_invariant, is_placeholder_metadata
+from automation.publishing.repository import PublishingRepository
 from automation.publishing.metadata_builder import PublishingMetadataBuilder
 from automation.flow.generator import GoogleFlowWebProvider, MockVideoProvider, VideoProvider
 from automation.content.concepts import CATEGORIES
@@ -80,6 +81,16 @@ from automation.orchestration.slot_generator import (
     get_timezone,
 )
 from automation.orchestration.obsidian_mirror import ObsidianControlCenter, DEFAULT_VAULT_PATH
+
+# The two daily slots, in order. Defined once so the planner and the start-date rule
+# below can never drift apart about when a day's first slot is.
+DAILY_SLOT_TIMES = ("19:30", "22:00")
+
+# How much room a same-day start must leave before that first slot. Generating a full
+# week of 14 Reels took 49 minutes on 2026-08-21, so six hours is generous; a day whose
+# first slot is nearer than this starts tomorrow instead, rather than risk scheduling
+# into a moment that has already passed by the time publishing begins.
+SAME_DAY_START_LEAD_HOURS = 6
 
 PLATFORM_SUCCESS_STATUSES = ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED")
 
@@ -209,6 +220,9 @@ class SimpleWeeklyPipeline:
 
         self.batch_repo = BatchRepository(self.base_dir)
         self.state_repo = StateRepository(self.base_dir)
+        # Read-only here: the publishers own this store. The pipeline consults it only to
+        # notice when it disagrees with progress.json -- see _report_state_divergence.
+        self.pub_repo = PublishingRepository(self.base_dir)
         self.obsidian = ObsidianControlCenter(vault_path or DEFAULT_VAULT_PATH)
 
         try:
@@ -375,20 +389,37 @@ class SimpleWeeklyPipeline:
 
         return latest
 
+    def _earliest_usable_start(self, now: datetime.datetime) -> datetime.date:
+        """
+        The soonest day a new week may begin.
+
+        Today counts when its first slot is still SAME_DAY_START_LEAD_HOURS away.
+        Always skipping to tomorrow threw away both of today's slots even at breakfast
+        time -- a whole day of the week lost for nothing, and the reason a run started in
+        the morning published nothing until the following evening.
+        """
+        hour, minute = (int(part) for part in DAILY_SLOT_TIMES[0].split(":"))
+        first_slot_today = now.replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        )
+        if now + datetime.timedelta(hours=SAME_DAY_START_LEAD_HOURS) <= first_slot_today:
+            return now.date()
+        return now.date() + datetime.timedelta(days=1)
+
     def _resolve_start_date(self) -> datetime.date:
         """
         Where the next week begins: the day after the last slot already on a platform.
 
-        Falls back to the next-Monday rule only when nothing has ever been published, and
-        never returns a date in the past -- 14 Reels take hours of Flow time, so the
-        earliest honest start is tomorrow even if the calendar says today is free.
+        Falls back to starting as soon as possible when nothing has ever been published,
+        and never returns a date whose slots have gone by -- see _earliest_usable_start,
+        which lets a week begin today while today's slots are still ahead.
         """
         if self.start_date:
             return self.start_date
 
         tz = get_timezone("Europe/Istanbul")
-        today = datetime.datetime.now(tz).date()
-        earliest = today + datetime.timedelta(days=1)
+        now = datetime.datetime.now(tz)
+        earliest = self._earliest_usable_start(now)
 
         last_scheduled = self.find_last_scheduled_date()
         if last_scheduled is None:
@@ -446,7 +477,7 @@ class SimpleWeeklyPipeline:
             return existing
 
         logger.info(f"[PLAN] No manifest for {week_id} -- creating a fresh DRAFT (14 slots, 19:30 & 22:00 Europe/Istanbul).")
-        slot_plan = generate_14_slot_week_plan(start_date=start_date, slot_times=["19:30", "22:00"], timezone_str="Europe/Istanbul")
+        slot_plan = generate_14_slot_week_plan(start_date=start_date, slot_times=list(DAILY_SLOT_TIMES), timezone_str="Europe/Istanbul")
 
         reel_ids = self._allocate_reel_ids(count=14)
 
@@ -767,6 +798,46 @@ class SimpleWeeklyPipeline:
                 return False
         return True
 
+    def _report_state_divergence(
+        self, manifest: BatchManifest, platform: str, plat_enum: Platform
+    ) -> None:
+        """
+        Say out loud when the two state stores disagree about a Reel.
+
+        Platform state lives in two places: progress.json, which this pipeline writes and
+        reports from, and 13_PUBLISHING/PUB-*.md, which the publishers write and then
+        consult through merge_with_existing -- where, in its own words, existing remote
+        evidence ALWAYS WINS.
+
+        On 2026-08-21 fourteen duplicate uploads were deleted by hand and progress.json
+        was cleared. The publish records were not, so a deleted video's id came straight
+        back and held seven Reels in a resume loop against a video that no longer existed.
+        Every state file looked plausible on its own; nothing anywhere said the two
+        disagreed. This does not pick a winner -- the publisher now proves for itself
+        whether a recorded video still exists -- it just makes the disagreement visible
+        in the run output instead of leaving it to be discovered days later.
+        """
+        progress = self.batch_repo.load_progress(manifest.week_id)
+        for reel in manifest.reels:
+            entry = (progress.get(reel.reel_id) or {}).get(platform) or {}
+            try:
+                record = self.pub_repo.get_publish_record(reel.reel_id, plat_enum)
+            except Exception:
+                continue
+            if record is None:
+                continue
+
+            tracked = entry.get("remote_id") or None
+            recorded = getattr(record, "remote_id", None) or None
+            if tracked == recorded:
+                continue
+
+            logger.warning(
+                f"[STATE_DIVERGENCE] {reel.reel_id}/{platform}: progress.json "
+                f"'{tracked or '-'}' derken yayin kaydi '{recorded or '-'}' diyor. "
+                f"Yayinci hangisinin gercek oldugunu kendisi dogrulayacak."
+            )
+
     def _reel_already_using_remote_id(
         self, manifest: BatchManifest, platform: str, remote_id: str, this_reel_id: str
     ) -> Optional[str]:
@@ -844,6 +915,7 @@ class SimpleWeeklyPipeline:
 
         reel_ids = manifest.reel_ids()
         self.batch_repo.ensure_progress_entries(manifest.week_id, reel_ids)
+        self._report_state_divergence(manifest, platform, plat_enum)
         soft_failures: List[str] = []
 
         for reel in manifest.reels:
@@ -1129,9 +1201,47 @@ class SimpleWeeklyPipeline:
     # TOP-LEVEL: single-command cascading run
     # =========================================================================
 
+    def _refuse_dry_run_over_live_week(self, manifest: BatchManifest) -> None:
+        """
+        A rehearsal must never write into a week that has already published for real.
+
+        The mock publishers return SCHEDULED with an invented remote id, and the
+        publishing phases record whatever the publisher hands back -- that write is not
+        conditioned on dry_run anywhere. Pointed at a live week, --dry-run therefore
+        overwrites real publication records with mock ones, and SCHEDULED is exactly what
+        the "already done, skip" test looks for. Every overwritten Reel is then skipped
+        forever by the next live run: the slots stay empty while the state file insists
+        the week is finished.
+
+        Rehearsing a week that has published nothing stays allowed -- that is what the
+        flag is for, and it is how the test suite uses it.
+        """
+        if not self.dry_run:
+            return
+
+        live: List[str] = []
+        progress = self.batch_repo.load_progress(manifest.week_id)
+        for reel_id in sorted(progress):
+            entry = progress.get(reel_id) or {}
+            for platform in ("youtube", "tiktok", "instagram"):
+                record = entry.get(platform) or {}
+                remote = record.get("remote_id") or record.get("remote_media_id")
+                if remote and not str(remote).startswith("mock_"):
+                    live.append(f"{reel_id}/{platform}")
+
+        if live:
+            raise RuntimeError(
+                f"DRY_RUN_OVER_LIVE_WEEK: {manifest.week_id} gercek yayin kaydi tasiyor "
+                f"({len(live)} kayit, ornek: {live[0]}). Prova calistirmasi bu kayitlarin "
+                f"uzerine sahte 'SCHEDULED' yazar ve sonraki canli calistirma o Reel'leri "
+                f"'zaten yapilmis' sanip atlar -- slotlar bos kalir. Bu haftayi calistirmak "
+                f"icin --live kullanin; prova icin bos bir --week-id verin."
+            )
+
     def run(self, phase: Optional[str] = None) -> Tuple[bool, List[PhaseResult], BatchManifest]:
         results: List[PhaseResult] = []
         manifest = self._get_or_create_manifest()
+        self._refuse_dry_run_over_live_week(manifest)
 
         if phase:
             handler = {

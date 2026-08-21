@@ -192,17 +192,24 @@ def test_the_second_channel_points_at_the_right_accounts():
 
 def test_a_brand_with_no_history_starts_at_once_and_an_established_one_does_not(tmp_path):
     """
-    A new channel has no rhythm to align to, so it starts tomorrow rather than waiting
-    for a calendar Monday. A brand that has published continues from its own last slot
-    and never reaches that branch.
+    A new channel has no rhythm to align to, so it starts as soon as it can rather than
+    waiting for a calendar Monday. A brand that has published continues from its own last
+    slot and never reaches that branch.
+
+    "As soon as it can" is today while today's slots are still ahead, and tomorrow once
+    they are not -- see _earliest_usable_start. Asserting the soonest usable day rather
+    than a literal "tomorrow" keeps this test honest at every hour of the day.
     """
     import datetime
     from automation.orchestration.batch_manifest import BatchManifest, BatchReel, BatchRepository
+    from automation.orchestration.slot_generator import get_timezone
 
     fresh = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
                                  dry_run=True, brand=get_brand("craftsbyman"))
+    now = datetime.datetime.now(get_timezone("Europe/Istanbul"))
     assert fresh.find_last_scheduled_date() is None
-    assert fresh._resolve_start_date() == datetime.date.today() + datetime.timedelta(days=1)
+    assert fresh._resolve_start_date() == fresh._earliest_usable_start(now)
+    assert fresh._resolve_start_date() >= now.date()
 
     repo = BatchRepository(tmp_path)
     last = datetime.date.today() + datetime.timedelta(days=20)

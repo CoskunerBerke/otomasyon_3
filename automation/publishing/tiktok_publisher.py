@@ -156,8 +156,15 @@ class TikTokPublisher(BaseTikTokPublisher):
                     _sched_time = str(record.scheduled_at_local).split()[1][:5]
                 except Exception:
                     _sched_time = ""
+                # Match on the caption, not the title. TikTok's content list prints the
+                # text that was actually written into the post -- record.description via
+                # replace_caption -- while record.title is the YouTube headline, which
+                # shares almost no words with it. Verifying against the title reported
+                # "not verified" for three perfectly scheduled Reels on 2026-08-22 and
+                # would have kept doing so at random forever, since whether it passed
+                # depended on the two texts happening to share a word.
                 remote_ok, remote_msg = observer.verify_remote_scheduled_status(
-                    expected_title=record.title,
+                    expected_title=record.description or record.title,
                     expected_time_str=_sched_time
                 )
                 if not remote_ok:

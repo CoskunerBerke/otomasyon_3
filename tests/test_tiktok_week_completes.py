@@ -87,3 +87,109 @@ def test_login_lands_on_the_page_the_publisher_drives():
         "the login helper must open the publisher's own TikTok upload URL"
     )
     assert PublishingConfig().tiktok_url.startswith("https://www.tiktok.com/")
+
+
+# --------------------------------------------------------------------------
+# The upload area is built after the page loads
+# --------------------------------------------------------------------------
+
+class _Loc:
+    def __init__(self, present):
+        self.present = present
+        self.files = None
+
+    @property
+    def first(self):
+        return self
+
+    def count(self):
+        return 1 if self.present else 0
+
+    def set_input_files(self, path):
+        self.files = path
+
+    def is_visible(self, timeout=None):
+        return False
+
+    def is_enabled(self):
+        return False
+
+
+class SlowUploadPage:
+    """The file input mounts only after `mounts_after` passes over the selectors."""
+
+    def __init__(self, mounts_after):
+        self.mounts_after = mounts_after
+        self.looks = 0
+
+    def locator(self, selector):
+        if "input[type='file']" in selector:
+            self.looks += 1
+            return _Loc(self.looks > self.mounts_after)
+        return _Loc(False)
+
+
+def _tiktok_observer(page):
+    from automation.publishing.tiktok_ui_observer import TikTokUIObserver
+
+    obs = TikTokUIObserver.__new__(TikTokUIObserver)
+    obs.page = page
+    obs.dismiss_unsaved_draft_banner_if_present = lambda *a, **k: (True, "NO_BANNER")
+    return obs
+
+
+def test_the_upload_area_is_waited_for_not_read_once(monkeypatch, tmp_path):
+    """
+    Eleven Reels were already scheduled when the twelfth reported "file input not found"
+    and stopped the week. The control was not absent -- the page had not built it yet.
+    """
+    import time as _time
+    from automation.publishing import tiktok_ui_observer as mod
+
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"0" * 16)
+
+    page = SlowUploadPage(mounts_after=8)
+    assert _tiktok_observer(page).upload_file(video) is True
+
+
+def test_a_genuinely_missing_upload_area_still_fails(monkeypatch, tmp_path):
+    """Patience must not become an infinite wait that hides a real breakage."""
+    from automation.publishing import tiktok_ui_observer as mod
+
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(mod, "FILE_INPUT_WAIT_SECONDS", 0.0)
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"0" * 16)
+
+    assert _tiktok_observer(SlowUploadPage(mounts_after=10**9)).upload_file(video) is False
+
+
+def test_the_upload_wait_is_generous_enough():
+    from automation.publishing.tiktok_ui_observer import FILE_INPUT_WAIT_SECONDS
+
+    assert FILE_INPUT_WAIT_SECONDS >= 15
+
+
+# --------------------------------------------------------------------------
+# Verification reads what TikTok actually displays
+# --------------------------------------------------------------------------
+
+def test_schedule_verification_matches_the_caption_not_the_title():
+    """
+    TikTok's content list prints the caption that was written into the post. The title is
+    the YouTube headline and shares almost no words with it, so verifying against it
+    reported "not verified" for three correctly scheduled Reels on 2026-08-22 -- and
+    passed for the other eleven only because their two texts happened to share a word.
+    """
+    src = (REPO / "automation" / "publishing" / "tiktok_publisher.py").read_text(encoding="utf-8")
+    assert "expected_title=record.description or record.title" in src, (
+        "verification must match the text TikTok shows, which is the caption"
+    )
+
+
+def test_the_caption_verified_against_is_the_caption_written():
+    """The written text and the verified text must come from the same field."""
+    src = (REPO / "automation" / "publishing" / "tiktok_publisher.py").read_text(encoding="utf-8")
+    assert "observer.replace_caption(record.description, record.hashtags)" in src
