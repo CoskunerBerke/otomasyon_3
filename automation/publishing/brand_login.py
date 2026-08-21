@@ -19,6 +19,7 @@ from typing import List, Tuple
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
 from automation.brands import Brand, BRANDS, get_brand
+from automation.publishing.config import PublishingConfig
 from automation.publishing.instagram_web_browser import InstagramWebBrowserManager
 from automation.publishing.tiktok_browser import TikTokBrowserManager
 from automation.publishing.youtube_studio_browser import YouTubeStudioBrowserManager
@@ -44,7 +45,13 @@ def _open(brand: Brand, platform: str) -> Tuple[bool, str]:
             )
             if mgr.is_cdp_available():
                 return True, f"zaten acik (port {brand.tiktok_port})"
-            mgr.launch_chrome_for_tiktok()
+            # Open the very page the publisher drives, not TikTok's other upload URL.
+            # A brand-new account shows its one-time tour over the caption editor, and
+            # that tour is what blocked craftsbyman on 2026-08-21. It appears once and
+            # never again, so it cannot be captured or retried -- the only reliable way
+            # past it is for a human to meet it here, on this exact page, before the
+            # automation ever sees it.
+            mgr.launch_chrome_for_tiktok(start_url=PublishingConfig().tiktok_url)
             return True, f"acildi (port {brand.tiktok_port}) -> {brand.tiktok_username}"
 
         mgr = InstagramWebBrowserManager(

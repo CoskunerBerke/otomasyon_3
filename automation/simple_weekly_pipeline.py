@@ -83,6 +83,13 @@ from automation.orchestration.obsidian_mirror import ObsidianControlCenter, DEFA
 
 PLATFORM_SUCCESS_STATUSES = ("SCHEDULED", "PUBLISHED", "REMOTE_VERIFIED")
 
+# Remote ids that identify a platform's state rather than one particular video.
+# TikTok's scheduler hands back no per-post id, so the publisher records a fixed marker
+# instead; every Reel of the week carries the same one BY DESIGN. Reading that as a
+# collision would stop TikTok on its second Reel every single week, with a
+# REEL_ID_MEDIA_MISMATCH naming two Reels that are both perfectly scheduled.
+NON_IDENTIFYING_REMOTE_IDS = frozenset({"tiktok_scheduled_post"})
+
 # How Instagram gets its Reels. Exactly one of these runs per Reel -- running both would
 # schedule the post through the composer AND hand the same media to the cloud worker,
 # which publishes it again when its moment arrives. Two copies of every Reel.
@@ -892,7 +899,7 @@ class SimpleWeeklyPipeline:
             # success path left the soft-failure write below unprotected, and on
             # 2026-08-22 that path recorded one deleted video's id onto all seven Reels
             # a second time -- the very collision this guard exists to stop.
-            if res_rec.remote_id:
+            if res_rec.remote_id and res_rec.remote_id not in NON_IDENTIFYING_REMOTE_IDS:
                 clash = self._reel_already_using_remote_id(
                     manifest, platform, res_rec.remote_id, reel.reel_id
                 )

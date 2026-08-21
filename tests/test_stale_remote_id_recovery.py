@@ -246,7 +246,7 @@ def test_a_shared_remote_id_is_refused_on_the_soft_failure_path():
     before_guard = src.split("_reel_already_using_remote_id")[0]
     condition = "\n".join(before_guard.rstrip().splitlines()[-6:])
 
-    assert "if res_rec.remote_id:" in condition, (
+    assert "if res_rec.remote_id" in condition, (
         "the collision guard must cover every returned id, not just successful ones"
     )
     assert "PLATFORM_SUCCESS_STATUSES" not in condition, (
