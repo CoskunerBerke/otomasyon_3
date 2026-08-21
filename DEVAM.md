@@ -1,64 +1,74 @@
-# Devam — Reels AI Factory (21 Ağustos 2026 akşamı)
+# Devam — Reels AI Factory (22 Ağustos 2026)
 
 Bu dosyayı yeni sohbete yapıştır. Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
 Branch: `hidden-build-second-channel` (PR yok). Türkçe cevap ver, detaylı rapor ver.
 
 ## Sistem
 
-İki kanal, aynı pipeline. Tek komut: ilgili `.bat`.
+İki kanal, aynı pipeline. Klasörde ne nerede: `README.md` bölüm 0.
 
 | Marka | Kanal | Mod | Platform | Durum |
 |---|---|---|---|---|
-| `buildverse` | @BuiIdVerse | `narrative_ambient_story` | YT+TT+IG | Çalışıyor, W35 (24–30 Ağu) 14/14 tamam |
-| `craftsbyman` | @craftsbyman | `hidden_build_story` | YT+TT (IG kapalı) | **Sorunlu, aşağıya bak** |
+| `buildverse` | @BuiIdVerse | `narrative_ambient_story` | YT+TT+IG | W35 (24–30 Ağu) 14/14 tamam |
+| `craftsbyman` | @craftsbyman | `hidden_build_story` | YT+TT (IG kapalı) | YT 14/14 · TT 11/14 |
 
 Marka ayrımı `automation/brands.py`: önek (`CBM-`), ayrı Chrome portları (YT 9234/TT 9233),
 ayrı hesap kimliği. Varsayılan marka eski davranışın birebir aynısı.
 
-`.bat` dosyaları: `HAFTALIK_14_REEL_URET_VE_PLANLA.bat` (1. kanal),
-`HAFTALIK_14_REEL_CRAFTSBYMAN.bat` (2. kanal), `CRAFTSBYMAN_KANAL_GIRISI.bat` (giriş).
+## Nerede kalındı: CBM-2026-W34 (22–28 Ağustos)
 
-## Acil durum: craftsbyman
+14 video da diskte, üretim gerekmiyor. Manifest `LOCKED`.
 
-Batch `workspace/batches/CBM-2026-W34`, slotlar 22–28 Ağu 19:30 & 22:00.
-**14 videonun hepsi diskte** (`workspace/downloads/clean_clean_CBM-REEL-*.mp4`) — üretim gerekmez.
+- **YouTube 14/14 tamam** — 14 benzersiz remote ID, çakışma yok.
+- **TikTok 11/14** — 0001–0011 planlandı ve tarihleri doğru. **0012, 0013, 0014 eksik.**
+  Kaldığı yerden devam etmek için: `CRAFTSBYMAN_SADECE_TIKTOK.bat`.
+  Durduran hata (`file input not found`) düzeltildi; planlı Reel'ler atlanır.
+- **Instagram** bu marka için kapalı. Açmak: `brands.py` içinde `platforms` tuple'ına
+  `"instagram"` ekle — geçmiş haftalar otomatik "eksik" okunur ve sadece IG'de tamamlanır.
 
-- **CBM-REEL-0001…0007** → `PENDING`. Kanaldan silindiler, 22–25 Ağu slotlarına yüklenmeleri lazım.
-- **CBM-REEL-0008…0014** → `SCHEDULED`, kanalda duruyorlar. 0009–0014 tarihleri doğru (26/27/28 Ağu).
-- **CBM-REEL-0008** (container→sinema) kanalda **21 Ağu**'da, slotu 25 Ağu 22:00'ydi. Operatörün kararı.
+### Elle müdahale gereken iki şey (sistem uzak içerik silemez)
 
-İlk iş: `.bat` ile eksik 7'yi yükle. Kanaldaki 7'ye dokunmaz (SCHEDULED = atlanır).
-**İlk 2–3 Reel'i canlıda gözle izle.**
+1. **Tram videosu YouTube'da iki kez var.** Biri 21 Ağu'da yayınlandı (elle temizlikten
+   kurtulmuş bir kopya), aslı 27 Ağu 19:30'da tekrar çıkacak. Karar senin:
+   27 Ağu'dakini silersen tekrar olmaz ama o slot boş kalır.
+2. **25 Ağu 22:00 YouTube'da boş** — CBM-REEL-0008 oraya gidecekti, 21 Ağu'da çıktı.
 
-## Bugün ne patladı (tekrarlamasın)
+## Bu turda düzeltilenler
 
-14 planlanan Reel kanalda **28 videoya** dönüştü. İki kusur:
+`f13e149` · `d43fda4` · `b65a214` · `907a539` — hepsi push edildi.
 
-1. `_build_publish_record` kaydı hep `PENDING` kuruyor, `upload_started`ı sadece `remote_id`den
-   türetiyordu → ID'si okunamayan 7 Reel "hiç yüklenmemiş" görünüp 30 dk'lık hold'un iki turunda
-   baştan yüklendi (14+7+7=28).
-2. 0001–0007 aynı `VTMhhYTl9Co` ID'sini paylaşıyordu; ID yakalama bayat tarayıcı URL'ine düşüyor.
+- Silinmiş bir videoya kilitlenen `remote_id` (7 Reel'i dört gün boş bıraktı).
+  `open_exact_remote_video` artık hata sayfasını video sanmıyor.
+- Çakışma koruması artık her dönen ID'yi kapsıyor; TikTok'un sabit işareti muaf
+  (yoksa TikTok her hafta ikinci Reel'de dururdu).
+- `upload_file` sayfanın kurulmasını bekliyor (12. Reel'de duran hata).
+- TikTok doğrulaması artık caption'a bakıyor, başlığa değil.
+- Yeni hafta bugün başlayabiliyor — günün slotları hâlâ önümüzdeyse gün çöpe gitmiyor.
+- `--dry-run` gerçek yayın kaydı taşıyan bir haftaya artık **reddediliyor**.
+- İki state deposu çeliştiğinde artık çıktıda görünüyor (`STATE_DIVERGENCE`).
 
-İkisi de düzeltildi (commit `9708be0`, `tests/test_no_duplicate_uploads.py`). Operatör 14 kopyayı
-elle sildi — bu sistem uzak içerik silemez.
+## Asıl hedef: satılabilir hale getirmek
 
-## Asıl iş: kök neden
+Operatörün amacı bu otomasyonu hem başkalarına satmak hem kendi yeni kanallarında
+farklı senaryolarla çalıştırmak. Flow üretim tarafı sorunsuz; kırılganlık hep
+yükleme-planlama tarafında.
 
-Operatörün şikayeti: **"her .bat'a basınca hata."** Üç günde aynı kök neden dört kez çıktı —
-Flow'un yüklenmemiş sayfası, YouTube'un içerik kontrolü, TikTok'un tarih alanı, YouTube'un video
-ID'si. Hepsi aynı: **bir arayüzü bir kez, hemen okuyup "henüz hazır değil"i "yok" sanmak.**
-Beklemeler `tests/test_platform_patience.py` içinde sabitli.
+**Kök örüntü:** otomasyon olgun bir hesabın arayüzüne göre sertleştirilmiş. Yeni hesap
+ilk açılışta tanıtım turu / bilgilendirme kartları gösteriyor, bunlar bir kez çıkıp bir
+daha çıkmıyor — ne HTML'i alınabiliyor ne tekrar test edilebiliyor. Çözüm selector
+kovalamak değil: `CRAFTSBYMAN_KANAL_GIRISI.bat` artık yayıncının kullandığı sayfayı
+açıyor, insan turu bir kez elle geçiyor, otomasyon olgun bir hesap görüyor.
 
-Tek tek yama yerine sistematik bakılacak:
+**Kalan yapısal iş:** platform state'i iki yerde tutuluyor — `progress.json` ve
+`13_PUBLISHING/PUB-*.md`. İkincisi "mevcut kanıt her zaman kazanır" dediği için
+birincisinin temizliği tutmuyor. Şu an çelişki raporlanıyor ama tek kaynağa
+indirilmedi. Bir müşteride bu olursa kimse elle teşhis edemez.
 
-1. Eksik 7 Reel'i yükle (üretim yok).
-2. **TikTok'ta da kopya var mı kontrol et** — aynı retry mantığı orada da çalışıyor, hiç bakılmadı.
-3. Haftanın herhangi bir 7 günlük pencerede sağlam çalışması: yeni marka için başlangıç tarihi
-   ("yarın" yerine "üretim bitince en yakın slot") ve slot/atlama mantığı.
-4. `--phase youtube` gibi tek faz çalıştırmanın kopya üretmediğini doğrula.
-5. Instagram craftsbyman için kapalı (planlama tarafı çalışmıyor, hesap profesyonel olmayabilir).
-   Açmak: `brands.py` içinde `platforms` tuple'ına `"instagram"` ekle — geçmiş haftalar otomatik
-   "eksik" okunur ve sadece IG'de tamamlanır.
+## Disk
+
+`workspace/` 1.1 GB (segmentler 641 MB, downloads 385 MB) — CLAUDE.md bunları korumayı
+şart koşuyor, silme. `screenshots/` 138 MB / 251 dosya; 231'i 15–19 Ağu'dan, kapanmış
+olaylara ait — operatör onay verirse temizlenebilir.
 
 ## Kurallar (CLAUDE.md)
 
@@ -68,8 +78,3 @@ Tek tek yama yerine sistematik bakılacak:
 - Aynı anda tek pytest, onarım başına en fazla 2 çalıştırma.
 - Canlı çalıştırma (Flow/yayın) sadece açık talimatla.
 - Reel ID değişmezliği: slot = state = kayıt = dosya adı. Uyuşmazsa `REEL_ID_MEDIA_MISMATCH`.
-
-## İlk hamle
-
-`workspace/batches/CBM-2026-W34/progress.json` ve manifest'i oku, kanalın gerçek haliyle
-karşılaştır, sonra plan sun. Hiçbir şey çalıştırmadan önce durumu doğrula.

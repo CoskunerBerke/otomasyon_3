@@ -88,7 +88,7 @@ def run_telegram_preflight() -> Tuple[bool, str, List[str]]:
         print("=" * 60)
         for err in errors:
             print(f"- {err}")
-        print("\nKurulum için lütfen TELEGRAM_SETUP.md kılavuzunu inceleyin.")
+        print("\nKurulum için lütfen docs/TELEGRAM_SETUP.md kılavuzunu inceleyin.")
         print("=" * 60 + "\n")
         return False, "NEEDS_USER_TELEGRAM_SETUP", errors
 

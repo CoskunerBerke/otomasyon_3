@@ -4,6 +4,46 @@ Windows üzerinde çalışan, harici ücretli LLM API (OpenAI, Claude) veya CapC
 
 ---
 
+## 0. Klasörde Ne Nerede?
+
+Çift tıklayacağın her şey **kökte**. Alt klasörler koda ve verilere ait.
+
+### Tıkladığın dosyalar (kök)
+
+| Dosya | Ne yapar |
+|---|---|
+| `INSTALL_FIRST_TIME.bat` | Tek seferlik kurulum |
+| `HAFTALIK_14_REEL_URET_VE_PLANLA.bat` | **BuildVerse** (1. kanal) — haftalık 14 Reel, uçtan uca |
+| `HAFTALIK_14_REEL_CRAFTSBYMAN.bat` | **Crafts By Man** (2. kanal) — haftalık 14 Reel, uçtan uca |
+| `CRAFTSBYMAN_KANAL_GIRISI.bat` | 2. kanalın üç tarayıcısını giriş için açar |
+| `CRAFTSBYMAN_SADECE_YOUTUBE.bat` | 2. kanal — yalnızca YouTube'daki eksikleri tamamlar |
+| `CRAFTSBYMAN_SADECE_TIKTOK.bat` | 2. kanal — yalnızca TikTok'taki eksikleri tamamlar |
+| `FLOW_LOGIN.bat` | Google Flow oturumu |
+| `YOUTUBE_LOGIN.bat` · `YOUTUBE_STUDIO_LOGIN.bat` | 1. kanal YouTube oturumları |
+| `TIKTOK_LOGIN.bat` · `INSTAGRAM_LOGIN.bat` | 1. kanal TikTok / Instagram oturumları |
+| `BASLAT.bat` | Haftalık pipeline'ı elle argümanla çalıştırır |
+
+> Giriş `.bat`'ları kökte durmak zorunda: hata mesajları kullanıcıyı adlarıyla
+> buraya yönlendiriyor ve bir test `YOUTUBE_LOGIN.bat`'ın kökte olmasını şart koşuyor.
+
+### Klasörler
+
+| Klasör | İçindekiler |
+|---|---|
+| `automation/` | Bütün kaynak kod |
+| `tests/` | Test paketi |
+| `docs/` | Railway ve Telegram kurulum kılavuzları |
+| `_eski_batlar/` | Artık kullanılmayan eski `.bat` dosyaları |
+| `workspace/` | **Üretim verisi** — segmentler, final MP4'ler, haftalık state. Silme. |
+| `13_PUBLISHING/` | Yayın kayıtları (`PUB-*.md`) |
+| `screenshots/` · `logs/` | Hata görüntüleri ve çalışma logları |
+| `secrets/` · `.env` | Kimlik bilgileri — git'e girmez, paylaşılmaz |
+
+`CLAUDE.md` bu repoda geçerli kalıcı güvenlik kurallarını, `DEVAM.md` ise
+en son nerede kalındığını tutar.
+
+---
+
 ## 1. Sistem Ne Yapıyor?
 
 Masaüstündeki `.bat` dosyasına tıkladığınızda sistem otomatik olarak:
