@@ -7,7 +7,7 @@ echo ============================================================
 echo Target   : 14 Reels (7 Days x 2 Slots: 19:30 ^& 22:00)
 echo Start    : the day after this brand's last scheduled video
 echo Mode     : hidden_build_story (buried object + recurring craftsman)
-echo Upload   : YouTube + TikTok + Instagram (all three scheduled)
+echo Upload   : YouTube + TikTok  (Instagram su an KAPALI)
 echo Timezone : Europe/Istanbul
 echo ============================================================
 echo.

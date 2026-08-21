@@ -27,7 +27,7 @@ never collide or resume each other.
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import os
 
 from automation.content.content_modes import (
@@ -76,6 +76,16 @@ class Brand:
     # Instagram delivery is per-brand: the first channel was handed to the cloud worker
     # before the composer route existed.
     instagram_delivery: str = "web"
+
+    # Which platforms this brand publishes to. A platform left out is skipped entirely --
+    # not failed, not retried, not counted against the week -- while generation continues
+    # as normal, so the videos are on disk and ready the moment it is switched back on.
+    # Re-enabling one makes every past week read as unfinished again, which is exactly
+    # right: the next run picks up only the missing platform and leaves the rest alone.
+    platforms: Tuple[str, ...] = ("youtube", "tiktok", "instagram")
+
+    def publishes_to(self, platform: str) -> bool:
+        return platform in self.platforms
 
     @property
     def youtube_profile_dir(self) -> Path:
@@ -200,6 +210,10 @@ CRAFTSBYMAN = Brand(
     instagram_port=9235,
     profile_suffix="-craftsbyman",
     instagram_delivery="web",
+    # Instagram is off for this channel while its scheduling side is unusable
+    # (2026-08-21). Generation is unaffected: the 14 finished videos sit in the workspace,
+    # and putting "instagram" back in this tuple is the whole of what re-enabling takes.
+    platforms=("youtube", "tiktok"),
 )
 
 BRANDS: Dict[str, Brand] = {b.brand_id: b for b in (BUILDVERSE, CRAFTSBYMAN)}

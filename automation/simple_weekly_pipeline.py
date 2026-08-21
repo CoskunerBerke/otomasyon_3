@@ -256,13 +256,20 @@ class SimpleWeeklyPipeline:
         return allocated
 
     def _is_batch_finished(self, manifest: BatchManifest) -> bool:
-        """A batch is done only when it is LOCKED and all three platforms are complete."""
+        """
+        A batch is done when it is LOCKED and every platform this brand publishes to is
+        complete.
+
+        Only this brand's platforms count. A platform that is switched off is not a gap to
+        be filled later by this check -- but switching it back on makes past weeks read as
+        unfinished again, so the next run completes them on that platform alone.
+        """
         if manifest.status != "LOCKED" or not self.all_generated(manifest):
             return False
         reel_ids = manifest.reel_ids()
         return all(
             self.all_platform_done(manifest.week_id, reel_ids, p)
-            for p in ("youtube", "tiktok", "instagram")
+            for p in self.brand.platforms
         )
 
     def _find_unfinished_week_id(self) -> Optional[str]:
@@ -1045,6 +1052,14 @@ class SimpleWeeklyPipeline:
             }.get(phase)
             if handler is None:
                 raise ValueError(f"Unknown --phase '{phase}'")
+            if phase in ("youtube", "tiktok", "instagram") and not self.brand.publishes_to(phase):
+                # Refused rather than run: opening a browser for an account this brand
+                # deliberately does not use is how a video reaches the wrong channel.
+                raise ValueError(
+                    f"PLATFORM_DISABLED_FOR_BRAND: '{self.brand.brand_id}' markasi "
+                    f"'{phase}' platformuna yayin yapmiyor. Acmak icin automation/brands.py "
+                    f"icinde bu markanin 'platforms' listesine ekleyin."
+                )
             result = handler(manifest)
             results.append(result)
             self._sync_obsidian(manifest)
@@ -1082,6 +1097,12 @@ class SimpleWeeklyPipeline:
             ("tiktok", self._run_tiktok_phase),
             ("instagram", self._run_instagram_phase),
         ):
+            if not self.brand.publishes_to(platform):
+                # Switched off for this brand. Skipped outright rather than run and
+                # failed, so it costs no time, records no failure and holds nothing.
+                logger.info(f"[{platform.upper()}] '{self.brand.brand_id}' bu platforma yayin yapmiyor -- atlaniyor.")
+                continue
+
             if self.all_platform_done(manifest.week_id, reel_ids, platform):
                 continue
 
@@ -1270,7 +1291,7 @@ class SimpleWeeklyPipeline:
             )
 
         p("=" * 60)
-        p(f"REELS AI FACTORY -- {manifest.week_id}")
+        p(f"REELS AI FACTORY -- {self.brand.display_name} -- {manifest.week_id}")
         p("=" * 60)
         p(f"Uretim    : {gen_complete}/{total}" + ("  [OK]" if gen_complete == total else ""))
         p(f"Manifest  : {manifest.status}")
@@ -1279,6 +1300,12 @@ class SimpleWeeklyPipeline:
         for label, key in (("YouTube  ", "youtube"), ("TikTok   ", "tiktok"), ("Instagram", "instagram")):
             n = _done(key)
             platform_counts[key] = n
+            if not self.brand.publishes_to(key):
+                # Named rather than hidden: "0/14" beside the others reads as a failure,
+                # and silence would leave nobody aware the platform is waiting to be
+                # switched back on.
+                p(f"{label} : KAPALI (bu marka su an bu platforma yayin yapmiyor)")
+                continue
             p(f"{label} : {n}/{total}" + ("  [OK]" if n == total else ""))
         p()
 

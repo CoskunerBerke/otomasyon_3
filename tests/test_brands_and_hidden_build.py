@@ -354,3 +354,91 @@ def test_the_other_two_modes_still_produce_their_own_plans():
 
     assert all(p.content_mode == NARRATIVE_AMBIENT_STORY for p in story)
     assert all(p.content_mode == SILENT_STEP_BY_STEP for p in silent)
+
+
+# ---------------------------------------------------------------- switched-off platforms
+
+def test_the_original_channel_still_publishes_everywhere():
+    assert BUILDVERSE.platforms == ("youtube", "tiktok", "instagram")
+    assert BUILDVERSE.publishes_to("instagram")
+
+
+def test_the_second_channel_has_instagram_switched_off():
+    """Instagram's scheduling side was unusable for this account on 2026-08-21."""
+    assert CRAFTSBYMAN.platforms == ("youtube", "tiktok")
+    assert not CRAFTSBYMAN.publishes_to("instagram")
+    assert CRAFTSBYMAN.publishes_to("youtube")
+    assert CRAFTSBYMAN.publishes_to("tiktok")
+
+
+def _locked_week_for(pipe, tmp_path, week_id, n=2):
+    import datetime
+    from automation.orchestration.batch_manifest import BatchManifest, BatchReel
+
+    base = datetime.date.today() + datetime.timedelta(days=5)
+    reels = []
+    for i in range(n):
+        v = tmp_path / f"v{i}.mp4"
+        v.write_bytes(b"v" * 32)
+        reels.append(BatchReel(
+            index=i + 1, reel_id=pipe.brand.reel_id(i + 1),
+            scheduled_at_local=f"{base.isoformat()} 19:30:00",
+            scheduled_at_utc=f"{base.isoformat()} 16:30:00",
+            video_path=str(v), generation_status="COMPLETE",
+        ))
+    manifest = BatchManifest(week_id=week_id, start_date=base.isoformat(),
+                             status="LOCKED", reels=reels)
+    pipe.batch_repo.save_manifest(manifest)
+    pipe.batch_repo.ensure_progress_entries(week_id, [r.reel_id for r in reels])
+    return manifest
+
+
+def test_a_week_is_finished_without_the_switched_off_platform(tmp_path):
+    """Otherwise the run would hold forever waiting for a platform nobody is publishing to."""
+    pipe = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
+                                dry_run=True, brand=get_brand("craftsbyman"))
+    manifest = _locked_week_for(pipe, tmp_path, "CBM-2026-W40")
+
+    progress = pipe.batch_repo.load_progress(manifest.week_id)
+    for reel in manifest.reels:
+        progress[reel.reel_id]["youtube"]["status"] = "SCHEDULED"
+        progress[reel.reel_id]["tiktok"]["status"] = "SCHEDULED"
+    pipe.batch_repo.save_progress(manifest.week_id, progress)
+
+    assert pipe._is_batch_finished(manifest), "YouTube + TikTok done should finish this week"
+    assert pipe._find_unfinished_week_id() is None
+
+
+def test_the_same_week_is_unfinished_once_instagram_is_switched_back_on(tmp_path):
+    """
+    Re-enabling a platform must reopen past weeks so the next run completes them there --
+    and only there, since the others are already done and get skipped.
+    """
+    import dataclasses
+
+    pipe = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
+                                dry_run=True, brand=get_brand("craftsbyman"))
+    manifest = _locked_week_for(pipe, tmp_path, "CBM-2026-W40")
+    progress = pipe.batch_repo.load_progress(manifest.week_id)
+    for reel in manifest.reels:
+        progress[reel.reel_id]["youtube"]["status"] = "SCHEDULED"
+        progress[reel.reel_id]["tiktok"]["status"] = "SCHEDULED"
+    pipe.batch_repo.save_progress(manifest.week_id, progress)
+
+    reopened = dataclasses.replace(
+        get_brand("craftsbyman"), platforms=("youtube", "tiktok", "instagram")
+    )
+    later = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
+                                 dry_run=True, brand=reopened)
+    assert not later._is_batch_finished(manifest)
+    assert later._find_unfinished_week_id() == manifest.week_id
+
+
+def test_a_disabled_platform_cannot_be_run_by_hand(tmp_path):
+    """Opening a browser for an account this brand does not use is how a video misfires."""
+    pipe = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
+                                dry_run=True, brand=get_brand("craftsbyman"))
+    _locked_week_for(pipe, tmp_path, "CBM-2026-W40")
+
+    with pytest.raises(ValueError, match="PLATFORM_DISABLED_FOR_BRAND"):
+        pipe.run(phase="instagram")
