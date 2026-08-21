@@ -47,6 +47,30 @@ ayrı hesap kimliği. Varsayılan marka eski davranışın birebir aynısı.
 - `--dry-run` gerçek yayın kaydı taşıyan bir haftaya artık **reddediliyor**.
 - İki state deposu çeliştiğinde artık çıktıda görünüyor (`STATE_DIVERGENCE`).
 
+## Uçtan uca denetim (22 Ağustos gecesi)
+
+Yayın yolunun tamamı tarandı: kritik yoldaki her fonksiyon "yokluk kararını sabırla mı
+veriyor" diye denetlendi. Bulunan 6 kusur düzeltildi (`97abca8`).
+
+**En ağır ikisi yanlış kanala yayın riskiydi.** Her iki hesap koruması da okunamayınca
+`"assumed active"` deyip True dönüyordu, ve ikisinde de kanal 1'in adı (`buildverse` /
+`kitchenverse`) hangi marka çalışırsa çalışsın kabul ediliyordu. Bu fallback tembellik
+değildi: kanal 1'in handle'ı `@BuiIdVerse` — büyük İ ile — görünen adı ise "BuildVerse".
+Karakter katlamasıyla çözüldü (ikisi de `bu11dverse`, `craftsbyman` kendine).
+YouTube artık okuyamazsa reddediyor; TikTok reddetmiyor (Kural 31: göremediğimiz DOM'u
+tahmin etmiyoruz) ama artık "doğrulandı" da demiyor.
+
+Diğer dördü: `upload_file` tek bakışta "yok" diyordu (TikTok'u 12. Reel'de durduran
+hatanın aynısı, YouTube'da da vardı); `fill_details` başlık yazılamasa bile True dönüyordu
+(Reel dosya adıyla yayınlanırdı); `is_editor_open_for_reel` `"oasis"` kelimesini
+eşleştiriyordu (bir Reel'in başlığını başka bir videoya yapıştırabilirdi);
+`wait_for_upload_completion` timeout'ta da başarı bildiriyordu.
+
+**Test paketi zaten kırmızıydı** — 7 hata. Hepsi bilinçli değişikliklerden kalmış bayat
+iddialar; asıl niyetleri korunarak güncellendi. Biri ise sadece test sırasına bağlıydı:
+`CloudConfig` reponun `.env`'ini `os.environ`'a kalıcı yazıyor, dolayısıyla ilk kim
+`CloudConfig` kurarsa "güvenli varsayılan"ı o belirliyor. **Paket artık 675/675 yeşil.**
+
 ## Asıl hedef: satılabilir hale getirmek
 
 Operatörün amacı bu otomasyonu hem başkalarına satmak hem kendi yeni kanallarında
