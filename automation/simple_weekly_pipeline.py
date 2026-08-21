@@ -119,6 +119,23 @@ SOFT_FAILURE_STATUSES = ("SCHEDULE_RESUME_REQUIRED", "UPLOADED_DRAFT", "REVIEW_R
 # every remaining Reel, so this stops the current platform.
 HARD_FAILURE_STATUSES = ("ACCOUNT_MISMATCH", "AUTH_REQUIRED", "NEEDS_USER_HTML")
 
+# Statuses that prove a file already went up, whether or not its remote id was ever read.
+# A rebuilt PublishRecord must carry this, because the publisher decides between "resume
+# the existing draft" and "upload from scratch" on exactly that evidence.
+#
+# 2026-08-21: it did not. _build_publish_record hardcoded PENDING and derived
+# upload_started from remote_id alone, so seven Reels whose id capture failed looked
+# untouched on retry and were uploaded again -- twice, once per pass of the 30-minute
+# hold. Fourteen planned Reels became twenty-eight videos on a live channel.
+UPLOAD_ALREADY_ATTEMPTED_STATUSES = (
+    "UPLOAD_ATTEMPTED",
+    "UPLOADED_DRAFT",
+    "SCHEDULE_RESUME_REQUIRED",
+    "SCHEDULING_UNAVAILABLE",
+    "REVIEW_REQUIRED",
+    "SUBMITTED_UNVERIFIED",
+) + PLATFORM_SUCCESS_STATUSES
+
 
 class PhaseResult:
     """Outcome of running one phase. `success=True` means the phase is fully (14/14) done."""
@@ -743,7 +760,31 @@ class SimpleWeeklyPipeline:
                 return False
         return True
 
+    def _reel_already_using_remote_id(
+        self, manifest: BatchManifest, platform: str, remote_id: str, this_reel_id: str
+    ) -> Optional[str]:
+        """The other Reel of this week already recorded against `remote_id`, if any."""
+        progress = self.batch_repo.load_progress(manifest.week_id)
+        for reel in manifest.reels:
+            if reel.reel_id == this_reel_id:
+                continue
+            if progress.get(reel.reel_id, {}).get(platform, {}).get("remote_id") == remote_id:
+                return reel.reel_id
+        return None
+
     def _build_publish_record(self, reel: BatchReel, platform: Platform, progress_entry: Dict[str, Any]) -> PublishRecord:
+        recorded = str(progress_entry.get("status") or "")
+        upload_attempted = bool(progress_entry.get("remote_id")) or recorded in UPLOAD_ALREADY_ATTEMPTED_STATUSES
+        try:
+            recorded_status = PlatformPublicationStatus(recorded) if recorded else PlatformPublicationStatus.PENDING
+        except ValueError:
+            # An unrecognised status is still evidence of an attempt if it says so above;
+            # what it must never do is read as PENDING and invite a fresh upload silently.
+            recorded_status = (
+                PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED if upload_attempted
+                else PlatformPublicationStatus.PENDING
+            )
+
         video_file = Path(reel.video_path)
         file_sha = reel.video_sha256 or hashlib.sha256(video_file.read_bytes()).hexdigest()
         account_handle = self.pub_config.youtube_expected_handle if platform == Platform.YOUTUBE else self.pub_config.tiktok_expected_username
@@ -764,14 +805,16 @@ class SimpleWeeklyPipeline:
             scheduled_at_local=reel.scheduled_at_local,
             scheduled_at_utc=reel.scheduled_at_utc,
             timezone="Europe/Istanbul",
-            status=PlatformPublicationStatus.PENDING,
+            status=recorded_status,
             dry_run=self.dry_run,
             ai_generated=True,
             synthetic_media_disclosed=True,
             remote_id=progress_entry.get("remote_id"),
             remote_url=progress_entry.get("url"),
-            upload_started=bool(progress_entry.get("remote_id")),
-            remote_draft_exists=bool(progress_entry.get("remote_id")),
+            # An upload that happened is evidence even when its id was never read.
+            # Deriving this from remote_id alone is what re-uploaded seven Reels.
+            upload_started=upload_attempted,
+            remote_draft_exists=upload_attempted,
         )
 
     def _run_platform_phase(self, manifest: BatchManifest, platform: str) -> PhaseResult:
@@ -821,6 +864,16 @@ class SimpleWeeklyPipeline:
                 return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {gate_reason}", {"failed_reel": reel.reel_id, "reason": gate_reason, "hard_stop": True})
 
             logger.info(f"[{platform.upper()}] {reel.reel_id} sıraya alındı ({reel.index}/14)...")
+
+            # Record the attempt BEFORE making it. If the process dies mid-upload, or the
+            # id is never read, the next run must still know this file already went up --
+            # otherwise it uploads it again.
+            if not already_success and not self.dry_run:
+                self.batch_repo.update_platform_status(
+                    manifest.week_id, reel.reel_id, platform, "UPLOAD_ATTEMPTED",
+                    error="Gonderim baslatildi; sonuc henuz yazilmadi.",
+                )
+
             try:
                 res_rec = publisher.upload_and_schedule(rec)
             except Exception as e:
@@ -829,6 +882,34 @@ class SimpleWeeklyPipeline:
                 return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {e}", {"failed_reel": reel.reel_id, "hard_stop": True})
 
             status_val = str(res_rec.status.value if hasattr(res_rec.status, "value") else res_rec.status)
+
+            # A remote id already claimed by a different Reel of this week means the
+            # publisher read a stale page: on 2026-08-21 seven Reels all came back with
+            # one id, because capture fell through to a browser URL still showing the
+            # previous video. Recording it would tie this Reel's state to another Reel's
+            # video, which CLAUDE.md's Reel ID invariant exists to prevent.
+            if status_val in PLATFORM_SUCCESS_STATUSES and res_rec.remote_id:
+                clash = self._reel_already_using_remote_id(
+                    manifest, platform, res_rec.remote_id, reel.reel_id
+                )
+                if clash:
+                    self.batch_repo.update_platform_status(
+                        manifest.week_id, reel.reel_id, platform, "FAILED_FATAL",
+                        error=(
+                            f"REEL_ID_MEDIA_MISMATCH: {res_rec.remote_id} zaten {clash} "
+                            f"Reel'ine ait. Bayat sayfadan okunmus olabilir; kaydedilmedi."
+                        ),
+                    )
+                    logger.error(
+                        f"[{platform.upper()}] {reel.reel_id}: {res_rec.remote_id} zaten "
+                        f"{clash} tarafindan kullaniliyor -- REEL_ID_MEDIA_MISMATCH."
+                    )
+                    return PhaseResult(
+                        False, platform.upper(),
+                        f"{reel.reel_id}: REEL_ID_MEDIA_MISMATCH ({res_rec.remote_id} = {clash})",
+                        {"failed_reel": reel.reel_id, "hard_stop": True},
+                    )
+
             if status_val in PLATFORM_SUCCESS_STATUSES:
                 self.batch_repo.update_platform_status(
                     manifest.week_id, reel.reel_id, platform, status_val,
