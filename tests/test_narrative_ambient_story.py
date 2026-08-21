@@ -15,6 +15,8 @@ Two properties matter most here and are covered in both directions:
 No real browser, no Flow, no platform calls -- fakes only.
 """
 import datetime
+
+from automation.orchestration.slot_generator import get_timezone
 import sys
 from pathlib import Path
 
@@ -439,7 +441,12 @@ def test_start_date_never_lands_in_the_past(tmp_path):
     _make_week(tmp_path, "2020-W10", datetime.date(2020, 3, 2), [_scheduled_everywhere()] * 14)
     pipe = _pipeline(tmp_path)
     resolved = pipe._resolve_start_date()
-    assert resolved > datetime.date.today()
+    # Today counts as long as today's slots are still ahead -- see _earliest_usable_start.
+    # What must never happen is a date already gone, which is what this test is named for.
+    assert resolved >= datetime.date.today()
+    assert resolved == pipe._earliest_usable_start(
+        datetime.datetime.now(get_timezone("Europe/Istanbul"))
+    )
 
 
 def test_explicit_start_date_wins(tmp_path):
@@ -449,9 +456,14 @@ def test_explicit_start_date_wins(tmp_path):
 
 
 def test_first_ever_run_falls_back_to_the_calendar(tmp_path):
+    """A brand with no history starts as soon as it can, never in the past."""
     pipe = _pipeline(tmp_path)
     assert pipe.find_last_scheduled_date() is None
-    assert pipe._resolve_start_date() > datetime.date.today()
+    resolved = pipe._resolve_start_date()
+    assert resolved >= datetime.date.today()
+    assert resolved <= datetime.date.today() + datetime.timedelta(days=1), (
+        "a fresh brand must not wait for a calendar Monday"
+    )
 
 
 def test_new_week_starts_where_the_last_one_ended(tmp_path):

@@ -288,7 +288,17 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                         logger.debug(f"Video ID capture error: {e}")
 
                     # Fill Details (Title, Description, Hashtags)
-                    observer.fill_details(record.title, record.description, record.hashtags)
+                    # Checked, because an unwritten title is not a cosmetic failure: the
+                    # Reel would go live under YouTube's default, which is the source
+                    # filename. Marked as resume-required rather than failed outright --
+                    # the video is already uploaded and must not be sent again.
+                    if not observer.fill_details(record.title, record.description, record.hashtags):
+                        record.mark_failed(
+                            "YouTube basligi yazilamadi veya dogrulanamadi; Reel dosya adiyla "
+                            "yayinlanmasin diye durduruldu.",
+                            status=PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
+                        )
+                        return record
                     time.sleep(1.0)
 
                 # 5. WIZARD STATE MACHINE: Advance through all steps to VISIBILITY

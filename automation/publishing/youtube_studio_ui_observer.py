@@ -65,6 +65,64 @@ VIDEO_ID_WAIT_SECONDS = 20.0
 # put a second copy on the channel.
 VIDEO_EDIT_PAGE_WAIT_SECONDS = 25.0
 
+# How long the channel header is given to appear before the account guard gives up.
+# This guard is the last thing standing between a run and the wrong channel's audience,
+# so it waits properly and then refuses -- it never assumes.
+CHANNEL_IDENTITY_WAIT_SECONDS = 12.0
+
+# Channel names and handles disagree on characters that look identical. The first
+# channel's handle is "@BuiIdVerse" -- a capital i where the display name "BuildVerse"
+# has a lowercase L -- so a literal comparison of the two fails. That is why the guard
+# used to fall back on the first channel's bare name, and why that workaround was so
+# dangerous: a literal accepted for EVERY brand turned the first channel into a skeleton
+# key for the second.
+#
+# Folding the confusable characters instead keeps the comparison brand-specific.
+# "buiidverse" and "buildverse" both fold to "bu11dverse"; "craftsbyman" folds to itself
+# and still matches neither.
+_CONFUSABLE_CHARS = str.maketrans({
+    "i": "1", "l": "1", "I": "1", "|": "1",
+    "o": "0", "O": "0",
+    "_": "", "-": "", ".": "", " ": "",
+})
+
+
+def normalize_account_identity(value: str) -> str:
+    """Lowercase, strip '@', and fold visually identical characters."""
+    return (value or "").strip().lstrip("@").lower().translate(_CONFUSABLE_CHARS)
+
+# A detected name shorter than this is not evidence of anything: two or three characters
+# are "inside" almost any handle, so accepting them would hand back the fail-open this
+# guard exists to remove.
+MIN_IDENTITY_MATCH_CHARS = 5
+
+
+def account_identities_match(expected: str, detected: str) -> bool:
+    """
+    Whether `detected` names the same account as `expected`.
+
+    Containment both ways, because a page may show "BuildVerse Official" where the handle
+    is "@BuiIdVerse", or a bare "@craftsbyman" where the expectation carries a suffix --
+    but only when the detected text is long enough to mean something.
+    """
+    exp = normalize_account_identity(expected)
+    det = normalize_account_identity(detected)
+    if not exp or not det:
+        return False
+    if exp in det:
+        return True
+    return len(det) >= MIN_IDENTITY_MATCH_CHARS and det in exp
+
+
+
+# How long the upload dialog is given to build its file input. The same single-pass read
+# stopped TikTok's week at its twelfth Reel on 2026-08-22; YouTube carried the identical
+# shape and had simply not been unlucky yet.
+FILE_INPUT_WAIT_SECONDS = 20.0
+
+# How long the details step is given to mount its title field.
+TITLE_INPUT_WAIT_SECONDS = 15.0
+
 
 class YouTubeStudioUIObserver:
     """Interacts with visible DOM elements of YouTube Studio Web UI."""
@@ -120,33 +178,52 @@ class YouTubeStudioUIObserver:
         """
         Verify that the currently opened YouTube Studio channel matches expected_handle / channel_id.
         """
-        exp_handle_norm = expected_handle.strip().lstrip("@").lower()
-        detected_text = ""
-
-        for sel in YouTubeStudioSelectors.CHANNEL_HEADER_SELECTORS:
-            try:
-                loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1500):
-                    text = loc.inner_text().strip()
-                    if text:
-                        detected_text = text
-                        break
-            except Exception:
-                pass
-
+        # The publisher navigates to studio.youtube.com/channel/<expected id> before this
+        # runs, so the id surviving in the URL is the strongest evidence available: a
+        # profile signed into a different channel gets redirected away from it.
         curr_url = self.page.url
         if expected_channel_id and expected_channel_id in curr_url:
             return True, f"Channel ID {expected_channel_id}", f"YouTube Channel Verified via URL: {expected_channel_id}"
 
-        if detected_text:
-            det_norm = detected_text.lower()
-            if exp_handle_norm in det_norm or "buildverse" in det_norm:
-                return True, detected_text, f"YouTube Channel Verified: {detected_text}"
-            else:
-                self.capture_error_snapshot("account_mismatch")
-                return False, detected_text, f"ACCOUNT_MISMATCH: Expected '{expected_handle}', detected '{detected_text}'"
+        # The header mounts after the page settles, and this is not a check to lose on
+        # timing -- read it patiently rather than once.
+        detected_text = ""
+        deadline = time.time() + CHANNEL_IDENTITY_WAIT_SECONDS
+        while not detected_text:
+            for sel in YouTubeStudioSelectors.CHANNEL_HEADER_SELECTORS:
+                try:
+                    loc = self.page.locator(sel).first
+                    if loc.is_visible(timeout=1000):
+                        text = loc.inner_text().strip()
+                        if text:
+                            detected_text = text
+                            break
+                except Exception:
+                    pass
+            if detected_text or time.time() >= deadline:
+                break
+            time.sleep(1.0)
 
-        return True, expected_handle, f"YouTube Channel assumed active ({expected_handle})"
+        if detected_text:
+            # Only THIS brand's handle passes. Until 2026-08-22 the literal "buildverse"
+            # was accepted here whatever brand was running, which made the first channel's
+            # name a skeleton key: a craftsbyman run that landed on @BuiIdVerse would have
+            # been told it was on the right channel and published there. brands.py exists
+            # to make that impossible and this line quietly undid it.
+            if account_identities_match(expected_handle, detected_text):
+                return True, detected_text, f"YouTube Channel Verified: {detected_text}"
+            self.capture_error_snapshot("account_mismatch")
+            return False, detected_text, f"ACCOUNT_MISMATCH: Expected '{expected_handle}', detected '{detected_text}'"
+
+        # Nothing readable. Refuse rather than assume: we navigated to a URL carrying the
+        # expected channel id and it is no longer there, which is what a redirect to a
+        # different account looks like. Publishing to the wrong channel cannot be undone.
+        self.capture_error_snapshot("channel_identity_unreadable")
+        return False, "", (
+            f"ACCOUNT_MISMATCH: '{expected_handle}' dogrulanamadi -- kanal kimligi "
+            f"{CHANNEL_IDENTITY_WAIT_SECONDS:.0f}s icinde okunamadi ve beklenen kanal id'si "
+            f"URL'de yok. Yanlis kanala yayin riski nedeniyle durduruldu."
+        )
 
     def capture_video_id_and_url(
         self, wait_seconds: float = VIDEO_ID_WAIT_SECONDS
@@ -476,16 +553,29 @@ class YouTubeStudioUIObserver:
         video_path = Path(video_path).resolve()
         self.open_upload_dialog()
 
-        for sel in YouTubeStudioSelectors.FILE_INPUT_SELECTORS:
-            try:
-                loc = self.page.locator(sel).first
-                if loc.count() > 0:
-                    loc.set_input_files(str(video_path))
-                    logger.info(f"Set input files for YouTube Studio: {video_path.name}")
-                    return True
-            except Exception as e:
-                logger.debug(f"File input selector {sel} failed: {e}")
+        # The dialog builds its file input after it opens, so absence has to be waited
+        # out rather than read once -- exactly the mistake that stopped TikTok's week at
+        # its twelfth Reel with eleven already scheduled.
+        deadline = time.time() + FILE_INPUT_WAIT_SECONDS
+        while True:
+            for sel in YouTubeStudioSelectors.FILE_INPUT_SELECTORS:
+                try:
+                    loc = self.page.locator(sel).first
+                    if loc.count() > 0:
+                        loc.set_input_files(str(video_path))
+                        logger.info(f"Set input files for YouTube Studio: {video_path.name}")
+                        return True
+                except Exception as e:
+                    logger.debug(f"File input selector {sel} failed: {e}")
 
+            if time.time() >= deadline:
+                break
+            time.sleep(1.0)
+
+        logger.error(
+            f"YOUTUBE_FILE_INPUT_NOT_AVAILABLE: upload dialog did not expose a file input "
+            f"within {FILE_INPUT_WAIT_SECONDS:.0f}s."
+        )
         self.capture_error_snapshot("file_input_not_found")
         return False
 
@@ -501,23 +591,79 @@ class YouTubeStudioUIObserver:
                 except Exception:
                     pass
             time.sleep(2.0)
+
+        # Returning True here keeps a long-standing behaviour: the Next button is the only
+        # completion signal this code has, and refusing on its absence would stop every
+        # upload if that selector ever drifts. But an unconfirmed upload must not pass in
+        # silence -- when the wizard then fails a step, this line is the explanation.
+        logger.warning(
+            f"YOUTUBE_UPLOAD_COMPLETION_UNCONFIRMED: no enabled Next button after "
+            f"{timeout_seconds}s. Continuing, but the upload may still be processing."
+        )
         return True
 
+    def _resolve_visible(self, selectors: List[str], wait_seconds: float) -> Optional[Any]:
+        """First visible match among `selectors`, waited for rather than read once."""
+        deadline = time.time() + wait_seconds
+        while True:
+            for sel in selectors:
+                try:
+                    loc = self.page.locator(sel).first
+                    if loc.is_visible(timeout=1000):
+                        return loc
+                except Exception:
+                    pass
+            if time.time() >= deadline:
+                return None
+            time.sleep(1.0)
+
     def fill_details(self, title: str, description: str, hashtags: List[str]) -> bool:
-        """Fill title and description inputs."""
+        """
+        Fill title and description inputs, and prove the title actually took.
+
+        Until 2026-08-22 this returned True unconditionally. If the title field was not
+        found -- the wizard still settling was enough -- nothing was typed, nothing was
+        checked, and the Reel went to a live channel under YouTube's default title, which
+        is the source filename: "clean clean CBM REEL 2026 0001 aircraft garden hidden".
+        CLAUDE.md rejects placeholder metadata at the gate; this is the same rule one
+        layer down, where the text is actually written.
+        """
         full_title = title[:100]
-        for sel in YouTubeStudioSelectors.TITLE_INPUTS:
-            try:
-                loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=2000):
-                    loc.click()
-                    self.page.keyboard.press("Control+A")
-                    self.page.keyboard.press("Backspace")
-                    loc.fill(full_title)
-                    logger.info(f"Filled YouTube Title: {full_title[:40]}...")
-                    break
-            except Exception:
-                pass
+
+        loc = self._resolve_visible(YouTubeStudioSelectors.TITLE_INPUTS, TITLE_INPUT_WAIT_SECONDS)
+        if loc is None:
+            self.capture_error_snapshot("title_input_not_found")
+            logger.error("YOUTUBE_TITLE_INPUT_NOT_FOUND: baslik alani bulunamadi.")
+            return False
+
+        try:
+            loc.click()
+            self.page.keyboard.press("Control+A")
+            self.page.keyboard.press("Backspace")
+            loc.fill(full_title)
+            logger.info(f"Filled YouTube Title: {full_title[:40]}...")
+        except Exception as e:
+            logger.error(f"YOUTUBE_TITLE_FILL_FAILED: {e}")
+            return False
+
+        # Read back. An empty field, or one still carrying the upload's filename, means
+        # the Reel would publish under a name nobody wrote.
+        actual = ""
+        try:
+            actual = (loc.inner_text() or "").strip()
+            if not actual and hasattr(loc, "input_value"):
+                actual = (loc.input_value() or "").strip()
+        except Exception:
+            pass
+
+        if actual:
+            lowered = actual.lower()
+            if "reel-2026-" in lowered or ".mp4" in lowered or "clean_clean" in lowered:
+                self.capture_error_snapshot("title_still_filename")
+                logger.error(f"YOUTUBE_TITLE_NOT_REPLACED: baslikta hala dosya adi var: '{actual[:60]}'")
+                return False
+        else:
+            logger.warning("YouTube baslik geri-okumasi bos dondu; alan yazildi kabul ediliyor.")
 
         tags_str = " ".join(hashtags)
         full_desc = f"{description}\n\n{tags_str}"

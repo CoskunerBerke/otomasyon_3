@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
 from .tiktok_selectors import TikTokSelectors
+from .youtube_studio_ui_observer import account_identities_match, normalize_account_identity
 
 logger = logging.getLogger("ReelsAIFactory.TikTokUIObserver")
 
@@ -31,6 +32,9 @@ MORE_OPTIONS_WAIT_SECONDS = 12.0
 # builds its file input after load. Reading once and concluding "not found" stopped
 # craftsbyman's week at its twelfth Reel on 2026-08-22, with eleven already scheduled.
 FILE_INPUT_WAIT_SECONDS = 20.0
+
+# How long the account guard waits for TikTok to show whose session this is.
+ACCOUNT_IDENTITY_WAIT_SECONDS = 10.0
 MORE_OPTIONS_PROBE_MS = 800
 
 DATE_READBACK_ATTEMPTS = 6
@@ -95,7 +99,6 @@ class TikTokUIObserver:
         Verify that the logged-in TikTok user matches expected_username.
         Returns: (is_match: bool, detected_username: str, message: str)
         """
-        exp_norm = expected_username.strip().lstrip("@").lower()
         detected_username = ""
 
         username_selectors = [
@@ -107,35 +110,59 @@ class TikTokUIObserver:
             "div[class*='account-name']"
         ]
 
-        for sel in username_selectors:
-            try:
-                loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    text = loc.inner_text().strip() if not loc.get_attribute("href") else loc.get_attribute("href")
-                    if text:
-                        detected_username = text.split("/")[-1].split("?")[0].lstrip("@").strip()
-                        if detected_username:
-                            break
-            except Exception:
-                pass
+        # Read patiently: the account chrome mounts after the rest of the page, and this
+        # is the guard between a run and the wrong channel's audience.
+        deadline = time.time() + ACCOUNT_IDENTITY_WAIT_SECONDS
+        while not detected_username:
+            for sel in username_selectors:
+                try:
+                    loc = self.page.locator(sel).first
+                    if loc.is_visible(timeout=1000):
+                        text = loc.inner_text().strip() if not loc.get_attribute("href") else loc.get_attribute("href")
+                        if text:
+                            detected_username = text.split("/")[-1].split("?")[0].lstrip("@").strip()
+                            if detected_username:
+                                break
+                except Exception:
+                    pass
 
-        if not detected_username:
-            try:
-                url = self.page.url
-                if "/@" in url:
-                    detected_username = url.split("/@")[-1].split("/")[0].split("?")[0]
-            except Exception:
-                pass
+            if not detected_username:
+                try:
+                    url = self.page.url
+                    if "/@" in url:
+                        detected_username = url.split("/@")[-1].split("/")[0].split("?")[0]
+                except Exception:
+                    pass
+
+            if detected_username or time.time() >= deadline:
+                break
+            time.sleep(1.0)
 
         if detected_username:
-            act_norm = detected_username.lower()
-            if act_norm == exp_norm or "kitchenverse" in act_norm:
+            act_norm = normalize_account_identity(detected_username)
+            # Only THIS brand's handle passes. Until 2026-08-22 the literal "kitchenverse"
+            # -- the FIRST channel's TikTok -- was accepted whatever brand was running,
+            # so a craftsbyman run that landed on @kitchenverse360 would have been told it
+            # was on the right account and published there.
+            if account_identities_match(expected_username, detected_username):
                 return True, f"@{detected_username}", f"TikTok User Verified: @{detected_username}"
-            else:
-                self.capture_error_snapshot("account_mismatch")
-                return False, f"@{detected_username}", f"ACCOUNT_MISMATCH: Expected '{expected_username}', detected '@{detected_username}'"
+            self.capture_error_snapshot("account_mismatch")
+            return False, f"@{detected_username}", f"ACCOUNT_MISMATCH: Expected '{expected_username}', detected '@{detected_username}'"
 
-        return True, expected_username, f"TikTok User assumed active ({expected_username})"
+        # Nothing readable. This does NOT block -- TikTok Studio's upload page may simply
+        # not name the account anywhere, and refusing on a DOM this code cannot verify
+        # would stop a working channel on a guess (Kural 31). What it must never do is
+        # report success: the run continues on the strength of the per-brand Chrome
+        # profile and CDP port alone, and says so.
+        logger.warning(
+            f"[TIKTOK] ACCOUNT_UNVERIFIED: '{expected_username}' sayfadan okunamadi. "
+            f"Yayin, markaya ozel Chrome profiline guvenerek devam ediyor -- bu profile "
+            f"yalnizca {expected_username} hesabinin girili oldugundan emin olun."
+        )
+        return True, "ACCOUNT_UNVERIFIED", (
+            f"TikTok hesabi sayfadan dogrulanamadi; markaya ozel profile guveniliyor "
+            f"({expected_username})."
+        )
 
     def is_editor_open_for_reel(self, reel_id: str, filename: str) -> bool:
         """
@@ -159,7 +186,13 @@ class TikTokUIObserver:
             f_clean = filename.lower()
             page_text = self.page.content().lower()
 
-            if r_id_clean in page_text or f_clean in page_text or "zen_temple" in page_text or "oasis" in page_text:
+            # This Reel's own id or filename, and nothing else. "zen_temple" and "oasis"
+            # used to count too -- leftovers from an early test that turned any page
+            # mentioning an oasis into "the editor is already open for this Reel". These
+            # captions are about buried objects becoming underground gardens and oases;
+            # a match would have skipped the upload and hung this Reel's title, caption
+            # and slot on whatever video was actually sitting in the editor.
+            if r_id_clean in page_text or f_clean in page_text:
                 logger.info(f"Existing TikTok editor session detected for {reel_id} ({filename}). Resuming directly.")
                 return True
         except Exception as e:

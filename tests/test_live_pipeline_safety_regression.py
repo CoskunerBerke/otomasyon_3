@@ -500,17 +500,23 @@ class _FakePage:
 
 
 def test_youtube_review_modal_dismissed_via_anladim_only():
+    from automation.publishing.youtube_studio_selectors import YouTubeStudioSelectors
     from automation.publishing.youtube_studio_ui_observer import YouTubeStudioUIObserver
+
+    # Take the selector from the source rather than restating it. The dismissal moved to
+    # comma-grouped aria-label strategies (Kural 31) and this test kept naming the old
+    # bare has-text selector, so its fake matched nothing and it had been failing --
+    # quietly, in a suite nobody could read, while the code itself was fine.
+    dismiss_selector = YouTubeStudioSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS[0]
 
     page = _FakePage(
         inner_text="İçeriğinizi kontrol etmeye devam ediyoruz. Anladım",
-        visible_selectors={"button:has-text('Anladım')": True}
+        visible_selectors={dismiss_selector: True}
     )
     observer = YouTubeStudioUIObserver(page)
     observer.dismiss_content_review_info_if_present()
 
-    clicked_loc = page.locator("button:has-text('Anladım')")
-    assert clicked_loc.clicked is True
+    assert page.locator(dismiss_selector).clicked is True
 
 
 def test_youtube_review_modal_not_touched_when_absent():
@@ -636,7 +642,12 @@ def test_youtube_bounded_remote_verification_max_two_attempts(tmp_path):
          patch("automation.publishing.youtube_studio_publisher.time.sleep", return_value=None):
         result = publisher.upload_and_schedule(rec)
 
-    assert mock_observer.verify_remote_scheduled_status.call_count == 2
+    # Bounded, not unbounded -- which is what this test is for. The bound itself grew
+    # deliberately when verification was made patient (2026-08-19), so it is read from the
+    # source: one pre-resume check plus one per backoff step.
+    from automation.publishing.youtube_studio_publisher import VERIFY_BACKOFF_SECONDS
+
+    assert mock_observer.verify_remote_scheduled_status.call_count == 1 + len(VERIFY_BACKOFF_SECONDS)
     assert result.status == PlatformPublicationStatus.SCHEDULE_RESUME_REQUIRED
     # Remote evidence must be preserved, never falsely marked SCHEDULED.
     assert result.remote_id == "yt_existing_id"

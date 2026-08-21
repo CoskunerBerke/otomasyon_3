@@ -418,10 +418,20 @@ def test_instagram_worker_claims_and_publishes_due_job(tmp_path):
     assert completed_job.permalink == "https://instagr.am/p/123"
 
 
-def test_instagram_worker_dry_run_gate_blocks_real_upload(tmp_path):
+def test_instagram_worker_dry_run_gate_blocks_real_upload(tmp_path, monkeypatch):
     """The default CloudConfig safety flags (dry_run=True / allow_upload=False) must stop
     execute_job() before any binary upload or publish call reaches Meta -- a job may only
-    be simulated, never really published, unless the flags are explicitly enabled."""
+    be simulated, never really published, unless the flags are explicitly enabled.
+
+    The flags are cleared from the environment first. CloudConfig._load_dotenv copies the
+    repo's real .env into os.environ and leaves it there for the rest of the process, so
+    any earlier test that built a CloudConfig at the repo root decides what "default"
+    means here -- and this test then passes or fails on collection order rather than on
+    the behaviour it is meant to pin.
+    """
+    for flag in ("INSTAGRAM_DRY_RUN", "INSTAGRAM_ALLOW_UPLOAD", "INSTAGRAM_ALLOW_PUBLISH"):
+        monkeypatch.delenv(flag, raising=False)
+
     db_file = tmp_path / "cloud_test.db"
     cfg = CloudConfig(tmp_path)
     cfg.database_url = f"sqlite:///{db_file}"

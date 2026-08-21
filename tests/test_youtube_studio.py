@@ -241,6 +241,11 @@ def test_youtube_studio_hard_upload_guard_in_resume_state(tmp_path: Path):
     mock_observer.is_logged_in.return_value = True
     mock_observer.verify_logged_in_channel.return_value = (True, "@BuiIdVerse", "OK")
     # Draft is not found
+    # Not scheduled remotely, so the run takes the resume-the-draft path this test is
+    # about. Left unstubbed, a MagicMock yields nothing and the publisher's
+    # "already_scheduled, why = ..." unpack raises -- which is why these four tests
+    # had been red since the pre-resume verification landed.
+    mock_observer.verify_remote_scheduled_status.return_value = (False, "REMOTE_SCHEDULE_NOT_VERIFIED")
     mock_observer.find_and_open_existing_draft.return_value = False
 
     pub.browser_mgr = MagicMock()
@@ -449,7 +454,15 @@ def test_exact_remote_video_resume_bypasses_upload(tmp_path: Path):
     mock_observer.find_and_expand_schedule_card.return_value = True
     mock_observer.set_schedule_datetime.return_value = True
     mock_observer.click_schedule_and_verify.return_value = (True, "confirmed")
-    mock_observer.verify_remote_scheduled_status.return_value = (True, "SCHEDULED")
+    # Not scheduled when the run starts, scheduled once the run has scheduled it. One
+    # fixed answer cannot express both: a video reported as already scheduled returns
+    # before any draft is reopened (correct since 2026-08-19, and it made this test's
+    # open_exact_remote_video assertion unreachable), while a permanent "not scheduled"
+    # leaves the post-schedule verification failing forever.
+    _first_answer = iter([(False, "REMOTE_SCHEDULE_NOT_VERIFIED")])
+    mock_observer.verify_remote_scheduled_status.side_effect = (
+        lambda *a, **k: next(_first_answer, (True, "SCHEDULED"))
+    )
 
     pub.browser_mgr = MagicMock()
     mock_ctx = MagicMock()
@@ -506,7 +519,15 @@ def test_remote_id_rR_uNcTLZuM_prevents_upload(tmp_path: Path):
     mock_observer.find_and_expand_schedule_card.return_value = True
     mock_observer.set_schedule_datetime.return_value = True
     mock_observer.click_schedule_and_verify.return_value = (True, "confirmed")
-    mock_observer.verify_remote_scheduled_status.return_value = (True, "SCHEDULED")
+    # Not scheduled when the run starts, scheduled once the run has scheduled it. One
+    # fixed answer cannot express both: a video reported as already scheduled returns
+    # before any draft is reopened (correct since 2026-08-19, and it made this test's
+    # open_exact_remote_video assertion unreachable), while a permanent "not scheduled"
+    # leaves the post-schedule verification failing forever.
+    _first_answer = iter([(False, "REMOTE_SCHEDULE_NOT_VERIFIED")])
+    mock_observer.verify_remote_scheduled_status.side_effect = (
+        lambda *a, **k: next(_first_answer, (True, "SCHEDULED"))
+    )
 
     pub.browser_mgr = MagicMock()
     mock_ctx = MagicMock()
@@ -978,6 +999,11 @@ def test_draft_wizard_failure_blocks_upload_no_duplicate(tmp_path):
     mock_observer.verify_logged_in_channel.return_value = (True, "@BuiIdVerse", "OK")
     mock_observer.open_exact_remote_video.return_value = True
     mock_observer.enter_existing_draft_wizard.return_value = False  # wizard never opens
+    # Not scheduled remotely, so the run takes the resume-the-draft path this test is
+    # about. Left unstubbed, a MagicMock yields nothing and the publisher's
+    # "already_scheduled, why = ..." unpack raises -- which is why these four tests
+    # had been red since the pre-resume verification landed.
+    mock_observer.verify_remote_scheduled_status.return_value = (False, "REMOTE_SCHEDULE_NOT_VERIFIED")
 
     pub.browser_mgr = MagicMock()
     mock_ctx = MagicMock()
