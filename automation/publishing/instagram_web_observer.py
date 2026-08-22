@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from .instagram_web_selectors import InstagramWebSelectors
+from .ui_wait import visible
 
 logger = logging.getLogger("ReelsAIFactory.InstagramWebObserver")
 
@@ -651,7 +652,7 @@ class InstagramWebObserver:
     def _success_dialog_visible(self) -> bool:
         for sel in InstagramWebSelectors.SUCCESS_DIALOG_DONE_BUTTONS:
             try:
-                if self.page.locator(sel).first.is_visible(timeout=500):
+                if visible(self.page.locator(sel).first, 500):
                     return True
             except Exception:
                 continue

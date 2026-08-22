@@ -16,6 +16,7 @@ logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
 from automation.publishing.instagram_web_browser import InstagramWebBrowserManager
 from automation.publishing.instagram_web_selectors import InstagramWebSelectors
+from .ui_wait import visible as is_element_visible
 
 SCHEDULED_CONTENT_URL = "https://www.instagram.com/scheduled_content/"
 
@@ -67,7 +68,7 @@ def check() -> int:
             # usually means a professional/creator account is required, or the UI moved.
             try:
                 entry = page.locator(InstagramWebSelectors.OPEN_COMPOSER_BUTTONS[0]).first
-                visible = entry.is_visible(timeout=4000)
+                visible = is_element_visible(entry, 4000)
             except Exception:
                 visible = False
 

@@ -28,6 +28,7 @@ from typing import Any, List, Optional, Tuple
 from .instagram_web_browser import InstagramWebBrowserManager
 from .instagram_web_observer import InstagramWebObserver
 from .instagram_web_selectors import InstagramWebSelectors
+from .ui_wait import visible
 
 logger = logging.getLogger("ReelsAIFactory.InstagramWebPublisher")
 
@@ -129,7 +130,7 @@ class InstagramWebPublisher(BaseInstagramWebPublisher):
         selector = InstagramWebSelectors.OPEN_COMPOSER_BUTTONS[0]
         while time.time() < deadline:
             try:
-                if page.locator(selector).first.is_visible(timeout=1000):
+                if visible(page.locator(selector).first, 1000):
                     return True
             except Exception:
                 pass

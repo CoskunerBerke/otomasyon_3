@@ -80,6 +80,7 @@ def test_tiktok_studio_replace_caption_clears_filename():
         if "react-joyride" in sel or "overlay" in sel or "joyride" in sel:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         else:
             res.first = mock_editor
@@ -109,6 +110,7 @@ def test_tiktok_studio_caption_verification_fails_if_filename_remains():
         if "react-joyride" in sel or "overlay" in sel or "joyride" in sel:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         else:
             res.first = mock_editor
@@ -157,6 +159,7 @@ def test_tiktok_studio_select_schedule_mode_planla():
             res.first = mock_label
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -244,6 +247,7 @@ def test_tiktok_schedule_mode_case_2_label_for_click_intercept_regression():
             res.first = mock_label
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -328,7 +332,9 @@ def test_tiktok_schedule_mode_case_4_inner_circle_click():
             res.is_visible.return_value = True
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
             res.is_visible.return_value = False
+            res.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_planla_input.locator.side_effect = input_loc
@@ -341,6 +347,7 @@ def test_tiktok_schedule_mode_case_4_inner_circle_click():
             res.first = mock_simdi_input
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -374,7 +381,9 @@ def test_tiktok_schedule_mode_case_5_keyboard_space_fallback():
     # Child locators invisible
     child_loc = MagicMock()
     child_loc.first.is_visible.return_value = False
+    child_loc.first.wait_for.side_effect = TimeoutError("not visible")
     child_loc.is_visible.return_value = False
+    child_loc.wait_for.side_effect = TimeoutError("not visible")
     mock_planla_input.locator.return_value = child_loc
 
     def loc_side_effect(sel):
@@ -385,6 +394,7 @@ def test_tiktok_schedule_mode_case_5_keyboard_space_fallback():
             res.first = mock_simdi_input
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -416,6 +426,7 @@ def test_tiktok_schedule_mode_case_6_schedule_true_but_now_also_true():
             res.first = mock_simdi_input
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -446,6 +457,7 @@ def test_tiktok_schedule_mode_case_7_no_interaction_changes_state():
             res.first = mock_simdi_input
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -538,12 +550,15 @@ def test_tiktok_joyride_overlay_detected_and_dismissed_via_kapat():
             vis = overlay_states.pop(0) if overlay_states else False
             loc = MagicMock()
             loc.is_visible.return_value = vis
+            if not vis:
+                loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         elif "Kapat" in sel or "Close" in sel:
             res.first = mock_close_btn
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -569,12 +584,15 @@ def test_tiktok_joyride_overlay_dismissed_via_close_en():
             vis = overlay_states.pop(0) if overlay_states else False
             loc = MagicMock()
             loc.is_visible.return_value = vis
+            if not vis:
+                loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         elif "Close" in sel:
             res.first = mock_close_btn
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -600,12 +618,15 @@ def test_tiktok_joyride_overlay_dismissed_via_atla_skip():
             vis = overlay_states.pop(0) if overlay_states else False
             loc = MagicMock()
             loc.is_visible.return_value = vis
+            if not vis:
+                loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         elif "Atla" in sel or "Skip" in sel:
             res.first = mock_skip_btn
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -621,6 +642,7 @@ def test_tiktok_joyride_overlay_dismissed_via_escape():
     mock_page = MagicMock()
     mock_hidden_btn = MagicMock()
     mock_hidden_btn.is_visible.return_value = False
+    mock_hidden_btn.wait_for.side_effect = TimeoutError("not visible")
 
     overlay_states = [True, True, False, False]
 
@@ -630,10 +652,13 @@ def test_tiktok_joyride_overlay_dismissed_via_escape():
             vis = overlay_states.pop(0) if overlay_states else False
             loc = MagicMock()
             loc.is_visible.return_value = vis
+            if not vis:
+                loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -686,6 +711,7 @@ def test_tiktok_editor_state_empty_upload_page_detected():
             res.count.return_value = 1
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
             res.count.return_value = 0
         return res
 
@@ -705,6 +731,7 @@ def test_tiktok_editor_state_loaded_editor_detected():
             res.first.is_visible.return_value = True
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -811,6 +838,7 @@ def test_tiktok_select_schedule_mode_real_input_state():
             res.first = mock_label
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -859,7 +887,7 @@ def test_tiktok_timepicker_case_1_ui_picker_success():
         elif "input" in sel:
             res.first = mock_time_input
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -903,7 +931,7 @@ def test_tiktok_timepicker_case_2_typing_reverts_to_12_00_picker_used():
         elif "input" in sel:
             res.first = mock_time_input
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -936,6 +964,10 @@ def test_tiktok_timepicker_case_3_picker_options_exact_matching():
         loc = MagicMock()
         if "tiktok-timepicker-time-picker-container" in sel and ":has" not in sel and "text-is" not in sel:
             loc.is_visible.side_effect = lambda **kw: is_popup_open[0]
+            def _timepicker_wait_for(*args, **kwargs):
+                if not is_popup_open[0]:
+                    raise TimeoutError("not visible")
+            loc.wait_for.side_effect = _timepicker_wait_for
         else:
             loc.is_visible.return_value = True
         def make_click(s):
@@ -1016,7 +1048,7 @@ def test_tiktok_ai_disclosure_multi_switches_scopes_to_aigc_only():
         if "aigc_container" in sel or "AI" in sel or "Yapay" in sel:
             res.first = mock_aigc_container
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1037,15 +1069,25 @@ def test_tiktok_ai_disclosure_show_more_expansion_flow():
 
     mock_show_more = MagicMock()
     mock_show_more.is_visible.side_effect = lambda **kw: not is_expanded[0]
+    def _show_more_wait_for(*args, **kwargs):
+        if is_expanded[0]:
+            raise TimeoutError("not visible")
+    mock_show_more.wait_for.side_effect = _show_more_wait_for
     def on_show_more_click(*args, **kwargs):
         is_expanded[0] = True
     mock_show_more.click.side_effect = on_show_more_click
 
+    def _aigc_wait_for(*args, **kwargs):
+        if not is_expanded[0]:
+            raise TimeoutError("not visible")
+
     mock_aigc_container = MagicMock()
     mock_aigc_container.is_visible.side_effect = lambda **kw: is_expanded[0]
+    mock_aigc_container.wait_for.side_effect = _aigc_wait_for
 
     mock_ai_switch = MagicMock()
     mock_ai_switch.is_visible.side_effect = lambda **kw: is_expanded[0]
+    mock_ai_switch.wait_for.side_effect = _aigc_wait_for
     mock_ai_switch.get_attribute.side_effect = lambda attr: "true" if (attr == "aria-checked" and ai_checked[0]) else ("false" if attr == "aria-checked" else None)
 
     def on_ai_click(*args, **kwargs):
@@ -1060,7 +1102,7 @@ def test_tiktok_ai_disclosure_show_more_expansion_flow():
         elif "aigc_container" in sel or "AI" in sel:
             res.first = mock_aigc_container
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1098,6 +1140,7 @@ def test_tiktok_ai_disclosure_fails_when_control_missing():
     mock_page = MagicMock()
     mock_empty = MagicMock()
     mock_empty.is_visible.return_value = False
+    mock_empty.wait_for.side_effect = TimeoutError("not visible")
     mock_page.locator.return_value.first = mock_empty
 
     observer = TikTokUIObserver(mock_page)
@@ -1135,7 +1178,7 @@ def test_tiktok_ai_disclosure_false_negative_prevention_live_dom_case():
         elif "input" in sel or "role" in sel:
             res.first = mock_inp
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_aigc.locator.side_effect = aigc_locator
@@ -1145,7 +1188,7 @@ def test_tiktok_ai_disclosure_false_negative_prevention_live_dom_case():
         if "aigc_container" in sel or "AI" in sel:
             res.first = mock_aigc
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = page_locator
@@ -1190,7 +1233,7 @@ def test_tiktok_ai_disclosure_toggle_from_off_to_on():
         elif "input" in sel or "role" in sel:
             res.first = mock_inp
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_aigc.locator.side_effect = aigc_locator
@@ -1200,7 +1243,7 @@ def test_tiktok_ai_disclosure_toggle_from_off_to_on():
         if "aigc_container" in sel or "AI" in sel:
             res.first = mock_aigc
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = page_locator
@@ -1244,7 +1287,7 @@ def test_tiktok_timepicker_22_00_dynamic_slot():
         elif "input" in sel:
             res.first = mock_time_input
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1296,7 +1339,7 @@ def test_tiktok_calendar_august_2026_days_16_to_22():
             elif "input" in sel:
                 res.first = m_inp
             else:
-                res.first = MagicMock(is_visible=MagicMock(return_value=False))
+                res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
             return res
 
         mock_page.locator.side_effect = loc_side_effect
@@ -1362,7 +1405,7 @@ def test_tiktok_calendar_month_transition_august_to_september():
         elif "input" in sel:
             res.first = mock_date_input
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1397,7 +1440,7 @@ def test_tiktok_final_post_video_button_exact_dom_resolution_and_click():
         if "post_video_button" in sel:
             res.first = mock_btn
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False), is_enabled=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")), is_enabled=MagicMock(return_value=False))
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1424,7 +1467,7 @@ def test_tiktok_final_button_disabled_blocks_click():
             if "post_video_button" in sel:
                 res.first = b
             else:
-                res.first = MagicMock(is_visible=MagicMock(return_value=False), is_enabled=MagicMock(return_value=False))
+                res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")), is_enabled=MagicMock(return_value=False))
             return res
 
         mock_page.locator.side_effect = loc_side_effect
@@ -1477,7 +1520,7 @@ def test_tiktok_aigc_fresh_off_state_overrides_stale_on_cache():
         elif "input" in sel or "role" in sel:
             res.first = mock_inp
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_aigc.locator.side_effect = aigc_locator
@@ -1487,7 +1530,7 @@ def test_tiktok_aigc_fresh_off_state_overrides_stale_on_cache():
         if "aigc_container" in sel or "AI" in sel:
             res.first = mock_aigc
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
 
     mock_page.locator.side_effect = page_locator
@@ -1537,7 +1580,7 @@ def test_tiktok_aigc_strict_scoping_ignores_copyright_and_content_check_switches
         if "Switch__content" in sel:
             res.first = mock_aigc_content
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
     mock_aigc.locator.side_effect = aigc_locator
 
@@ -1548,7 +1591,7 @@ def test_tiktok_aigc_strict_scoping_ignores_copyright_and_content_check_switches
         elif "copyright_container" in sel:
             res.first = mock_copyright
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
     mock_page.locator.side_effect = page_locator
 
@@ -1577,6 +1620,10 @@ def test_tiktok_ensure_more_options_expanded():
 
     mock_aigc = MagicMock()
     mock_aigc.is_visible.side_effect = lambda **kw: expanded[0]
+    def _aigc_wait_for(*args, **kwargs):
+        if not expanded[0]:
+            raise TimeoutError("not visible")
+    mock_aigc.wait_for.side_effect = _aigc_wait_for
 
     def page_locator(sel):
         res = MagicMock()
@@ -1585,7 +1632,7 @@ def test_tiktok_ensure_more_options_expanded():
         elif "aigc_container" in sel:
             res.first = mock_aigc
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         return res
     mock_page.locator.side_effect = page_locator
 
@@ -1617,8 +1664,8 @@ def test_tiktok_aigc_off_to_on_toggle_flow():
         is_on[0] = True
     mock_content.click.side_effect = on_click
 
-    mock_aigc.locator.side_effect = lambda s: MagicMock(first=mock_content if "Switch__content" in s else MagicMock(is_visible=MagicMock(return_value=False)))
-    mock_page.locator.side_effect = lambda s: MagicMock(first=mock_aigc if "aigc_container" in s else MagicMock(is_visible=MagicMock(return_value=False)))
+    mock_aigc.locator.side_effect = lambda s: MagicMock(first=mock_content if "Switch__content" in s else MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible"))))
+    mock_page.locator.side_effect = lambda s: MagicMock(first=mock_aigc if "aigc_container" in s else MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible"))))
 
     observer = TikTokUIObserver(mock_page)
     ok = observer.toggle_ai_disclosure(True)
@@ -1658,6 +1705,10 @@ def test_tiktok_content_check_modal_escaped_no_publish_now_click():
     mock_modal = MagicMock()
     # Modal visible on attempt 1, closed after Escape and gone on attempt 2
     mock_modal.is_visible.side_effect = lambda **kw: (attempt[0] == 1 and "Escape" not in keys_pressed)
+    def _modal_wait_for(*args, **kwargs):
+        if not (attempt[0] == 1 and "Escape" not in keys_pressed):
+            raise TimeoutError("not visible")
+    mock_modal.wait_for.side_effect = _modal_wait_for
 
     mock_hemen_paylas = MagicMock()
     mock_hemen_paylas.is_visible.return_value = True
@@ -1687,9 +1738,9 @@ def test_tiktok_content_check_modal_escaped_no_publish_now_click():
         elif "status-success" in sel:
             return mock_succ_locs
         elif "postSchedule" in sel or ("input" in sel and "schedule" in sel):
-            res.first = MagicMock(is_checked=MagicMock(return_value=True), is_visible=MagicMock(return_value=False))
+            res.first = MagicMock(is_checked=MagicMock(return_value=True), is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")))
         else:
-            res.first = MagicMock(is_visible=MagicMock(return_value=False), is_enabled=MagicMock(return_value=False))
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")), is_enabled=MagicMock(return_value=False))
         return res
 
     mock_page.locator.side_effect = page_locator
@@ -1729,7 +1780,7 @@ def test_tiktok_content_check_data_show_false_ignored():
             return mock_chk_locs
         elif "status-success" in sel:
             return mock_succ_locs
-        return MagicMock(count=MagicMock(return_value=0), first=MagicMock(is_visible=MagicMock(return_value=False)))
+        return MagicMock(count=MagicMock(return_value=0), first=MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible"))))
 
     mock_page.locator.side_effect = page_locator
 
@@ -1764,7 +1815,7 @@ def test_tiktok_content_check_data_show_true_active_and_waited():
             return mock_chk
         elif "status-success" in sel:
             return mock_succ
-        return MagicMock(count=MagicMock(return_value=0), first=MagicMock(is_visible=MagicMock(return_value=False)))
+        return MagicMock(count=MagicMock(return_value=0), first=MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible"))))
 
     mock_page.locator.side_effect = page_locator
 
@@ -1786,7 +1837,7 @@ def test_tiktok_checks_success_retry_final_submit_redirect():
     mock_post_btn.get_attribute.side_effect = lambda a: "false" if a in ("aria-disabled", "data-disabled", "data-loading") else ""
     mock_post_btn.inner_text.return_value = "Planla"
 
-    mock_page.locator.side_effect = lambda s: MagicMock(first=mock_post_btn if "post_video_button" in s else MagicMock(is_visible=MagicMock(return_value=False), is_enabled=MagicMock(return_value=False)))
+    mock_page.locator.side_effect = lambda s: MagicMock(first=mock_post_btn if "post_video_button" in s else MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")), is_enabled=MagicMock(return_value=False)))
     mock_page.url = "https://www.tiktok.com/tiktokstudio/content"
 
     observer = TikTokUIObserver(mock_page)
@@ -1821,6 +1872,10 @@ class _ModalBtn:
 
     def is_visible(self, timeout=None):
         return self._visible
+
+    def wait_for(self, state="visible", timeout=None):
+        if state == "visible" and not self._visible:
+            raise TimeoutError(f"{self._label!r} not visible")
 
     def is_enabled(self, timeout=None):
         return True

@@ -38,6 +38,15 @@ class FakeLocator:
     def is_visible(self, timeout=None):
         return self._visible_fn()
 
+    def wait_for(self, state=None, timeout=None):
+        """Model Playwright: wait_for polls and RAISES on timeout, unlike
+        is_visible, which is a snapshot that returns a bool. A fake that offers
+        only is_visible makes every "not visible" path pass for the wrong
+        reason -- and, since 2026-08-22, makes every visible one fail.
+        """
+        if not self.is_visible():
+            raise TimeoutError(f"not visible within {timeout}ms")
+
     def click(self, timeout=None):
         self.clicked = True
 

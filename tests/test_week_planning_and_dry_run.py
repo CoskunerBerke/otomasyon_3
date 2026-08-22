@@ -171,3 +171,78 @@ def test_a_live_run_is_never_blocked_by_this_guard(tmp_path):
 
     pipeline = _pipeline(tmp_path, week_id, dry_run=False)
     pipeline._refuse_dry_run_over_live_week(pipeline._get_or_create_manifest())
+
+
+# ---------------------------------------------------------------- rehearsal records
+
+def test_a_rehearsals_records_are_stamped_as_a_rehearsal(tmp_path):
+    """
+    Otherwise a rehearsal's records are indistinguishable from real ones, and the next
+    live run skips the whole week as "already done" -- slots empty, state file confident.
+    """
+    week_id = "CBM-2026-W41"
+    _week_on_disk(tmp_path, week_id, remote_id=None)
+    reel_id = "CBM-REEL-2026-0001"
+
+    rehearsal = _pipeline(tmp_path, week_id, dry_run=True)
+    rehearsal._record_platform_status(
+        week_id, reel_id, "youtube", "SCHEDULED", remote_id="mock_yt_abc123"
+    )
+    rehearsed = rehearsal.batch_repo.load_progress(week_id)[reel_id]["youtube"]
+    assert rehearsed["status"] == "SCHEDULED", "the rehearsal still runs end to end"
+    assert rehearsed["dry_run"] is True, "and says what it was"
+
+    live = _pipeline(tmp_path, week_id, dry_run=False)
+    live._record_platform_status(week_id, reel_id, "tiktok", "SCHEDULED")
+    assert live.batch_repo.load_progress(week_id)[reel_id]["tiktok"]["dry_run"] is False
+
+
+def test_only_a_live_run_discards_a_rehearsed_record(tmp_path):
+    """
+    Both halves matter. A live run must redo rehearsed work, or the slot stays empty --
+    but the rehearsal itself must still trust its own records, or the thirty-minute hold
+    re-runs the whole week every time it retries a phase.
+    """
+    week_id = "CBM-2026-W41"
+    _week_on_disk(tmp_path, week_id, remote_id=None)
+    rehearsed = {"status": "SCHEDULED", "remote_id": "mock_yt_abc123", "dry_run": True}
+    real = {"status": "SCHEDULED", "remote_id": "IQUBc21t6is", "dry_run": False}
+
+    live = _pipeline(tmp_path, week_id, dry_run=False)
+    rehearsal = _pipeline(tmp_path, week_id, dry_run=True)
+
+    assert live._counts_as_done(rehearsed) is False
+    assert live._counts_as_done(real) is True
+    assert rehearsal._counts_as_done(rehearsed) is True
+
+
+def test_a_live_run_does_not_skip_a_rehearsed_reel():
+    """The stamp is only worth anything if the skip consults it."""
+    import inspect
+    from automation import simple_weekly_pipeline as swp
+
+    src = inspect.getsource(swp.SimpleWeeklyPipeline._run_platform_phase)
+    assert "in PLATFORM_SUCCESS_STATUSES and self._counts_as_done(entry)" in src
+
+    ig = inspect.getsource(swp.SimpleWeeklyPipeline._run_instagram_web_phase)
+    assert "in INSTAGRAM_TERMINAL_STATUSES and self._counts_as_done(entry)" in ig
+
+
+def test_a_rehearsed_record_is_not_evidence_of_an_upload(tmp_path):
+    """
+    The publisher decides between "resume the existing draft" and "upload from scratch" on
+    this evidence. A mock id must never send a live run looking for a draft that only ever
+    existed in a rehearsal.
+    """
+    from automation.publishing.models import Platform
+
+    week_id = "CBM-2026-W42"
+    _week_on_disk(tmp_path, week_id, remote_id=None)
+    pipeline = _pipeline(tmp_path, week_id, dry_run=False)
+    manifest = pipeline._get_or_create_manifest()
+
+    rehearsed = {"status": "SCHEDULED", "remote_id": "mock_yt_abc123", "dry_run": True}
+    record = pipeline._build_publish_record(manifest.reels[0], Platform.YOUTUBE, rehearsed)
+
+    assert record.upload_started is False
+    assert record.remote_draft_exists is False

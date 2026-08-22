@@ -798,6 +798,34 @@ class SimpleWeeklyPipeline:
                 return False
         return True
 
+    def _counts_as_done(self, entry: Dict[str, Any]) -> bool:
+        """
+        Whether a recorded status may be trusted to skip the work again.
+
+        A rehearsal's record counts inside that rehearsal -- the hold re-runs phases, and
+        without this a dry run would schedule every Reel twice. It never counts once the
+        run is live: the mock publishers invent a remote id and report SCHEDULED, and
+        taking that as done leaves a real slot empty while the state file says otherwise.
+        """
+        return self.dry_run or not entry.get("dry_run")
+
+    def _record_platform_status(
+        self, week_id: str, reel_id: str, platform: str, status: str, **fields: Any
+    ) -> bool:
+        """
+        Write one platform status, stamped with whether a rehearsal produced it.
+
+        The mock publishers return SCHEDULED with an invented remote id, and these phases
+        record whatever a publisher hands back. Without this stamp a --dry-run leaves
+        records indistinguishable from real ones, and the next live run skips every Reel
+        in the week as "already done" -- slots left empty while the state file says the
+        week is finished. The .bat advertises --dry-run as the safe option, so the safe
+        option has to actually be safe.
+        """
+        return self.batch_repo.update_platform_status(
+            week_id, reel_id, platform, status, dry_run=self.dry_run, **fields
+        )
+
     def _report_state_divergence(
         self, manifest: BatchManifest, platform: str, plat_enum: Platform
     ) -> None:
@@ -852,7 +880,13 @@ class SimpleWeeklyPipeline:
 
     def _build_publish_record(self, reel: BatchReel, platform: Platform, progress_entry: Dict[str, Any]) -> PublishRecord:
         recorded = str(progress_entry.get("status") or "")
-        upload_attempted = bool(progress_entry.get("remote_id")) or recorded in UPLOAD_ALREADY_ATTEMPTED_STATUSES
+        # A rehearsal's record is not evidence that anything was uploaded for real.
+        trusted = self._counts_as_done(progress_entry)
+        if not trusted:
+            recorded = ""
+        upload_attempted = trusted and (
+            bool(progress_entry.get("remote_id")) or recorded in UPLOAD_ALREADY_ATTEMPTED_STATUSES
+        )
         try:
             recorded_status = PlatformPublicationStatus(recorded) if recorded else PlatformPublicationStatus.PENDING
         except ValueError:
@@ -921,12 +955,12 @@ class SimpleWeeklyPipeline:
         for reel in manifest.reels:
             video_file = Path(reel.video_path)
             if not video_file.exists():
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_FATAL", error="Video file missing on disk")
+                self._record_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_FATAL", error="Video file missing on disk")
                 return PhaseResult(False, platform.upper(), f"{reel.reel_id}: video dosyası bulunamadı", {"failed_reel": reel.reel_id, "hard_stop": True})
 
             progress = self.batch_repo.load_progress(manifest.week_id)
             entry = progress.get(reel.reel_id, {}).get(platform, {})
-            if entry.get("status") in PLATFORM_SUCCESS_STATUSES:
+            if entry.get("status") in PLATFORM_SUCCESS_STATUSES and self._counts_as_done(entry):
                 logger.info(f"[{platform.upper()}] {reel.reel_id} zaten {entry.get('status')}, atlanıyor.")
                 continue
 
@@ -938,7 +972,7 @@ class SimpleWeeklyPipeline:
                 reel_state=reel_state, slot=reel, publish_record=rec, video_path=video_file, already_platform_success=already_success
             )
             if not gate_ok:
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_FATAL", error=gate_reason)
+                self._record_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_FATAL", error=gate_reason)
                 logger.error(f"[{platform.upper()}] {reel.reel_id} ön-yayın kapısı tarafından ENGELLENDİ: {gate_reason}")
                 return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {gate_reason}", {"failed_reel": reel.reel_id, "reason": gate_reason, "hard_stop": True})
 
@@ -948,7 +982,7 @@ class SimpleWeeklyPipeline:
             # id is never read, the next run must still know this file already went up --
             # otherwise it uploads it again.
             if not already_success and not self.dry_run:
-                self.batch_repo.update_platform_status(
+                self._record_platform_status(
                     manifest.week_id, reel.reel_id, platform, "UPLOAD_ATTEMPTED",
                     error="Gonderim baslatildi; sonuc henuz yazilmadi.",
                 )
@@ -957,7 +991,7 @@ class SimpleWeeklyPipeline:
                 res_rec = publisher.upload_and_schedule(rec)
             except Exception as e:
                 logger.error(f"[{platform.upper()}] {reel.reel_id} beklenmeyen hata: {e}")
-                self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_RETRYABLE", error=str(e))
+                self._record_platform_status(manifest.week_id, reel.reel_id, platform, "FAILED_RETRYABLE", error=str(e))
                 return PhaseResult(False, platform.upper(), f"{reel.reel_id}: {e}", {"failed_reel": reel.reel_id, "hard_stop": True})
 
             status_val = str(res_rec.status.value if hasattr(res_rec.status, "value") else res_rec.status)
@@ -976,7 +1010,7 @@ class SimpleWeeklyPipeline:
                     manifest, platform, res_rec.remote_id, reel.reel_id
                 )
                 if clash:
-                    self.batch_repo.update_platform_status(
+                    self._record_platform_status(
                         manifest.week_id, reel.reel_id, platform, "FAILED_FATAL",
                         error=(
                             f"REEL_ID_MEDIA_MISMATCH: {res_rec.remote_id} zaten {clash} "
@@ -994,14 +1028,14 @@ class SimpleWeeklyPipeline:
                     )
 
             if status_val in PLATFORM_SUCCESS_STATUSES:
-                self.batch_repo.update_platform_status(
+                self._record_platform_status(
                     manifest.week_id, reel.reel_id, platform, status_val,
                     remote_id=res_rec.remote_id, url=res_rec.remote_url, error=None,
                 )
                 logger.info(f"[{platform.upper()}] {reel.reel_id} basariyla planlandi ({reel.scheduled_at_local}).")
                 continue
 
-            self.batch_repo.update_platform_status(
+            self._record_platform_status(
                 manifest.week_id, reel.reel_id, platform, status_val,
                 remote_id=res_rec.remote_id, url=res_rec.remote_url, error=res_rec.last_error,
             )
@@ -1079,7 +1113,7 @@ class SimpleWeeklyPipeline:
         for reel in manifest.reels:
             progress = self.batch_repo.load_progress(manifest.week_id)
             entry = progress.get(reel.reel_id, {}).get("instagram", {})
-            if entry.get("status") in INSTAGRAM_TERMINAL_STATUSES:
+            if entry.get("status") in INSTAGRAM_TERMINAL_STATUSES and self._counts_as_done(entry):
                 # Covers a Reel already handed to the cloud worker too: scheduling it here
                 # as well would put two copies of the same video on the account.
                 logger.info(f"[INSTAGRAM] {reel.reel_id} zaten {entry.get('status')}, atlanıyor.")
@@ -1099,7 +1133,7 @@ class SimpleWeeklyPipeline:
                 reel_id=reel.reel_id,
             )
 
-            self.batch_repo.update_platform_status(
+            self._record_platform_status(
                 manifest.week_id, reel.reel_id, "instagram", status, error=error
             )
 
@@ -1125,7 +1159,7 @@ class SimpleWeeklyPipeline:
     def _instagram_preflight(self, manifest: BatchManifest, reel: BatchReel, video_file: Optional[Path], phase: str):
         """The media checks both Instagram routes share. Returns (ok, reason)."""
         if video_file is None or not video_file.exists():
-            self.batch_repo.update_platform_status(
+            self._record_platform_status(
                 manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL",
                 error="Video file missing on disk",
             )
@@ -1134,14 +1168,14 @@ class SimpleWeeklyPipeline:
         reel_state = self.state_repo.get_reel_state(reel.reel_id)
         elig_ok, elig_reason = is_live_production_eligible(reel_state, video_file)
         if not elig_ok:
-            self.batch_repo.update_platform_status(
+            self._record_platform_status(
                 manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=elig_reason
             )
             return False, elig_reason
 
         id_ok, id_reason = verify_reel_id_invariant(reel.reel_id, reel_state.reel_id, reel.reel_id, video_file)
         if not id_ok:
-            self.batch_repo.update_platform_status(
+            self._record_platform_status(
                 manifest.week_id, reel.reel_id, "instagram", "FAILED_FATAL", error=id_reason
             )
             return False, id_reason
@@ -1184,14 +1218,14 @@ class SimpleWeeklyPipeline:
             )
 
             if ok and data.get("ok"):
-                self.batch_repo.update_platform_status(
+                self._record_platform_status(
                     manifest.week_id, reel.reel_id, "instagram", "MEDIA_READY",
                     remote_media_id=data.get("media_object_key"), error=None,
                 )
                 logger.info(f"[INSTAGRAM] {reel.reel_id} MEDIA_READY: {data.get('media_object_key')}")
                 continue
 
-            self.batch_repo.update_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_RETRYABLE", error=err)
+            self._record_platform_status(manifest.week_id, reel.reel_id, "instagram", "FAILED_RETRYABLE", error=err)
             logger.error(f"[INSTAGRAM] {reel.reel_id} handoff basarisiz: {err}. Pipeline durduruluyor.")
             return PhaseResult(False, "INSTAGRAM_HANDOFF", f"{reel.reel_id}: {err}", {"failed_reel": reel.reel_id})
 

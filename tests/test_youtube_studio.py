@@ -103,6 +103,7 @@ def test_youtube_studio_planlayin_and_schedule_accordion_detection():
     
     mock_date_hidden = MagicMock()
     mock_date_hidden.is_visible.return_value = False
+    mock_date_hidden.wait_for.side_effect = TimeoutError("not visible")
 
     # Mock tabs so detect_current_wizard_step returns VISIBILITY
     visibility_tab = MagicMock()
@@ -163,6 +164,7 @@ def test_youtube_studio_date_and_time_picker_interaction():
 
     mock_hidden = MagicMock()
     mock_hidden.is_visible.return_value = False
+    mock_hidden.wait_for.side_effect = TimeoutError("not visible")
 
     def locator_side_effect(sel):
         res = MagicMock()
@@ -364,6 +366,7 @@ def test_youtube_studio_invalid_date_error_blocks_schedule_click():
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -580,6 +583,7 @@ def test_disabled_planla_button_prevents_click_and_fails_safely():
     # Valid date and time inputs
     mock_valid_loc = MagicMock()
     mock_valid_loc.is_visible.return_value = False
+    mock_valid_loc.wait_for.side_effect = TimeoutError("not visible")
 
     # Disabled Planla button
     mock_disabled_btn = MagicMock()
@@ -595,6 +599,7 @@ def test_disabled_planla_button_prevents_click_and_fails_safely():
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -709,6 +714,7 @@ def test_audience_set_not_made_for_kids_strict_verification():
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -739,6 +745,7 @@ def test_audience_mismatch_fails_when_yes_checked():
         else:
             loc = MagicMock()
             loc.is_visible.return_value = False
+            loc.wait_for.side_effect = TimeoutError("not visible")
             res.first = loc
         return res
 
@@ -826,6 +833,12 @@ class _DraftLoc:
 
     def is_visible(self, timeout=None):
         return self._visible() if callable(self._visible) else self._visible
+
+    def wait_for(self, state="visible", timeout=None):
+        visible = self._visible() if callable(self._visible) else self._visible
+        if state == "visible" and not visible:
+            raise TimeoutError(f"{self._kind} not visible")
+        return None
 
     def is_enabled(self, timeout=None):
         return self._enabled
@@ -1072,6 +1085,7 @@ def _make_mock_page_with_tabs(active_tab_text="Ayrıntılar", tab_count=4):
         m.first = MagicMock()
         m.first.is_visible.return_value = False
         m.first.is_enabled.return_value = False
+        m.first.wait_for.side_effect = TimeoutError("not visible")
         m.count.return_value = 0
         return m
 
@@ -1161,6 +1175,7 @@ def test_exact_live_bug_regression_stale_details_with_video_elements_content():
     # Stale background details radio (should be ignored by consensus)
     mock_stale_radio = MagicMock()
     mock_stale_radio.is_visible.return_value = False
+    mock_stale_radio.wait_for.side_effect = TimeoutError("not visible")
 
     def dialog_loc(sel):
         res = MagicMock()
@@ -1185,6 +1200,7 @@ def test_exact_live_bug_regression_stale_details_with_video_elements_content():
             res.is_visible.return_value = False
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
             res.count.return_value = 0
         return res
 
@@ -1261,6 +1277,7 @@ def test_wizard_step_detection_all_four_steps_with_stale_previous_clones():
                 res.first = aud
             else:
                 res.first.is_visible.return_value = False
+                res.first.wait_for.side_effect = TimeoutError("not visible")
                 res.count.return_value = 0
             return res
 
@@ -1306,6 +1323,8 @@ def test_advance_wizard_to_visibility_full_progression():
         # Audience NOT_MFK radio: visible and clickable on DETAILS step
         if "VIDEO_MADE_FOR_KIDS_NOT_MFK" in sel:
             m.first.is_visible.return_value = (state["step_index"] == 0)
+            if state["step_index"] != 0:
+                m.first.wait_for.side_effect = TimeoutError("not visible")
             m.first.bounding_box.return_value = {"x": 100, "y": 200, "width": 30, "height": 30}
             m.first.get_attribute.return_value = "true" if state["step_index"] == 0 else "false"
             m.first.scroll_into_view_if_needed = MagicMock()
@@ -1316,6 +1335,8 @@ def test_advance_wizard_to_visibility_full_progression():
 
         if "VIDEO_MADE_FOR_KIDS_MFK" in sel:
             m.first.is_visible.return_value = (state["step_index"] == 0)
+            if state["step_index"] != 0:
+                m.first.wait_for.side_effect = TimeoutError("not visible")
             m.first.get_attribute.return_value = "false"
             m.count.return_value = 1 if state["step_index"] == 0 else 0
             m.nth.return_value = m.first
@@ -1334,11 +1355,15 @@ def test_advance_wizard_to_visibility_full_progression():
         # Show More button
         if "toggle-button" in sel or "Show more" in sel or "Daha fazla" in sel:
             m.first.is_visible.return_value = (state["step_index"] == 0)
+            if state["step_index"] != 0:
+                m.first.wait_for.side_effect = TimeoutError("not visible")
             return m
 
         # AI disclosure radio
         if "ALTERED_CONTENT_YES" in sel or "SYNTHETIC_CONTENT_YES" in sel:
             m.first.is_visible.return_value = (state["step_index"] == 0)
+            if state["step_index"] != 0:
+                m.first.wait_for.side_effect = TimeoutError("not visible")
             return m
 
         # Checks completion - dialog text
@@ -1353,6 +1378,7 @@ def test_advance_wizard_to_visibility_full_progression():
 
         m.first.is_visible.return_value = False
         m.first.is_enabled.return_value = False
+        m.first.wait_for.side_effect = TimeoutError("not visible")
         m.count.return_value = 0
         return m
 
@@ -1478,6 +1504,7 @@ def test_audience_bounding_box_required():
             m.first.click = MagicMock()
             return m
         m.first.is_visible.return_value = False
+        m.first.wait_for.side_effect = TimeoutError("not visible")
         return m
 
     mock_page.locator = MagicMock(side_effect=locator_side_effect)
@@ -1649,6 +1676,7 @@ def test_audience_scoped_to_active_kitle_container_ignores_clones():
         else:
             res.count.return_value = 0
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = page_locator
@@ -1699,6 +1727,7 @@ def test_audience_ambiguous_pairs_in_container_fails():
         else:
             res.count.return_value = 0
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = page_locator
@@ -1740,6 +1769,7 @@ def test_single_visible_hh_mm_paper_input_fallback_resolves_time():
         else:
             res.count.return_value = 0
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1797,6 +1827,7 @@ def test_ai_disclosure_control_not_found():
 
     mock_loc = MagicMock()
     mock_loc.first.is_visible.return_value = False
+    mock_loc.first.wait_for.side_effect = TimeoutError("not visible")
     mock_loc.count.return_value = 0
     mock_dialog.locator.return_value = mock_loc
 
@@ -1832,6 +1863,7 @@ def test_ai_disclosure_already_enabled():
             res.is_visible.return_value = True
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_dialog.locator.side_effect = d_loc_side_effect
@@ -1841,6 +1873,7 @@ def test_ai_disclosure_already_enabled():
             return mock_dialog
         res = MagicMock()
         res.first.is_visible.return_value = False
+        res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1883,6 +1916,7 @@ def test_ai_disclosure_enable_success():
             res.first = mock_aud_yes
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_dialog.locator.side_effect = d_loc_side_effect
@@ -1892,6 +1926,7 @@ def test_ai_disclosure_enable_success():
             return mock_dialog
         res = MagicMock()
         res.first.is_visible.return_value = False
+        res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_page.locator.side_effect = loc_side_effect
@@ -1940,6 +1975,12 @@ def test_ai_disclosure_dual_metadata_editors_scopes_strictly_to_active_dialog():
 
     mock_ai_radio = MagicMock()
     mock_ai_radio.is_visible.side_effect = lambda *args, **kwargs: expanded_state["open"]
+
+    def _ai_radio_wait_for_side_effect(*args, **kwargs):
+        if not expanded_state["open"]:
+            raise TimeoutError("not visible")
+
+    mock_ai_radio.wait_for.side_effect = _ai_radio_wait_for_side_effect
     mock_ai_radio.get_attribute.side_effect = lambda attr: "ALTERED_CONTENT_YES" if attr == "name" else "false"
 
     mock_aud_no = MagicMock()
@@ -1958,8 +1999,10 @@ def test_ai_disclosure_dual_metadata_editors_scopes_strictly_to_active_dialog():
         elif "ALTERED_CONTENT_YES" in sel:
             res.first = mock_ai_radio
             res.is_visible = mock_ai_radio.is_visible
+            res.wait_for = mock_ai_radio.wait_for
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_dialog_editor.locator.side_effect = dialog_editor_loc
@@ -1992,6 +2035,7 @@ def test_ai_disclosure_dual_metadata_editors_scopes_strictly_to_active_dialog():
             res.is_visible.return_value = True
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_dialog.locator.side_effect = dialog_loc
@@ -2011,6 +2055,7 @@ def test_ai_disclosure_dual_metadata_editors_scopes_strictly_to_active_dialog():
             return res
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
             return res
 
     mock_page.locator.side_effect = page_loc
@@ -2067,6 +2112,7 @@ def test_ai_disclosure_corrupted_audience_fails_safely():
             res.is_visible.return_value = True
         else:
             res.first.is_visible.return_value = False
+            res.first.wait_for.side_effect = TimeoutError("not visible")
         return res
 
     mock_dialog.locator.side_effect = d_loc_side_effect

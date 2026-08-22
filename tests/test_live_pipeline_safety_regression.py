@@ -478,6 +478,13 @@ class _FakeLocator:
     def is_visible(self, timeout=None):
         return self._visible
 
+    def wait_for(self, state="visible", timeout=None):
+        # Mirrors real Playwright: raises if the element never reaches `state`
+        # within timeout, returns None (silently) once it does. Unlike
+        # is_visible(timeout=...), this fake actually enforces that contract.
+        if state == "visible" and not self._visible:
+            raise TimeoutError(f"locator did not become visible within {timeout}ms")
+
     def click(self, timeout=None):
         self.clicked = True
 
@@ -561,6 +568,13 @@ def test_flow_landing_page_raises_user_action_required_not_ui_changed(tmp_path):
 
         def is_visible(self, timeout=None):
             return self._visible
+
+        def wait_for(self, state="visible", timeout=None):
+            # Mirrors real Playwright: raises if the element never reaches `state`
+            # within timeout, returns None (silently) once it does. Unlike
+            # is_visible(timeout=...), this fake actually enforces that contract.
+            if state == "visible" and not self._visible:
+                raise TimeoutError(f"locator did not become visible within {timeout}ms")
 
     class _LandingPage:
         url = "https://labs.google/fx/tools/flow"

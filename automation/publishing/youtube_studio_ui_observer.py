@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
 from .youtube_studio_selectors import YouTubeStudioSelectors
+from .ui_wait import visible
 
 logger = logging.getLogger("ReelsAIFactory.YouTubeStudioUIObserver")
 
@@ -155,8 +156,8 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.LOGIN_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    return False
+                loc.wait_for(state="visible", timeout=1000)
+                return False
             except Exception:
                 pass
 
@@ -193,7 +194,7 @@ class YouTubeStudioUIObserver:
             for sel in YouTubeStudioSelectors.CHANNEL_HEADER_SELECTORS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000):
+                    if visible(loc, 1000):
                         text = loc.inner_text().strip()
                         if text:
                             detected_text = text
@@ -265,17 +266,17 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.VIDEO_LINK_SELECTORS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    href = loc.get_attribute("href") or loc.inner_text().strip()
-                    if href:
-                        video_url = href
-                        if "youtu.be/" in href:
-                            video_id = href.split("youtu.be/")[1].split("?")[0]
-                        elif "shorts/" in href:
-                            video_id = href.split("shorts/")[1].split("?")[0]
-                        elif "v=" in href:
-                            video_id = href.split("v=")[1].split("&")[0]
-                        break
+                loc.wait_for(state="visible", timeout=1000)
+                href = loc.get_attribute("href") or loc.inner_text().strip()
+                if href:
+                    video_url = href
+                    if "youtu.be/" in href:
+                        video_id = href.split("youtu.be/")[1].split("?")[0]
+                    elif "shorts/" in href:
+                        video_id = href.split("shorts/")[1].split("?")[0]
+                    elif "v=" in href:
+                        video_id = href.split("v=")[1].split("&")[0]
+                    break
             except Exception:
                 pass
 
@@ -295,15 +296,14 @@ class YouTubeStudioUIObserver:
         """
         try:
             dialog = self.page.locator(YouTubeStudioSelectors.UPLOAD_WIZARD_DIALOG).first
-            if not dialog.is_visible(timeout=timeout_ms):
-                return False
+            dialog.wait_for(state="visible", timeout=timeout_ms)
         except Exception:
             return False
 
         for sel in YouTubeStudioSelectors.WIZARD_STEPPER_IN_DIALOG:
             try:
-                if dialog.locator(sel).first.is_visible(timeout=timeout_ms):
-                    return True
+                dialog.locator(sel).first.wait_for(state="visible", timeout=timeout_ms)
+                return True
             except Exception:
                 continue
         return False
@@ -332,7 +332,8 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.EDIT_DRAFT_BUTTON_STRATEGIES:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1500) and loc.is_enabled():
+                loc.wait_for(state="visible", timeout=1500)
+                if loc.is_enabled():
                     loc.scroll_into_view_if_needed(timeout=2000)
                     loc.click(timeout=3000)
                     clicked_via = sel
@@ -403,7 +404,7 @@ class YouTubeStudioUIObserver:
         while True:
             for sel in YouTubeStudioSelectors.VIDEO_EDIT_PAGE_READY:
                 try:
-                    if self.page.locator(sel).first.is_visible(timeout=1000):
+                    if visible(self.page.locator(sel).first, 1000):
                         return True
                 except Exception:
                     pass
@@ -500,11 +501,14 @@ class YouTubeStudioUIObserver:
         try:
             for sel in YouTubeStudioSelectors.TITLE_INPUTS:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    curr_val = loc.inner_text() or (loc.input_value() if hasattr(loc, "input_value") else "")
-                    if clean_title in curr_val.lower() or r_id_clean in curr_val.lower():
-                        logger.info(f"Existing upload wizard is already open for '{target_title}'. Resuming directly.")
-                        return True
+                try:
+                    loc.wait_for(state="visible", timeout=1000)
+                except Exception:
+                    continue
+                curr_val = loc.inner_text() or (loc.input_value() if hasattr(loc, "input_value") else "")
+                if clean_title in curr_val.lower() or r_id_clean in curr_val.lower():
+                    logger.info(f"Existing upload wizard is already open for '{target_title}'. Resuming directly.")
+                    return True
         except Exception:
             pass
 
@@ -529,20 +533,20 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.CREATE_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=2000):
-                    loc.click()
-                    time.sleep(1.0)
-                    break
+                loc.wait_for(state="visible", timeout=2000)
+                loc.click()
+                time.sleep(1.0)
+                break
             except Exception:
                 pass
 
         for sel in YouTubeStudioSelectors.UPLOAD_MENU_ITEMS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=2000):
-                    loc.click()
-                    time.sleep(1.0)
-                    return True
+                loc.wait_for(state="visible", timeout=2000)
+                loc.click()
+                time.sleep(1.0)
+                return True
             except Exception:
                 pass
 
@@ -586,7 +590,8 @@ class YouTubeStudioUIObserver:
             for sel in YouTubeStudioSelectors.NEXT_BUTTONS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000) and loc.is_enabled():
+                    loc.wait_for(state="visible", timeout=1000)
+                    if loc.is_enabled():
                         return True
                 except Exception:
                     pass
@@ -609,7 +614,7 @@ class YouTubeStudioUIObserver:
             for sel in selectors:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000):
+                    if visible(loc, 1000):
                         return loc
                 except Exception:
                     pass
@@ -670,13 +675,13 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.DESCRIPTION_INPUTS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=2000):
-                    loc.click()
-                    self.page.keyboard.press("Control+A")
-                    self.page.keyboard.press("Backspace")
-                    loc.fill(full_desc)
-                    logger.info("Filled YouTube Description.")
-                    break
+                loc.wait_for(state="visible", timeout=2000)
+                loc.click()
+                self.page.keyboard.press("Control+A")
+                self.page.keyboard.press("Backspace")
+                loc.fill(full_desc)
+                logger.info("Filled YouTube Description.")
+                break
             except Exception:
                 pass
 
@@ -747,10 +752,8 @@ class YouTubeStudioUIObserver:
                 # If cannot resolve dedicated container, scope to active uploads dialog
                 dialog_loc = self.page.locator("ytcp-uploads-dialog").first
                 try:
-                    if dialog_loc.is_visible(timeout=500):
-                        container = dialog_loc
-                    else:
-                        container = self.page
+                    dialog_loc.wait_for(state="visible", timeout=500)
+                    container = dialog_loc
                 except Exception:
                     container = self.page
 
@@ -925,13 +928,13 @@ class YouTubeStudioUIObserver:
         for sel in strong_selectors:
             try:
                 loc = scope.locator(sel).first
-                if hasattr(loc, "is_visible") and loc.is_visible(timeout=250) is True:
-                    visible_hits += 1
-                    if ("Planlayın" in sel or "Schedule" in sel
-                            or "Kaydedin" in sel or "Save or publish" in sel):
-                        return True
-                    if visible_hits >= 2:
-                        return True
+                loc.wait_for(state="visible", timeout=250)
+                visible_hits += 1
+                if ("Planlayın" in sel or "Schedule" in sel
+                        or "Kaydedin" in sel or "Save or publish" in sel):
+                    return True
+                if visible_hits >= 2:
+                    return True
             except Exception:
                 pass
 
@@ -941,9 +944,9 @@ class YouTubeStudioUIObserver:
                 "h1:has-text('Visibility'), h2:has-text('Visibility')"
             ).first
             schedule = scope.locator("text=Planlayın, text=Schedule").first
-            if (hasattr(heading, "is_visible") and heading.is_visible(timeout=250) is True and
-                hasattr(schedule, "is_visible") and schedule.is_visible(timeout=250) is True):
-                return True
+            heading.wait_for(state="visible", timeout=250)
+            schedule.wait_for(state="visible", timeout=250)
+            return True
         except Exception:
             pass
 
@@ -1017,10 +1020,8 @@ class YouTubeStudioUIObserver:
         def _visible(sel: str) -> bool:
             try:
                 loc = scope.locator(sel).first
-                if hasattr(loc, "is_visible") and callable(loc.is_visible):
-                    v = loc.is_visible(timeout=200)
-                    return v is True or (isinstance(v, bool) and v)
-                return False
+                loc.wait_for(state="visible", timeout=200)
+                return True
             except Exception:
                 return False
 
@@ -1079,10 +1080,7 @@ class YouTubeStudioUIObserver:
                     for i in range(c_count):
                         elem = candidates.nth(i)
                         try:
-                            if hasattr(elem, "is_visible") and callable(elem.is_visible):
-                                v = elem.is_visible(timeout=200)
-                                if v is False:
-                                    continue
+                            elem.wait_for(state="visible", timeout=200)
                             aria_sel = elem.get_attribute("aria-selected") if hasattr(elem, "get_attribute") else ""
                             if not isinstance(aria_sel, str):
                                 aria_sel = ""
@@ -1112,10 +1110,7 @@ class YouTubeStudioUIObserver:
                 elif hasattr(candidates, "first"):
                     elem = candidates.first
                     try:
-                        if hasattr(elem, "is_visible") and callable(elem.is_visible):
-                            v = elem.is_visible(timeout=200)
-                            if v is False:
-                                continue
+                        elem.wait_for(state="visible", timeout=200)
                         aria_sel = elem.get_attribute("aria-selected") if hasattr(elem, "get_attribute") else ""
                         if not isinstance(aria_sel, str):
                             aria_sel = ""
@@ -1174,11 +1169,11 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.NEXT_BUTTONS:
             try:
                 loc = scope.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    is_en = loc.is_enabled() if hasattr(loc, "is_enabled") else True
-                    aria_dis = loc.get_attribute("aria-disabled") if hasattr(loc, "get_attribute") else None
-                    if is_en and aria_dis != "true":
-                        return loc
+                loc.wait_for(state="visible", timeout=1000)
+                is_en = loc.is_enabled() if hasattr(loc, "is_enabled") else True
+                aria_dis = loc.get_attribute("aria-disabled") if hasattr(loc, "get_attribute") else None
+                if is_en and aria_dis != "true":
+                    return loc
             except Exception:
                 pass
         return None
@@ -1203,7 +1198,8 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.NEXT_BUTTONS:
             try:
                 loc = scope.locator(sel).first
-                if loc.is_visible(timeout=1000) and (not hasattr(loc, "is_enabled") or loc.is_enabled()):
+                loc.wait_for(state="visible", timeout=1000)
+                if not hasattr(loc, "is_enabled") or loc.is_enabled():
                     if hasattr(loc, "scroll_into_view_if_needed"):
                         loc.scroll_into_view_if_needed(timeout=1500)
                     loc.click(timeout=3000)
@@ -1257,11 +1253,11 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=600):
-                    loc.click(timeout=2500)
-                    logger.info("[CONTENT_REVIEW_INFO] Dismissed informational review notice via 'Anladım'/'Got it'.")
-                    time.sleep(0.5)
-                    return
+                loc.wait_for(state="visible", timeout=600)
+                loc.click(timeout=2500)
+                logger.info("[CONTENT_REVIEW_INFO] Dismissed informational review notice via 'Anladım'/'Got it'.")
+                time.sleep(0.5)
+                return
             except Exception:
                 continue
 
@@ -1305,7 +1301,8 @@ class YouTubeStudioUIObserver:
             for sel in YouTubeStudioSelectors.NEXT_BUTTONS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=300) and loc.is_enabled():
+                    loc.wait_for(state="visible", timeout=300)
+                    if loc.is_enabled():
                         logger.info("Checks: Next button is enabled, proceeding.")
                         return True
                 except Exception:
@@ -1448,9 +1445,9 @@ class YouTubeStudioUIObserver:
             score = 0
             is_vis = False
             try:
-                if hasattr(d, "is_visible") and d.is_visible(timeout=300):
-                    is_vis = True
-                    score += 5
+                d.wait_for(state="visible", timeout=300)
+                is_vis = True
+                score += 5
             except Exception:
                 pass
 
@@ -1468,9 +1465,9 @@ class YouTubeStudioUIObserver:
             try:
                 if hasattr(d, "locator"):
                     desc = d.locator("#scrollable-content, ytcp-stepper, #next-button, div[role='tablist']").first
-                    if hasattr(desc, "is_visible") and desc.is_visible(timeout=200):
-                        score += 5
-                        is_vis = True
+                    desc.wait_for(state="visible", timeout=200)
+                    score += 5
+                    is_vis = True
             except Exception:
                 pass
 
@@ -1566,8 +1563,8 @@ class YouTubeStudioUIObserver:
 
         is_already_open = False
         try:
-            if ai_radio_already_visible.is_visible(timeout=300):
-                is_already_open = True
+            ai_radio_already_visible.wait_for(state="visible", timeout=300)
+            is_already_open = True
         except Exception:
             pass
 
@@ -1594,12 +1591,12 @@ class YouTubeStudioUIObserver:
             for sel in show_more_candidates:
                 try:
                     loc = editor_scope.locator(sel).first
-                    if loc.is_visible(timeout=1000):
-                        # Ensure NOT touching touch feedback child div
-                        tag = loc.evaluate("el => el.tagName") if hasattr(loc, "evaluate") else "BUTTON"
-                        if tag != "DIV":
-                            show_more_btn = loc
-                            break
+                    loc.wait_for(state="visible", timeout=1000)
+                    # Ensure NOT touching touch feedback child div
+                    tag = loc.evaluate("el => el.tagName") if hasattr(loc, "evaluate") else "BUTTON"
+                    if tag != "DIV":
+                        show_more_btn = loc
+                        break
                 except Exception:
                     pass
 
@@ -1607,9 +1604,9 @@ class YouTubeStudioUIObserver:
                 for sel in show_more_candidates:
                     try:
                         loc = active_dialog.locator(sel).first
-                        if loc.is_visible(timeout=1000):
-                            show_more_btn = loc
-                            break
+                        loc.wait_for(state="visible", timeout=1000)
+                        show_more_btn = loc
+                        break
                     except Exception:
                         pass
 
@@ -1653,20 +1650,26 @@ class YouTubeStudioUIObserver:
                 current_txt = show_more_btn.inner_text().lower() if hasattr(show_more_btn, "inner_text") else ""
                 if "gizle" in current_aria.lower() or "hide" in current_aria.lower() or "daha az" in current_txt or "show less" in current_txt:
                     expanded_verified = True
-
-                # B) Check Altered content radio visible
-                if not expanded_verified:
-                    r_check = active_dialog.locator("tp-yt-paper-radio-button[name='ALTERED_CONTENT_YES']").first
-                    if r_check.is_visible(timeout=1000):
-                        expanded_verified = True
-
-                # C) Check Altered content section visible
-                if not expanded_verified:
-                    sec_check = active_dialog.locator("div.section:has-text('Değiştirilmiş içerik'), div.section:has-text('Altered content')").first
-                    if sec_check.is_visible(timeout=1000):
-                        expanded_verified = True
             except Exception:
                 pass
+
+            # B) Check Altered content radio visible
+            if not expanded_verified:
+                try:
+                    r_check = active_dialog.locator("tp-yt-paper-radio-button[name='ALTERED_CONTENT_YES']").first
+                    r_check.wait_for(state="visible", timeout=1000)
+                    expanded_verified = True
+                except Exception:
+                    pass
+
+            # C) Check Altered content section visible
+            if not expanded_verified:
+                try:
+                    sec_check = active_dialog.locator("div.section:has-text('Değiştirilmiş içerik'), div.section:has-text('Altered content')").first
+                    sec_check.wait_for(state="visible", timeout=1000)
+                    expanded_verified = True
+                except Exception:
+                    pass
 
             if not expanded_verified:
                 logger.error("[DETAILS] ADVANCED_SETTINGS_NOT_EXPANDED: Advanced settings did not expand.")
@@ -1680,14 +1683,18 @@ class YouTubeStudioUIObserver:
             "tp-yt-paper-radio-button[name='SYNTHETIC_CONTENT_YES']:visible"
         ).first
 
-        if not ai_radio or not ai_radio.is_visible(timeout=1000):
+        try:
+            if not ai_radio:
+                raise Exception("ai_radio not resolved")
+            ai_radio.wait_for(state="visible", timeout=1000)
+        except Exception:
             # Fallback within active dialog
             for sel in YouTubeStudioSelectors.AI_DISCLOSURE_YES_RADIO:
                 try:
                     loc = active_dialog.locator(sel).first
-                    if loc.is_visible(timeout=1000):
-                        ai_radio = loc
-                        break
+                    loc.wait_for(state="visible", timeout=1000)
+                    ai_radio = loc
+                    break
                 except Exception:
                     pass
 
@@ -1755,20 +1762,20 @@ class YouTubeStudioUIObserver:
         for d_sel in YouTubeStudioSelectors.DATE_PICKER_INPUTS:
             try:
                 d_loc = self.page.locator(d_sel).first
-                if d_loc.is_visible(timeout=500):
-                    logger.info("Schedule date controls are already visible.")
-                    return True
+                d_loc.wait_for(state="visible", timeout=500)
+                logger.info("Schedule date controls are already visible.")
+                return True
             except Exception:
                 pass
 
         for sel in YouTubeStudioSelectors.SCHEDULE_ACCORDION_HEADERS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1500):
-                    loc.click()
-                    time.sleep(1.0)
-                    logger.info(f"Clicked Schedule accordion header: {sel}")
-                    return True
+                loc.wait_for(state="visible", timeout=1500)
+                loc.click()
+                time.sleep(1.0)
+                logger.info(f"Clicked Schedule accordion header: {sel}")
+                return True
             except Exception as e:
                 logger.debug(f"Schedule accordion selector {sel} failed: {e}")
 
@@ -1813,10 +1820,10 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.CALENDAR_DIALOGS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=500):
-                    self.page.keyboard.press("Escape")
-                    time.sleep(0.5)
-                    break
+                loc.wait_for(state="visible", timeout=500)
+                self.page.keyboard.press("Escape")
+                time.sleep(0.5)
+                break
             except Exception:
                 pass
         return True
@@ -1836,10 +1843,10 @@ class YouTubeStudioUIObserver:
         for d_sel in YouTubeStudioSelectors.DATE_PICKER_INPUTS:
             try:
                 d_loc = self.page.locator(d_sel).first
-                if d_loc.is_visible(timeout=1000):
-                    d_loc.click()
-                    time.sleep(0.8)
-                    break
+                d_loc.wait_for(state="visible", timeout=1000)
+                d_loc.click()
+                time.sleep(0.8)
+                break
             except Exception:
                 pass
 
@@ -1849,12 +1856,12 @@ class YouTubeStudioUIObserver:
             for h_sel in YouTubeStudioSelectors.CALENDAR_MONTH_HEADERS:
                 try:
                     h_loc = self.page.locator(h_sel).first
-                    if h_loc.is_visible(timeout=500):
-                        txt = h_loc.inner_text().strip()
-                        y, m = self.parse_calendar_month_year(txt)
-                        if y > 0 and m > 0:
-                            header_text = txt
-                            break
+                    h_loc.wait_for(state="visible", timeout=500)
+                    txt = h_loc.inner_text().strip()
+                    y, m = self.parse_calendar_month_year(txt)
+                    if y > 0 and m > 0:
+                        header_text = txt
+                        break
                 except Exception:
                     pass
 
@@ -1869,20 +1876,20 @@ class YouTubeStudioUIObserver:
                     for next_sel in YouTubeStudioSelectors.CALENDAR_NEXT_MONTH_BUTTONS:
                         try:
                             n_btn = self.page.locator(next_sel).first
-                            if n_btn.is_visible(timeout=500):
-                                n_btn.click()
-                                time.sleep(0.5)
-                                break
+                            n_btn.wait_for(state="visible", timeout=500)
+                            n_btn.click()
+                            time.sleep(0.5)
+                            break
                         except Exception:
                             pass
                 else:
                     for prev_sel in YouTubeStudioSelectors.CALENDAR_PREV_MONTH_BUTTONS:
                         try:
                             p_btn = self.page.locator(prev_sel).first
-                            if p_btn.is_visible(timeout=500):
-                                p_btn.click()
-                                time.sleep(0.5)
-                                break
+                            p_btn.wait_for(state="visible", timeout=500)
+                            p_btn.click()
+                            time.sleep(0.5)
+                            break
                         except Exception:
                             pass
             else:
@@ -1931,10 +1938,10 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.DATE_ERROR_INDICATORS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=500):
-                    err = loc.inner_text().strip() if hasattr(loc, "inner_text") else "Geçersiz Tarih"
-                    logger.error(f"Date validation error detected on YouTube Studio: {err}")
-                    return False, f"Date error: {err}"
+                loc.wait_for(state="visible", timeout=500)
+                err = loc.inner_text().strip() if hasattr(loc, "inner_text") else "Geçersiz Tarih"
+                logger.error(f"Date validation error detected on YouTube Studio: {err}")
+                return False, f"Date error: {err}"
             except Exception:
                 pass
 
@@ -1969,16 +1976,16 @@ class YouTubeStudioUIObserver:
         for container_sel in ["#schedule-section", "#schedule-card", "ytcp-datetime-picker", "ytcp-visibility-card"]:
             try:
                 container = self.page.locator(container_sel).first
-                if container.is_visible(timeout=500):
-                    inputs = container.locator("input.style-scope.tp-yt-paper-input, input")
-                    in_count = inputs.count()
-                    for j in range(in_count):
-                        cand = inputs.nth(j)
-                        val = cand.input_value().strip() if hasattr(cand, "input_value") else ""
-                        # If value matches HH:MM time pattern (e.g. 00:00, 19:30)
-                        if re.match(r"^\d{1,2}:\d{2}$", val):
-                            logger.info(f"Resolved time input via schedule card value pattern: '{val}'")
-                            return cand
+                container.wait_for(state="visible", timeout=500)
+                inputs = container.locator("input.style-scope.tp-yt-paper-input, input")
+                in_count = inputs.count()
+                for j in range(in_count):
+                    cand = inputs.nth(j)
+                    val = cand.input_value().strip() if hasattr(cand, "input_value") else ""
+                    # If value matches HH:MM time pattern (e.g. 00:00, 19:30)
+                    if re.match(r"^\d{1,2}:\d{2}$", val):
+                        logger.info(f"Resolved time input via schedule card value pattern: '{val}'")
+                        return cand
             except Exception:
                 pass
 
@@ -2019,9 +2026,9 @@ class YouTubeStudioUIObserver:
             for sel in YouTubeStudioSelectors.TIME_PICKER_INPUTS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000):
-                        time_loc = loc
-                        break
+                    loc.wait_for(state="visible", timeout=1000)
+                    time_loc = loc
+                    break
                 except Exception:
                     pass
 
@@ -2047,10 +2054,10 @@ class YouTubeStudioUIObserver:
             for d_sel in YouTubeStudioSelectors.TIME_DROPDOWN_ITEMS:
                 try:
                     d_loc = self.page.locator(d_sel).first
-                    if d_loc.is_visible(timeout=500):
-                        d_loc.click()
-                        time.sleep(0.5)
-                        break
+                    d_loc.wait_for(state="visible", timeout=500)
+                    d_loc.click()
+                    time.sleep(0.5)
+                    break
                 except Exception:
                     pass
 
@@ -2080,14 +2087,14 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.DATE_PICKER_INPUTS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=500):
-                    val = loc.input_value() if hasattr(loc, "input_value") else loc.inner_text()
-                    val_clean = val.lower().strip()
-                    if str(target_day) in val_clean and any(m in val_clean for m in ["ağu", "aug", "08"]):
-                        return True, "DATE_MATCH"
-                    elif "17" in val_clean:
-                        logger.error(f"[DATE_MISMATCH] Date input shows 17 instead of {target_day}: '{val}'")
-                        return False, "DATE_MISMATCH"
+                loc.wait_for(state="visible", timeout=500)
+                val = loc.input_value() if hasattr(loc, "input_value") else loc.inner_text()
+                val_clean = val.lower().strip()
+                if str(target_day) in val_clean and any(m in val_clean for m in ["ağu", "aug", "08"]):
+                    return True, "DATE_MATCH"
+                elif "17" in val_clean:
+                    logger.error(f"[DATE_MISMATCH] Date input shows 17 instead of {target_day}: '{val}'")
+                    return False, "DATE_MISMATCH"
             except Exception:
                 pass
 
@@ -2127,18 +2134,18 @@ class YouTubeStudioUIObserver:
                 for sel in YouTubeStudioSelectors.DATE_PICKER_INPUTS:
                     try:
                         loc = self.page.locator(sel).first
-                        if loc.is_visible(timeout=1000):
-                            loc.click()
-                            time.sleep(0.3)
-                            self.page.keyboard.press("Control+A")
-                            self.page.keyboard.press("Backspace")
-                            self.page.keyboard.type(candidate_str)
-                            self.page.keyboard.press("Enter")
-                            time.sleep(0.5)
-                            is_valid, _ = self.validate_date_input()
-                            if is_valid:
-                                logger.info(f"Date accepted with formatted string: '{candidate_str}'")
-                                break
+                        loc.wait_for(state="visible", timeout=1000)
+                        loc.click()
+                        time.sleep(0.3)
+                        self.page.keyboard.press("Control+A")
+                        self.page.keyboard.press("Backspace")
+                        self.page.keyboard.type(candidate_str)
+                        self.page.keyboard.press("Enter")
+                        time.sleep(0.5)
+                        is_valid, _ = self.validate_date_input()
+                        if is_valid:
+                            logger.info(f"Date accepted with formatted string: '{candidate_str}'")
+                            break
                     except Exception:
                         pass
                 if is_valid:
@@ -2169,9 +2176,9 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.TIME_ERROR_INDICATORS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=500):
-                    logger.error(f"Time error detected on YouTube Studio: {loc.inner_text().strip()}")
-                    return False
+                loc.wait_for(state="visible", timeout=500)
+                logger.error(f"Time error detected on YouTube Studio: {loc.inner_text().strip()}")
+                return False
             except Exception:
                 pass
 
@@ -2206,13 +2213,13 @@ class YouTubeStudioUIObserver:
             for sel in YouTubeStudioSelectors.FINAL_SCHEDULE_BUTTONS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000):
-                        btn_text = loc.inner_text().strip() if hasattr(loc, "inner_text") else ""
-                        if "kaydet" in btn_text.lower() or "save" in btn_text.lower():
-                            continue
-                        if loc.is_enabled():
-                            submit_btn = loc
-                            break
+                    loc.wait_for(state="visible", timeout=1000)
+                    btn_text = loc.inner_text().strip() if hasattr(loc, "inner_text") else ""
+                    if "kaydet" in btn_text.lower() or "save" in btn_text.lower():
+                        continue
+                    if loc.is_enabled():
+                        submit_btn = loc
+                        break
                 except Exception:
                     pass
             if submit_btn:
@@ -2239,10 +2246,10 @@ class YouTubeStudioUIObserver:
             for sel in YouTubeStudioSelectors.CLOSE_MODAL_BUTTONS:
                 try:
                     loc = self.page.locator(sel).first
-                    if loc.is_visible(timeout=1000):
-                        loc.click()
-                        logger.info("YouTube Studio Schedule confirmed successfully via modal close.")
-                        return True, "youtube_studio_scheduled"
+                    loc.wait_for(state="visible", timeout=1000)
+                    loc.click()
+                    logger.info("YouTube Studio Schedule confirmed successfully via modal close.")
+                    return True, "youtube_studio_scheduled"
                 except Exception:
                     pass
             time.sleep(1.5)
@@ -2417,7 +2424,8 @@ class YouTubeStudioUIObserver:
         for sel in YouTubeStudioSelectors.FINAL_SCHEDULE_BUTTONS:
             try:
                 loc = self.page.locator(sel).first
-                if loc.is_visible(timeout=1500) and loc.is_enabled():
+                loc.wait_for(state="visible", timeout=1500)
+                if loc.is_enabled():
                     btn_text = loc.inner_text().strip() if hasattr(loc, "inner_text") else ""
                     if "kaydet" in btn_text.lower() or "save" in btn_text.lower():
                         continue

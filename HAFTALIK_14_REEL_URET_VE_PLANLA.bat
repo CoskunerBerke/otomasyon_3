@@ -19,7 +19,10 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 rem Default is the narrated real-history mode with Flow's ambient audio.
-rem   --dry-run  : no Flow, no uploads (mock provider end-to-end)
+rem   --dry-run  : rehearsal only - no Flow, no uploads (mock provider end-to-end).
+rem                Its records are stamped as a rehearsal, so a later live run still
+rem                does the real work. Refused outright on a week that has already
+rem                published for real.
 rem   --sessiz   : the original silent step-by-step construction Reels
 rem   --ig-cloud : hand Instagram to the Railway worker instead of scheduling it
 rem                on instagram.com (never both - that would post each Reel twice)

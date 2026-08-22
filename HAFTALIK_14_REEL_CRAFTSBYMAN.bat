@@ -22,7 +22,9 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-rem   --dry-run          : no Flow, no uploads (mock provider end-to-end)
+rem   --dry-run          : rehearsal only - no Flow, no uploads. Its records are
+rem                        stamped as a rehearsal, so a later live run still does the
+rem                        real work. Refused on a week that has already published.
 rem   --start-date YYYY-MM-DD : force the first day of the week
 set RUNARG=--live
 set EXTRA=
