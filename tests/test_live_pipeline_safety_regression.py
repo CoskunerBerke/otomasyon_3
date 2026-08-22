@@ -534,7 +534,9 @@ def test_youtube_review_modal_dismissed_via_anladim_only():
     # comma-grouped aria-label strategies (Kural 31) and this test kept naming the old
     # bare has-text selector, so its fake matched nothing and it had been failing --
     # quietly, in a suite nobody could read, while the code itself was fine.
-    dismiss_selector = YouTubeStudioSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS[0]
+    # One alternative out of the strategy's comma-union, since _FakePage resolves a union
+    # to whichever alternative it is told is present -- exactly as Playwright would.
+    dismiss_selector = YouTubeStudioSelectors.CONTENT_REVIEW_INFO_DISMISS_BUTTONS[0].split(",")[0].strip()
 
     page = _FakePage(
         inner_text="İçeriğinizi kontrol etmeye devam ediyoruz. Anladım",
