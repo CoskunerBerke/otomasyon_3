@@ -10,7 +10,7 @@ Branch: `hidden-build-second-channel` (PR yok). Türkçe cevap ver, detaylı rap
 | Marka | Kanal | Mod | Platform | Durum |
 |---|---|---|---|---|
 | `buildverse` | @BuiIdVerse | `narrative_ambient_story` | YT+TT+IG | W35 (24–30 Ağu) 14/14 tamam |
-| `craftsbyman` | @craftsbyman | `hidden_build_story` | YT+TT (IG kapalı) | YT 14/14 · TT 11/14 |
+| `craftsbyman` | @craftsbyman | `hidden_build_story` | YT+TT (IG kapalı) | W34 (22–28 Ağu) 14/14 tamam |
 
 Marka ayrımı `automation/brands.py`: önek (`CBM-`), ayrı Chrome portları (YT 9234/TT 9233),
 ayrı hesap kimliği. Varsayılan marka eski davranışın birebir aynısı.
@@ -19,10 +19,12 @@ ayrı hesap kimliği. Varsayılan marka eski davranışın birebir aynısı.
 
 14 video da diskte, üretim gerekmiyor. Manifest `LOCKED`.
 
-- **YouTube 14/14 tamam** — 14 benzersiz remote ID, çakışma yok.
-- **TikTok 11/14** — 0001–0011 planlandı ve tarihleri doğru. **0012, 0013, 0014 eksik.**
-  Kaldığı yerden devam etmek için: `CRAFTSBYMAN_SADECE_TIKTOK.bat`.
-  Durduran hata (`file input not found`) düzeltildi; planlı Reel'ler atlanır.
+**Hafta bitti: YouTube 14/14, TikTok 14/14.** 22–28 Ağustos, her gün 19:30 ve 22:00.
+Operatör iki kanalda da gözle doğruladı. Açık iş yok.
+
+- YouTube'da 14 benzersiz remote ID, çakışma yok.
+- TikTok'u tamamlayan iki düzeltme: `file input not found` (12. Reel) ve Planla
+  butonuna kaydırırken 1,5 sn'de pes etme (13. Reel).
 - **Instagram** bu marka için kapalı. Açmak: `brands.py` içinde `platforms` tuple'ına
   `"instagram"` ekle — geçmiş haftalar otomatik "eksik" okunur ve sadece IG'de tamamlanır.
 
