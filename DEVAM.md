@@ -73,6 +73,26 @@ iddialar; asıl niyetleri korunarak güncellendi. Biri ise sadece test sırasın
 `CloudConfig` reponun `.env`'ini `os.environ`'a kalıcı yazıyor, dolayısıyla ilk kim
 `CloudConfig` kurarsa "güvenli varsayılan"ı o belirliyor. **Paket artık 675/675 yeşil.**
 
+## Kök nedenin kökü (22 Ağustos)
+
+Playwright'ın `Locator.is_visible(timeout=N)` **timeout'unu yok sayar** — anlık kontroldür,
+bekleme değil. Yani `is_visible(timeout=2000)` yazan her yer aslında hiç beklemiyordu ve
+henüz render olmamış elemanı "yok" sayıyordu. Bir haftalık "bulunamadı" hatalarının
+tamamının altındaki mekanik sebep buydu.
+
+**Bu 17 Ağustos'ta zaten bulunmuş ve düzeltilmiş** (`1a1ee1f`, 104 çağrı noktası), ama
+o commit hiç merge edilmemiş — `claude/xenodochial-wu-c9980a` dalında duruyordu. Beş
+günlük olayların hepsi, push edilmiş bir dalda bekleyen düzeltmenin ardından yaşandı.
+
+Cherry-pick edildi (`bfde795`): 97 çağrı temiz birleşti, 7 çakışma sonradan yazılan
+kodda çıktı ve yeni bekleme döngüleri korunarak çözüldü. Kalan 13'ü ortak bir yardımcıdan
+(`automation/publishing/ui_wait.py`) geçiyor; bu yardımcı yalnızca `is_visible` uygulayan
+test sahtelerinde anlık kontrole düşüyor. **Artık `is_visible`'a timeout geçen tek bir
+çağrı kalmadı.** Ayrıca `.bat`'ların hâlâ önerdiği `--dry-run` tuzağı kapatıldı: prova
+kayıtları damgalanıyor, canlı çalıştırma onları "yapılmış" saymıyor.
+
+Paket: **683/683 yeşil.**
+
 ## Asıl hedef: satılabilir hale getirmek
 
 Operatörün amacı bu otomasyonu hem başkalarına satmak hem kendi yeni kanallarında
