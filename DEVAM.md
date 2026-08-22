@@ -1,7 +1,20 @@
 # Devam — Reels AI Factory (22 Ağustos 2026)
 
 Bu dosyayı yeni sohbete yapıştır. Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
-Branch: `hidden-build-second-channel` (PR yok). Türkçe cevap ver, detaylı rapor ver.
+Branch: **`main`** — 22 Ağustos'ta `hidden-build-second-channel` (23 commit) main'e
+fast-forward edildi ve push edildi. Türkçe cevap ver, detaylı rapor ver.
+
+### Dallar
+
+Şu dallar `git branch -r --no-merged origin/main` çıktısında görünür ama **içerikleri
+main'de** (commit'leri cherry-pick edildiği için SHA'ları farklı) — tekrar uygulama:
+`claude/xenodochial-wu-c9980a`, `claude/infallible-carson-37802d`,
+`claude/compassionate-almeida-c9ab2b`, `fix/instagram-worker-timezone`.
+
+Gerçekten merge edilmemiş olanlar **özellik** dalları, operatörün kararı:
+`feature/enable-audio-generation` (Flow→QC→yayın ses üretimi),
+`feature/cross-platform-promo` (açıklamalarda diğer iki kanalın tanıtımı),
+`feature/nova-fox-series` (Nova the fox, sezon başına 20 bölüm).
 
 ## Sistem
 
