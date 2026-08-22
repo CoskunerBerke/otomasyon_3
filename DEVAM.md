@@ -113,8 +113,11 @@ indirilmedi. Bir müşteride bu olursa kimse elle teşhis edemez.
 ## Disk
 
 `workspace/` 1.1 GB (segmentler 641 MB, downloads 385 MB) — CLAUDE.md bunları korumayı
-şart koşuyor, silme. `screenshots/` 138 MB / 251 dosya; 231'i 15–19 Ağu'dan, kapanmış
-olaylara ait — operatör onay verirse temizlenebilir.
+şart koşuyor, **silme**. `screenshots/` 22 Ağustos'ta temizlendi: kapanmış olaylara ait
+231 dosya (114 MB) silindi, bugünün 142 dosyası (23 MB) duruyor.
+
+Operatör kararı (22 Ağu): hafta, günün ilk slotu 6+ saat ilerideyse **bugünden**
+başlayabilir — `SAME_DAY_START_LEAD_HOURS`.
 
 ## Kurallar (CLAUDE.md)
 
