@@ -221,14 +221,28 @@ class TikTokSelectors:
     # The ONLY safe exit is İptal. "Hemen paylaş" publishes IMMEDIATELY instead of at the
     # scheduled slot -- it would dump the whole week's Reels out at once and destroy the
     # schedule. It is never clicked, under any circumstance (CLAUDE.md, Kural 31).
+    # Both of these resolve by dialog text, so they are the only selectors in this file
+    # with nothing to match on a Studio that is not in Turkish. Every other list here
+    # either carries its English wording already or resolves structurally (data-e2e, id,
+    # class), which is why an English-language account can otherwise be driven unchanged.
+    #
+    # This matters beyond convenience: CONTENT_CHECK_MODAL_CANCEL_BUTTONS is the İptal /
+    # Cancel half of a modal whose only other button publishes immediately. Not finding
+    # Cancel does not make the run click the other one -- FORBIDDEN_IMMEDIATE_PUBLISH_LABELS
+    # is checked in both languages and blocks that outright -- but it does strand the Reel,
+    # so the wording belongs here rather than being bolted on at one call site.
     CONTENT_CHECK_CONFIRM_MODAL: List[str] = [
-        "div[role='dialog']:has-text('Paylaşmaya devam edilsin mi?')",
-        "div.TUXModal:has-text('Paylaşmaya devam edilsin mi?')",
+        "div[role='dialog']:has-text('Paylaşmaya devam edilsin mi?'), "
+        "div[role='dialog']:has-text('Continue posting?')",
+        "div.TUXModal:has-text('Paylaşmaya devam edilsin mi?'), "
+        "div.TUXModal:has-text('Continue posting?')",
     ]
 
     CONTENT_CHECK_MODAL_CANCEL_BUTTONS: List[str] = [
-        "div[role='dialog'] button:has-text('İptal')",
-        "div.TUXModal button:has-text('İptal'), div.common-modal-confirm-modal button:has-text('İptal')",
+        "div[role='dialog'] button:has-text('İptal'), "
+        "div[role='dialog'] button:has-text('Cancel')",
+        "div.TUXModal button:has-text('İptal'), div.common-modal-confirm-modal button:has-text('İptal'), "
+        "div.TUXModal button:has-text('Cancel'), div.common-modal-confirm-modal button:has-text('Cancel')",
     ]
 
     # Guard list: if a selector would ever resolve to one of these, it must be discarded.

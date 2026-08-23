@@ -1974,10 +1974,13 @@ class TikTokUIObserver:
                     return True, "TIKTOK_FINAL_SCHEDULE_SUBMITTED"
 
                 try:
+                    # "Continue posting?" now lives in CONTENT_CHECK_CONFIRM_MODAL beside
+                    # its Turkish wording, so only the "still checking" variant is added
+                    # here -- a different notice, not a translation of the same one.
                     check_modal_loc = self.page.locator(
                         ", ".join(TikTokSelectors.CONTENT_CHECK_CONFIRM_MODAL)
-                        + ", div[role='dialog']:has-text('Continue posting?')"
                         + ", div[role='dialog']:has-text('kontrol ediyoruz')"
+                        + ", div[role='dialog']:has-text('still checking')"
                     ).first
                     if hasattr(check_modal_loc, "wait_for"):
                         check_modal_loc.wait_for(state="visible", timeout=300)
