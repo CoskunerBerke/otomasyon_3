@@ -118,10 +118,33 @@ daha çıkmıyor — ne HTML'i alınabiliyor ne tekrar test edilebiliyor. Çöz�
 kovalamak değil: `CRAFTSBYMAN_KANAL_GIRISI.bat` artık yayıncının kullandığı sayfayı
 açıyor, insan turu bir kez elle geçiyor, otomasyon olgun bir hesap görüyor.
 
-**Kalan yapısal iş:** platform state'i iki yerde tutuluyor — `progress.json` ve
-`13_PUBLISHING/PUB-*.md`. İkincisi "mevcut kanıt her zaman kazanır" dediği için
-birincisinin temizliği tutmuyor. Şu an çelişki raporlanıyor ama tek kaynağa
-indirilmedi. Bir müşteride bu olursa kimse elle teşhis edemez.
+### Ürünleştirme yol haritası
+
+Kural: **her adım mevcut iki kanalı bozmadan.** Varsayılanlar bugünkü değerlerde kalır,
+her adımdan sonra tam paket yeşil olmalı.
+
+1. **Dil — BİTTİ** (`dc936fa`). TikTok içerik-kontrolü modalının iki listesi iki dilli
+   yapıldı; başka tek dilli UI aksiyonu kalmadı. Kural artık
+   `tests/test_selector_language_coverage.py` ile sabit: bir aksiyon Türkçe metne
+   dayanabilir ama tek yolu o olamaz. "Hemen paylaş'a basma" blocklist'leri için ayrı ve
+   daha sıkı kural (buton metnine bakıldığı için iki dili de bilmek zorunda).
+2. **Sabit değerler — SIRADA.** `Europe/Istanbul`, 19:30/22:00 slotları, dosya yolları.
+   Ayara taşınacak, varsayılanlar bugünkü değerler → iki kanal etkilenmez. Düşük risk.
+3. **Obsidian'ı opsiyonel yapmak.** Kasa varsa aynen çalışır, yoksa adım atlanır. Orta risk.
+4. **İki state deposu — EN RİSKLİ, EN SONA.** `progress.json` ve
+   `13_PUBLISHING/PUB-*.md`. İkincisi "mevcut kanıt her zaman kazanır" dediği için
+   birincisinin temizliği tutmuyor; çelişki şu an raporlanıyor ama tek kaynağa
+   indirilmedi. Yapılırken tek seferde değil: önce yalnızca okuma tarafı, iki tur
+   doğrulama, sonra yazma tarafı. Operatöre ayrıca sorulacak.
+
+Satmadan önce koddan bağımsız gerekenler: tek tıklık kurulum (şu an Python + ffmpeg +
+Chrome + venv), müşterinin kendi Google Flow erişimi ve kredisi, ve **ToS riski** —
+YouTube/TikTok/Instagram web arayüzünü otomatikleştirmek üç platformun da şartlarına
+aykırı yorumlanabilir; müşterinin kanalı kapanırsa sorumluluk satıcıya döner.
+
+**Operatör kararı (22 Ağu): 2. adıma geçilmedi, bir sonraki haftalık çalıştırma
+beklenecek.** O çalıştırmada ilk 2-3 Reel gözle izlenmeli — bu haftaki bütün
+düzeltmelerin gerçek sınavı odur.
 
 ## Disk
 
