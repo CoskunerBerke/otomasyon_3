@@ -174,7 +174,7 @@ def main() -> int:
             browser = p.chromium.connect_over_cdp("http://127.0.0.1:9223")
             page = find_tiktok_page(browser)
             if page is None:
-                print("[ABORT] No TikTok page found on CDP port 9223. Run TIKTOK_LOGIN.bat first.")
+                print("[ABORT] No TikTok page found on CDP port 9223. Run BUILDVERSE_GIRIS.bat first.")
                 return 4
 
             observer = TikTokUIObserver(page)

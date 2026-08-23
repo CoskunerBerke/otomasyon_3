@@ -55,6 +55,10 @@ class PublishingConfig:
     tiktok_debug_port: int = 9223
     tiktok_profile_dir: Path = field(default_factory=get_default_tiktok_profile_path)
     tiktok_url: str = "https://www.tiktok.com/tiktokstudio/upload"
+
+    # Which .bat signs this run's brand in. Named in AUTH_REQUIRED messages so the
+    # operator opens the browser whose session actually dropped.
+    login_bat: str = "BUILDVERSE_GIRIS.bat"
     tiktok_headless: bool = False
 
     def validate(self) -> None:

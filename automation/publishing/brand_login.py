@@ -68,11 +68,21 @@ def _open(brand: Brand, platform: str) -> Tuple[bool, str]:
 def run(brand_id: str, platforms: List[str]) -> int:
     brand = get_brand(brand_id)
 
+    # "all" means all of THIS brand's platforms, not all three. Opening a browser for a
+    # platform the brand does not publish to invites the operator to sign an account in
+    # somewhere it will never be used -- and, worse, makes a switched-off platform look
+    # switched on. Naming a platform explicitly still opens it, so a brand can be
+    # prepared before its tuple is widened.
+    platforms = [p for p in platforms if brand.publishes_to(p)] or platforms
+
     print("=" * 62)
     print(f"KANAL GIRISI -- {brand.display_name} ({brand.brand_id})")
     print("=" * 62)
     print(f"YouTube  : {brand.youtube_handle}  [{brand.youtube_channel_id}]")
     print(f"TikTok   : {brand.tiktok_username}")
+    kapali = [p for p in PLATFORMS if not brand.publishes_to(p)]
+    if kapali:
+        print(f"Kapali   : {', '.join(kapali)} -- bu marka bu platforma yayin yapmiyor")
     print(f"Portlar  : YT {brand.youtube_port} | TT {brand.tiktok_port} | IG {brand.instagram_port}")
     print("=" * 62)
     print()

@@ -4,7 +4,7 @@ LEGACY / DEPRECATED FOR LIVE WEEKLY EXECUTION (as of 2026-08-17).
 The live production entrypoint is now automation/simple_weekly_pipeline.py -- a
 deterministic, sequential, one-Reel-at-a-time pipeline (PLAN -> GENERATE -> VALIDATE ->
 LOCK -> YOUTUBE -> TIKTOK -> INSTAGRAM_HANDOFF -> DONE) that never lets a platform phase
-start before the previous one is fully (14/14) done. HAFTALIK_14_REEL_URET_VE_PLANLA.bat
+start before the previous one is fully (14/14) done. BUILDVERSE_HAFTALIK_14_REEL.bat
 and LocalWorker's GENERATE_WEEK command both call it, not this module.
 
 This module is kept only for backward compatibility (existing tests, manual/legacy

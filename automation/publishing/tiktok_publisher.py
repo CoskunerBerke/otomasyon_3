@@ -66,7 +66,8 @@ class TikTokPublisher(BaseTikTokPublisher):
                 # 1. Check Login
                 if not observer.is_logged_in():
                     record.mark_failed(
-                        "TikTok Studio oturumu açık değil. Lütfen önce 'TIKTOK_LOGIN.bat' ile giriş yapın.",
+                        f"TikTok Studio oturumu açık değil. Lütfen önce "
+                        f"'{self.config.login_bat}' ile bu markanın tarayıcısına giriş yapın.",
                         status=PlatformPublicationStatus.AUTH_REQUIRED
                     )
                     return record

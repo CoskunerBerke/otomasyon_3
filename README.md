@@ -12,19 +12,29 @@ Windows üzerinde çalışan, harici ücretli LLM API (OpenAI, Claude) veya CapC
 
 | Dosya | Ne yapar |
 |---|---|
-| `INSTALL_FIRST_TIME.bat` | Tek seferlik kurulum |
-| `HAFTALIK_14_REEL_URET_VE_PLANLA.bat` | **BuildVerse** (1. kanal) — haftalık 14 Reel, uçtan uca |
-| `HAFTALIK_14_REEL_CRAFTSBYMAN.bat` | **Crafts By Man** (2. kanal) — haftalık 14 Reel, uçtan uca |
-| `CRAFTSBYMAN_KANAL_GIRISI.bat` | 2. kanalın üç tarayıcısını giriş için açar |
-| `CRAFTSBYMAN_SADECE_YOUTUBE.bat` | 2. kanal — yalnızca YouTube'daki eksikleri tamamlar |
-| `CRAFTSBYMAN_SADECE_TIKTOK.bat` | 2. kanal — yalnızca TikTok'taki eksikleri tamamlar |
-| `FLOW_LOGIN.bat` | Google Flow oturumu |
-| `YOUTUBE_LOGIN.bat` · `YOUTUBE_STUDIO_LOGIN.bat` | 1. kanal YouTube oturumları |
-| `TIKTOK_LOGIN.bat` · `INSTAGRAM_LOGIN.bat` | 1. kanal TikTok / Instagram oturumları |
-| `BASLAT.bat` | Haftalık pipeline'ı elle argümanla çalıştırır |
+| `INSTALL_FIRST_TIME.bat` | Tek seferlik kurulum (Python, bağımlılıklar, Playwright) |
+| `FLOW_LOGIN.bat` | Google Flow oturumu — **iki kanal için ortak** (tek Flow hesabı) |
+| **BuildVerse (1. kanal)** | |
+| `BUILDVERSE_GIRIS.bat` | Kanalın tarayıcılarını giriş için açar (YT 9224 · TT 9223 · IG 9225) |
+| `BUILDVERSE_HAFTALIK_14_REEL.bat` | Haftalık 14 Reel — üretir ve YT+TT+IG'ye planlar |
+| `BUILDVERSE_SADECE_YOUTUBE.bat` | Yalnızca YouTube'daki eksikleri tamamlar |
+| `BUILDVERSE_SADECE_TIKTOK.bat` | Yalnızca TikTok'taki eksikleri tamamlar |
+| `BUILDVERSE_SADECE_INSTAGRAM.bat` | Yalnızca Instagram'daki eksikleri tamamlar |
+| **Crafts By Man (2. kanal)** | |
+| `CRAFTSBYMAN_GIRIS.bat` | Kanalın tarayıcılarını açar (YT 9234 · TT 9233 — **Instagram kapalı**) |
+| `CRAFTSBYMAN_HAFTALIK_14_REEL.bat` | Haftalık 14 Reel — üretir ve YT+TT'ye planlar |
+| `CRAFTSBYMAN_SADECE_YOUTUBE.bat` | Yalnızca YouTube'daki eksikleri tamamlar |
+| `CRAFTSBYMAN_SADECE_TIKTOK.bat` | Yalnızca TikTok'taki eksikleri tamamlar |
+| **Diğer** | |
+| `YOUTUBE_LOGIN.bat` | YouTube **API** yetkilendirmesi (OAuth) — haftalık akış bunu kullanmaz |
+| `BASLAT.bat` | Pipeline'ı elle argümanla çalıştırır (ileri seviye) |
 
-> Giriş `.bat`'ları kökte durmak zorunda: hata mesajları kullanıcıyı adlarıyla
-> buraya yönlendiriyor ve bir test `YOUTUBE_LOGIN.bat`'ın kökte olmasını şart koşuyor.
+> Her kanalın kendi Chrome profili ve portu var; biri diğerini etkilemez. Bir oturum
+> düşerse hata mesajı **o markanın** giriş dosyasını adıyla söyler.
+>
+> `SADECE_*` dosyaları tek faz çalıştırır ve 30 dk'lık bekleme döngüsüne girmez —
+> yarım kalmış bir haftayı tamamlamak için bunları kullanın.
+
 
 ### Klasörler
 
@@ -310,7 +320,7 @@ Schedule işlemi bir kez başarıyla tamamlandıktan sonra, **yayın saatinde bi
 #### B. TikTok Studio Kurulumu (İzole Chrome Profili):
 - TikTok için Flow profilinden tamamen ayrı, izole bir profil kullanılır (`%LOCALAPPDATA%\ReelsAIFactory\tiktok-profile`) ve **Port 9223** üzerinden çalışır (Flow portu 9222 ile asla karışmaz).
 - İlk giriş için:
-  👉 **`TIKTOK_LOGIN.bat`** dosyasını çalıştırın.
+  👉 **`BUILDVERSE_GIRIS.bat`** dosyasını çalıştırın.
 - Açılan Chrome penceresinde TikTok hesabınıza manuel olarak giriş yapın. Oturum kalıcı olarak profilde saklanır.
 
 ---

@@ -123,7 +123,8 @@ class YouTubeStudioPublisher(BaseYouTubePublisher):
                 # 1. Check Login
                 if not observer.is_logged_in():
                     record.mark_failed(
-                        "YouTube Studio oturumu açık değil. Lütfen önce 'YOUTUBE_LOGIN.bat' ile giriş yapın.",
+                        f"YouTube Studio oturumu açık değil. Lütfen önce "
+                        f"'{self.config.login_bat}' ile bu markanın tarayıcısına giriş yapın.",
                         status=PlatformPublicationStatus.AUTH_REQUIRED
                     )
                     return record

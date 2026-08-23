@@ -12,7 +12,7 @@ echo Timezone : Europe/Istanbul
 echo ============================================================
 echo.
 echo DIKKAT: Bu dosya IKINCI kanal icindir. Ilk seri
-echo         HAFTALIK_14_REEL_URET_VE_PLANLA.bat ile calisir ve
+echo         BUILDVERSE_HAFTALIK_14_REEL.bat ile calisir ve
 echo         bu calistirmadan hic etkilenmez.
 echo.
 

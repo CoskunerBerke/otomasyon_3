@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Tuple, Any, Optional
 from contextlib import contextmanager
 
+from automation.brands import login_bat_for_profile
+
 logger = logging.getLogger("ReelsAIFactory.YouTubeStudioBrowser")
 
 def get_default_youtube_studio_profile_path() -> Path:
@@ -92,7 +94,8 @@ class YouTubeStudioBrowserManager:
             if not cdp_ready:
                 raise ConnectionError(
                     f"Could not connect to YouTube Studio Chrome CDP on port {self.debug_port}.\n"
-                    f"Lütfen önce 'YOUTUBE_STUDIO_LOGIN.bat' dosyasını çalıştırın."
+                    f"Lütfen önce bu markanın giriş dosyasını çalıştırın "
+                    f"({login_bat_for_profile(self.profile_dir)})."
                 )
 
         p = sync_playwright().start()

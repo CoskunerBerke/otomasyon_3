@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Optional, Tuple
 from contextlib import contextmanager
 
+from automation.brands import login_bat_for_profile
+
 logger = logging.getLogger("ReelsAIFactory.TikTokBrowser")
 
 class TikTokBrowserManager:
@@ -71,7 +73,8 @@ class TikTokBrowserManager:
             if not self.is_cdp_available():
                 raise ConnectionError(
                     f"TikTok Chrome CDP port {self.debug_port} is not responding.\n"
-                    "Lütfen önce 'TIKTOK_LOGIN.bat' dosyasını çalıştırın."
+                    f"Lütfen önce bu markanın giriş dosyasını çalıştırın "
+                    f"({login_bat_for_profile(self.profile_dir)})."
                 )
 
         pw = sync_playwright().start()

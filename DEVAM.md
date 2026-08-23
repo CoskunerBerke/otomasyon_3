@@ -115,7 +115,7 @@ yükleme-planlama tarafında.
 **Kök örüntü:** otomasyon olgun bir hesabın arayüzüne göre sertleştirilmiş. Yeni hesap
 ilk açılışta tanıtım turu / bilgilendirme kartları gösteriyor, bunlar bir kez çıkıp bir
 daha çıkmıyor — ne HTML'i alınabiliyor ne tekrar test edilebiliyor. Çözüm selector
-kovalamak değil: `CRAFTSBYMAN_KANAL_GIRISI.bat` artık yayıncının kullandığı sayfayı
+kovalamak değil: `CRAFTSBYMAN_GIRIS.bat` artık yayıncının kullandığı sayfayı
 açıyor, insan turu bir kez elle geçiyor, otomasyon olgun bir hesap görüyor.
 
 ### Ürünleştirme yol haritası

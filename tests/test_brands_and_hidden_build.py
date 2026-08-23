@@ -449,3 +449,66 @@ def test_a_disabled_platform_cannot_be_run_by_hand(tmp_path):
 
     with pytest.raises(ValueError, match="PLATFORM_DISABLED_FOR_BRAND"):
         pipe.run(phase="instagram")
+
+
+# ---------------------------------------------------------------- per-brand entry points
+
+def test_every_brand_names_files_that_exist():
+    """
+    The .bat names are derived from the brand id, and error messages print them. A name
+    that does not exist on disk sends the operator looking for a file nobody shipped.
+    """
+    from pathlib import Path
+
+    from automation.brands import BRANDS
+
+    root = Path(__file__).resolve().parents[1]
+    missing = [
+        bat
+        for brand in BRANDS.values()
+        for bat in (brand.login_bat, brand.weekly_bat)
+        if not (root / bat).exists()
+    ]
+    assert not missing, f"named but not shipped: {missing}"
+
+
+def test_each_brand_names_its_own_files():
+    """
+    One shared name is what sent a dropped craftsbyman session to the first channel's
+    browser on port 9223, while the session that had expired was on 9233.
+    """
+    from automation.brands import BRANDS
+
+    logins = [b.login_bat for b in BRANDS.values()]
+    assert len(logins) == len(set(logins)), "two brands must not share a login file"
+
+    for brand in BRANDS.values():
+        assert brand.brand_id.upper() in brand.login_bat
+        assert brand.brand_id.upper() in brand.weekly_bat
+
+
+def test_a_dropped_session_names_the_right_brands_file():
+    """The browser managers know only a profile directory, so they resolve it back."""
+    from automation.brands import get_brand, login_bat_for_profile
+
+    for brand_id in ("buildverse", "craftsbyman"):
+        brand = get_brand(brand_id)
+        for profile in (brand.tiktok_profile_dir, brand.youtube_profile_dir):
+            assert login_bat_for_profile(profile) == brand.login_bat
+
+
+def test_login_opens_only_the_platforms_a_brand_publishes_to():
+    """
+    Opening a browser for a switched-off platform invites the operator to sign an account
+    in somewhere it will never be used, and makes the platform look switched on.
+    """
+    from automation.brands import get_brand
+    from automation.publishing.brand_login import PLATFORMS
+
+    craftsbyman = get_brand("craftsbyman")
+    opened = [p for p in PLATFORMS if craftsbyman.publishes_to(p)]
+    assert "instagram" not in opened
+    assert opened == ["youtube", "tiktok"]
+
+    buildverse = get_brand("buildverse")
+    assert [p for p in PLATFORMS if buildverse.publishes_to(p)] == list(PLATFORMS)

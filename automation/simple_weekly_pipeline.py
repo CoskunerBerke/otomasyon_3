@@ -1566,7 +1566,7 @@ class SimpleWeeklyPipeline:
             p("TAMAMLANDI - tum platformlar hazir.")
         else:
             p("Devam etmek icin ayni komutu tekrar calistir:")
-            p("  BASLAT.bat")
+            p(f"  {self.brand.weekly_bat}")
         p("=" * 60)
 
 

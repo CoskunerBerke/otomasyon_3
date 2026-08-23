@@ -9,7 +9,7 @@ echo Yapar    : Sadece TikTok'a eksik Reel'leri yukler
 echo Yapmaz   : Uretim yok, YouTube yok, Instagram yok
 echo.
 echo ONCE SUNU YAP:
-echo   1) CRAFTSBYMAN_KANAL_GIRISI.bat calistir
+echo   1) CRAFTSBYMAN_GIRIS.bat calistir
 echo   2) Acilan TikTok penceresinde yukleme sayfasina bak ve
 echo      cikan TUM tanitim/bilgilendirme kutularini kapat
 echo   3) Sayfa temiz kalana kadar devam et, sonra bu dosyayi calistir

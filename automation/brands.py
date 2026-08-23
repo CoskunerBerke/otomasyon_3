@@ -73,6 +73,7 @@ class Brand:
     instagram_port: int
     profile_suffix: str
 
+
     # Instagram delivery is per-brand: the first channel was handed to the cloud worker
     # before the composer route existed.
     instagram_delivery: str = "web"
@@ -83,6 +84,25 @@ class Brand:
     # Re-enabling one makes every past week read as unfinished again, which is exactly
     # right: the next run picks up only the missing platform and leaves the rest alone.
     platforms: Tuple[str, ...] = ("youtube", "tiktok", "instagram")
+
+    @property
+    def login_bat(self) -> str:
+        """
+        The .bat that signs THIS brand in.
+
+        Derived from the brand id rather than stored, so a new brand cannot be added with
+        a name that disagrees with its files -- and every error message that names it
+        stays correct by construction. Messages used to name one file for everybody: a
+        dropped craftsbyman session sent the operator to the FIRST channel's TikTok
+        browser on port 9223, while the session that had actually expired was the second
+        channel's on 9233. Signing in there fixed nothing and made the guard look broken.
+        """
+        return f"{self.brand_id.upper()}_GIRIS.bat"
+
+    @property
+    def weekly_bat(self) -> str:
+        """The .bat that runs this brand's week, named when a run stops part-way."""
+        return f"{self.brand_id.upper()}_HAFTALIK_14_REEL.bat"
 
     def publishes_to(self, platform: str) -> bool:
         return platform in self.platforms
@@ -173,6 +193,7 @@ class Brand:
         cfg.tiktok_expected_username = self.tiktok_username
         cfg.tiktok_debug_port = self.tiktok_port
         cfg.tiktok_profile_dir = self.tiktok_profile_dir
+        cfg.login_bat = self.login_bat
         return cfg
 
 
@@ -219,6 +240,22 @@ CRAFTSBYMAN = Brand(
 BRANDS: Dict[str, Brand] = {b.brand_id: b for b in (BUILDVERSE, CRAFTSBYMAN)}
 
 DEFAULT_BRAND_ID = BUILDVERSE.brand_id
+
+
+def login_bat_for_profile(profile_dir) -> str:
+    """
+    Which brand's login .bat owns this Chrome profile directory.
+
+    The browser managers know the profile they were handed but not the brand behind it,
+    and they are exactly where a dropped session surfaces. Naming one file for everybody
+    sent the operator to the wrong channel's browser; the profile suffix is the one thing
+    on hand that identifies the brand.
+    """
+    name = str(profile_dir or "").lower()
+    for brand in BRANDS.values():
+        if brand.profile_suffix and name.endswith(brand.profile_suffix.lower()):
+            return brand.login_bat
+    return BRANDS[DEFAULT_BRAND_ID].login_bat
 
 
 def get_brand(brand_id: Optional[str] = None) -> Brand:

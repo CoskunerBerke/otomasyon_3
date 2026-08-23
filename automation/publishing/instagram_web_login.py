@@ -75,7 +75,7 @@ def check() -> int:
             if visible:
                 print("[OK] 'Icerigi planla' butonu bulundu -- haftalik calistirma planlama yapabilir.")
                 print()
-                print("Hazirsiniz. HAFTALIK_14_REEL_URET_VE_PLANLA.bat calistirilabilir.")
+                print("Hazirsiniz. BUILDVERSE_HAFTALIK_14_REEL.bat calistirilabilir.")
                 return 0
 
             print("[HAYIR] 'Icerigi planla' butonu bulunamadi.")

@@ -57,7 +57,7 @@ scanned as live inventory and uploaded to YouTube as REEL-2026-0001).
   `MANUAL_REMOTE_CLEANUP_RECOMMENDED` — never delete it automatically.
 - Real platform operations (live Flow generation, live YouTube/TikTok/Instagram
   publishing, Telegram sends) require explicit user instruction for that specific run.
-  Do not run `HAFTALIK_14_REEL_URET_VE_PLANLA.bat` or any `--live` invocation as part of
+  Do not run `BUILDVERSE_HAFTALIK_14_REEL.bat` or any `--live` invocation as part of
   a repair/analysis task unless the user explicitly asks for a live run.
 - Resume/idempotency first: never re-spend Flow credits or re-upload when local/remote
   state already shows the work is done. Preserve existing completed segments/final videos.
