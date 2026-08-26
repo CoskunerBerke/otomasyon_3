@@ -203,6 +203,16 @@ class PublishingMetadataBuilder:
             "{title}, Then and Now",
             "The Day {title} Was Left Behind",
         ],
+        # The cutaway format's payoff is a WORKING interior, so it cannot borrow the
+        # abandonment titles the fallback would give it: "Why Nobody Lives Here Anymore"
+        # is false for a dam that is running right now.
+        "cutaway": [
+            "What Is Actually Inside {title}",
+            "Nobody Ever Sees What Is Under {title}",
+            "{title}: What the Surface Hides",
+            "Cut Open: {title}",
+            "You Have Walked Over {title} and Never Known",
+        ],
         "burial": [
             "{title}: Buried, Then Found Again",
             "What Was Buried at {title}",

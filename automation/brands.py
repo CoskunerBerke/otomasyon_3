@@ -31,6 +31,7 @@ from typing import Dict, List, Optional, Tuple
 import os
 
 from automation.content.content_modes import (
+    CUTAWAY_REVEAL_STORY,
     HIDDEN_BUILD_STORY,
     NARRATIVE_AMBIENT_STORY,
     is_live_eligible_mode,
@@ -76,6 +77,12 @@ class Brand:
 
     # Instagram delivery is per-brand: the first channel was handed to the cloud worker
     # before the composer route existed.
+    # A second format for the same channel. When set, the day's two slots carry
+    # different subjects: 19:30 gets the brand's own content_mode, 22:00 gets this one.
+    # Left None -- craftsbyman's case -- the week is single-format, which is the point of
+    # a channel built on one recurring craftsman.
+    alternate_content_mode: Optional[str] = None
+
     instagram_delivery: str = "web"
 
     # Which platforms this brand publishes to. A platform left out is skipped entirely --
@@ -211,6 +218,7 @@ BUILDVERSE = Brand(
     tiktok_port=9223,
     instagram_port=9225,
     profile_suffix="",
+    alternate_content_mode=CUTAWAY_REVEAL_STORY,
     instagram_delivery="web",
 )
 

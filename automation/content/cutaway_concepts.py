@@ -62,11 +62,15 @@ class CutawayConcept(ConceptDefinition):
     # Keys: "before", "turn", "after" -- the names StoryPlanner reads.
     ambient_sounds: Dict[str, str] = field(default_factory=dict)
 
+    # Which title family the metadata builder draws from. Fixed for this format: the
+    # payoff is a working interior, and the default family talks about abandonment.
+    narrative_frame: str = "cutaway"
+
 
 CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     CutawayConcept(
         id_slug="city-street-cistern",
-        name="The Cistern Under the Street",
+        name="City Streets",
         category_group="Under the City",
         environments=["a quiet stone-paved city street at dawn, shutters still closed"],
         architectures=["a vaulted brick cistern spanning the whole block beneath the paving"],
@@ -88,7 +92,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="dam-wall-galleries",
-        name="Inside the Dam Wall",
+        name="Dam Walls",
         category_group="Engineering Interiors",
         environments=["a vast blank concrete dam face in flat daylight, still water behind it"],
         architectures=["inspection galleries and stairwells threading the full height of the dam"],
@@ -110,7 +114,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="quiet-field-underground-city",
-        name="The City Under the Field",
+        name="Quiet Fields",
         category_group="Under the Ground",
         environments=["a bare ploughed field on a plateau, one low stone wall crossing it"],
         architectures=["carved rooms and connecting shafts descending many levels into soft rock"],
@@ -132,7 +136,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="salt-mine-chamber",
-        name="The Chamber Cut From Salt",
+        name="Salt Hills",
         category_group="Under the Ground",
         environments=["a low wooded hill in winter, a small brick shaft-head building at its foot"],
         architectures=["a vast chamber hewn entirely from rock salt, with carved stairs and chandeliers"],
@@ -154,7 +158,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="roman-bath-hypocaust",
-        name="The Floor That Was Heated From Below",
+        name="Old Tiled Floors",
         category_group="Engineering Interiors",
         environments=["a plain tiled floor in an empty stone room, weak light from one high window"],
         architectures=["a hypocaust of short brick pillars carrying the floor above a hot-air void"],
@@ -176,7 +180,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="lighthouse-spiral",
-        name="Inside the Lighthouse",
+        name="Lighthouses",
         category_group="Engineering Interiors",
         environments=["a white lighthouse tower on a flat headland, grey sea behind it"],
         architectures=["a stone spiral stair winding the full height to the lamp room"],
@@ -198,7 +202,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="grain-silo-interior",
-        name="Inside the Grain Silo",
+        name="Grain Silos",
         category_group="Engineering Interiors",
         environments=["a row of blank concrete silos beside a rail siding, flat farmland behind"],
         architectures=["cylindrical storage cells with conveyors running along the top and base"],
@@ -220,7 +224,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="amphitheatre-hypogeum",
-        name="Under the Arena Floor",
+        name="Arena Floors",
         category_group="Under the Ground",
         environments=["a bare oval arena floor of packed sand, empty tiers rising around it"],
         architectures=["a two-level basement of corridors, cages and timber lifts under the floor"],
@@ -242,7 +246,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="victorian-sewer-cathedral",
-        name="The Cathedral of the Sewer",
+        name="River Embankments",
         category_group="Under the City",
         environments=["a plain grass embankment beside a slow river, one brick vent stack on it"],
         architectures=["an interceptor sewer of cathedral-scale brick vaulting"],
@@ -264,7 +268,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="glacier-moulin",
-        name="The Shaft Inside the Ice",
+        name="Glaciers",
         category_group="Under the Ground",
         environments=["a flat white glacier surface under thin cloud, one meltwater stream crossing it"],
         architectures=["a meltwater shaft dropping through the full thickness of the ice"],
@@ -286,7 +290,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="bridge-pier-hollow",
-        name="Inside the Bridge Pier",
+        name="Bridge Piers",
         category_group="Engineering Interiors",
         environments=["a plain concrete bridge pier standing in a slow estuary, flat sky behind"],
         architectures=["a hollow pier with a ladder and inspection platforms running its height"],
@@ -308,7 +312,7 @@ CUTAWAY_CONCEPTS: List[CutawayConcept] = [
     ),
     CutawayConcept(
         id_slug="rock-overhang-town",
-        name="The Town Built Into the Rock",
+        name="Rock Overhangs",
         category_group="Under the Ground",
         environments=["a narrow whitewashed street under a huge grey rock overhang"],
         architectures=["houses built directly into the overhang, the rock forming their roofs"],

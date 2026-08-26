@@ -331,13 +331,26 @@ def test_plan_phase_builds_a_story_week(tmp_path):
     assert manifest.week_id == "2026-W35"
     assert manifest.content_mode == NARRATIVE_AMBIENT_STORY
     assert len(manifest.reels) == 14
-    assert all(r.content_mode == NARRATIVE_AMBIENT_STORY for r in manifest.reels)
     assert len({r.reel_id for r in manifest.reels}) == 14
 
-    # Each entry must rebuild into the same story plan on a later, separate run.
+    # This brand carries a second format, so the day's two slots differ by design:
+    # 19:30 is the week's own mode, 22:00 is the alternate. The manifest-level mode stays
+    # the primary one, which is what a resumed run must not silently re-mode.
+    alternate = pipe.brand.alternate_content_mode
+    assert alternate and alternate != NARRATIVE_AMBIENT_STORY
+
+    morning = [r for r in manifest.reels if r.scheduled_at_local[11:16] == "19:30"]
+    evening = [r for r in manifest.reels if r.scheduled_at_local[11:16] == "22:00"]
+    assert len(morning) == len(evening) == 7
+    assert all(r.content_mode == NARRATIVE_AMBIENT_STORY for r in morning)
+    assert all(r.content_mode == alternate for r in evening)
+
+    # Each entry must rebuild into the same plan on a later, separate run -- in ITS OWN
+    # mode. Looking a cutaway slug up in the story library reads as a corrupt manifest,
+    # which is what would strand a half-finished mixed week.
     for reel in manifest.reels:
         plan = pipe._rebuild_concept_plan(reel)
-        assert plan.content_mode == NARRATIVE_AMBIENT_STORY
+        assert plan.content_mode == reel.content_mode
         assert len(plan.segments) == 3
         assert plan.concept_def.id_slug == reel.concept_id_slug
 

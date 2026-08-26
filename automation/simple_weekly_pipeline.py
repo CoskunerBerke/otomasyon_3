@@ -53,6 +53,7 @@ from automation.publishing.metadata_builder import PublishingMetadataBuilder
 from automation.flow.generator import GoogleFlowWebProvider, MockVideoProvider, VideoProvider
 from automation.content.concepts import CATEGORIES
 from automation.content.content_modes import (
+    CUTAWAY_REVEAL_STORY,
     NARRATIVE_AMBIENT_STORY,
     SILENT_STEP_BY_STEP,
     is_live_eligible_mode,
@@ -64,6 +65,7 @@ from automation.content.engine import ContentEngine
 from automation.content.prompt_engine import PromptEngine, ReelConceptPlan
 from automation.content.story_concepts import STORY_CONCEPTS
 from automation.content.hidden_build_concepts import HIDDEN_BUILD_CONCEPTS
+from automation.content.cutaway_concepts import CUTAWAY_CONCEPTS
 from automation.quality.validator import VideoValidator
 from automation.media_handoff import handoff_reel_to_cloud
 from automation.local_worker_cloud_client import LocalWorkerCloudClient
@@ -481,13 +483,12 @@ class SimpleWeeklyPipeline:
 
         reel_ids = self._allocate_reel_ids(count=14)
 
-        content_engine = ContentEngine(content_mode=self.content_mode)
         past_history = [{"id": r.reel_id, "title": r.title, "category": r.content_mode} for r in self.state_repo.list_all_reels()]
-        concept_plans = content_engine.generate_next_reels(count=14, past_records=past_history, duration_seconds=10)
+        concept_plans = self._plan_concepts(past_history)
 
         reels: List[BatchReel] = []
         for i, (slot, reel_id, plan) in enumerate(zip(slot_plan.slots, reel_ids, concept_plans), start=1):
-            if self.content_mode == NARRATIVE_AMBIENT_STORY:
+            if plan.content_mode in (NARRATIVE_AMBIENT_STORY, CUTAWAY_REVEAL_STORY):
                 concept = plan.concept_def
                 yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_story_youtube_metadata(
                     reel_id=reel_id,
@@ -541,6 +542,46 @@ class SimpleWeeklyPipeline:
         self.batch_repo.ensure_progress_entries(week_id, reel_ids)
         return manifest
 
+    def _plan_concepts(self, past_history: List[Dict[str, Any]]) -> List[Any]:
+        """
+        The week's fourteen concept plans, in slot order.
+
+        With no alternate format this is one engine over one library, exactly as before.
+        With one, the day's two slots carry different subjects: 19:30 draws from the
+        brand's own mode and 22:00 from its alternate, so a viewer who sees both posts in
+        a day does not get the same idea twice.
+
+        Each mode is ranked within its own library, because diversity is a property of a
+        format's own pool: a cistern under a street and a ruined city are not near
+        duplicates, and scoring them against each other would suppress neither.
+        """
+        primary = ContentEngine(content_mode=self.content_mode)
+        alternate_mode = self.brand.alternate_content_mode
+        if not alternate_mode or alternate_mode == self.content_mode:
+            return primary.generate_next_reels(
+                count=14, past_records=past_history, duration_seconds=10
+            )
+
+        evening_engine = ContentEngine(content_mode=alternate_mode)
+        morning_plans = primary.generate_next_reels(
+            count=7, past_records=past_history, duration_seconds=10
+        )
+        evening_plans = evening_engine.generate_next_reels(
+            count=7, past_records=past_history, duration_seconds=10
+        )
+        logger.info(
+            f"[PLAN] Iki formatli hafta: 19:30 '{self.content_mode}', "
+            f"22:00 '{alternate_mode}'."
+        )
+
+        # Slots arrive as day1-19:30, day1-22:00, day2-19:30, ... so the morning plan
+        # always goes first and the evening one second.
+        interleaved: List[Any] = []
+        for morning, evening in zip(morning_plans, evening_plans):
+            interleaved.append(morning)
+            interleaved.append(evening)
+        return interleaved
+
     def _rebuild_concept_plan(self, reel: BatchReel) -> ReelConceptPlan:
         """Deterministically rebuilds the exact ReelConceptPlan (same prompt, same
         segments) used when this manifest entry was created -- see BatchReel's raw
@@ -553,6 +594,8 @@ class SimpleWeeklyPipeline:
             library, builder = STORY_CONCEPTS, PromptEngine.build_story_concept_plan
         elif reel.content_mode == HIDDEN_BUILD_STORY:
             library, builder = HIDDEN_BUILD_CONCEPTS, PromptEngine.build_hidden_build_plan
+        elif reel.content_mode == CUTAWAY_REVEAL_STORY:
+            library, builder = CUTAWAY_CONCEPTS, PromptEngine.build_cutaway_plan
         else:
             library, builder = CATEGORIES, PromptEngine.build_concept_plan
 
