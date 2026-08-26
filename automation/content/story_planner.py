@@ -23,6 +23,11 @@ from .story_concepts import StoryConcept
 
 STORY_BEATS = ("BEFORE", "THE_TURN", "WHAT_REMAINS")
 
+# The cutaway format walks the same three beats but means something different by them,
+# and Flow reads these names. "WHAT_REMAINS" tells it to render decay, which is the
+# opposite of that format's payoff: the interior is in USE, not abandoned.
+CUTAWAY_BEATS = ("PLAIN_SURFACE", "THE_CUT", "THE_WORKING_INTERIOR")
+
 
 class StoryPlanner:
     """Builds three continuity-locked story beats with per-beat diegetic sound design."""
@@ -180,8 +185,14 @@ class StoryPlanner:
         materials: str,
         reveal: str,
         duration_per_segment: int = DEFAULT_SEGMENT_DURATION,
+        beat_names: Tuple[str, str, str] = STORY_BEATS,
     ) -> Tuple[ContinuityContext, List[SegmentPlan]]:
-        """Builds the continuity context and the three story SegmentPlans."""
+        """
+        Builds the continuity context and the three story SegmentPlans.
+
+        `beat_names` is what Flow is told each beat IS, so a format that walks the same
+        skeleton toward a different payoff passes its own -- see CUTAWAY_BEATS.
+        """
         continuity = cls.create_continuity_context(
             concept=concept, env=env, arch=arch, camera=camera, lighting=lighting, materials=materials
         )
@@ -192,9 +203,9 @@ class StoryPlanner:
 
         ambience = concept.ambient_sounds or {}
         specs = [
-            (1, STORY_BEATS[0], beats["s1_start"], beats["s1_action"], beats["s1_end"], ambience.get("before", "")),
-            (2, STORY_BEATS[1], beats["s2_start"], beats["s2_action"], beats["s2_end"], ambience.get("turn", "")),
-            (3, STORY_BEATS[2], beats["s3_start"], beats["s3_action"], beats["s3_reveal"], ambience.get("after", "")),
+            (1, beat_names[0], beats["s1_start"], beats["s1_action"], beats["s1_end"], ambience.get("before", "")),
+            (2, beat_names[1], beats["s2_start"], beats["s2_action"], beats["s2_end"], ambience.get("turn", "")),
+            (3, beat_names[2], beats["s3_start"], beats["s3_action"], beats["s3_reveal"], ambience.get("after", "")),
         ]
 
         segments: List[SegmentPlan] = []

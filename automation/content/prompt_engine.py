@@ -4,9 +4,14 @@ Builds 30-second 3-segment plans with timing breakdown, strict negative exclusio
 and robust visual continuity across all three 10-second segments.
 """
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from .concepts import ConceptDefinition
-from .content_modes import HIDDEN_BUILD_STORY, NARRATIVE_AMBIENT_STORY, SILENT_STEP_BY_STEP
+from .content_modes import (
+    CUTAWAY_REVEAL_STORY,
+    HIDDEN_BUILD_STORY,
+    NARRATIVE_AMBIENT_STORY,
+    SILENT_STEP_BY_STEP,
+)
 from .duration_rules import (
     DEFAULT_VIDEO_DURATION,
     DEFAULT_SEGMENT_DURATION,
@@ -17,7 +22,7 @@ from .segment_planner import ContinuityContext, SegmentPlan, SegmentPlanner
 from .hidden_build_concepts import HiddenBuildConcept
 from .hidden_build_planner import HiddenBuildPlanner
 from .story_concepts import StoryConcept
-from .story_planner import StoryPlanner
+from .story_planner import CUTAWAY_BEATS, STORY_BEATS, StoryPlanner
 
 @dataclass
 class ReelConceptPlan:
@@ -129,6 +134,23 @@ class PromptEngine:
         )
 
     @classmethod
+    def build_cutaway_plan(cls, **kwargs) -> ReelConceptPlan:
+        """
+        A cutaway_reveal_story plan.
+
+        Identical to the story plan in every way the pipeline can see -- same three beats,
+        same ambience keys, same ReelConceptPlan shape -- so the manifest, generator and
+        publishers need no special case. Only content_mode and the topic key differ, and
+        the topic key differs so the two formats never collide in diversity history: a
+        cistern under a street and a real place with a documented past are different
+        Reels even when they share a slug.
+        """
+        plan = cls.build_story_concept_plan(beat_names=CUTAWAY_BEATS, **kwargs)
+        plan.content_mode = CUTAWAY_REVEAL_STORY
+        plan.topic_key = plan.topic_key.replace("-story", "-cutaway")
+        return plan
+
+    @classmethod
     def build_story_concept_plan(
         cls,
         concept: StoryConcept,
@@ -140,7 +162,8 @@ class PromptEngine:
         materials: str,
         reveal: str,
         diversity_score: float,
-        duration_seconds: int = DEFAULT_SEGMENT_DURATION
+        duration_seconds: int = DEFAULT_SEGMENT_DURATION,
+        beat_names: Tuple[str, str, str] = STORY_BEATS,
     ) -> ReelConceptPlan:
         """
         Assemble a 3-beat narrative_ambient_story plan. Same ReelConceptPlan shape as the
@@ -148,6 +171,7 @@ class PromptEngine:
         only content_mode and the beats themselves differ.
         """
         continuity, segments = StoryPlanner.plan_segments(
+            beat_names=beat_names,
             concept=concept,
             env=env,
             arch=arch,

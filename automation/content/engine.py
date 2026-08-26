@@ -7,11 +7,17 @@ import random
 from typing import List, Dict, Any, Optional
 
 from .concepts import CATEGORIES, ConceptDefinition
-from .content_modes import HIDDEN_BUILD_STORY, NARRATIVE_AMBIENT_STORY, SILENT_STEP_BY_STEP
+from .content_modes import (
+    CUTAWAY_REVEAL_STORY,
+    HIDDEN_BUILD_STORY,
+    NARRATIVE_AMBIENT_STORY,
+    SILENT_STEP_BY_STEP,
+)
 from .diversity import calculate_diversity_score, compute_similarity
 from .prompt_engine import PromptEngine, ReelConceptPlan
 from .story_concepts import STORY_CONCEPTS
 from .hidden_build_concepts import HIDDEN_BUILD_CONCEPTS
+from .cutaway_concepts import CUTAWAY_CONCEPTS
 
 class ContentProvider(ABC):
     """Abstract interface for generating video concept plans."""
@@ -179,12 +185,30 @@ class HiddenBuildContentProvider(StoryContentProvider):
         return PromptEngine.build_hidden_build_plan(**kwargs)
 
 
+class CutawayContentProvider(StoryContentProvider):
+    """
+    cutaway_reveal_story plans, over CUTAWAY_CONCEPTS.
+
+    Subclasses the story provider for its group round-robin: the pool is grouped by where
+    the section is cut -- under the city, under the ground, inside engineering -- and
+    without interleaving a week would open with four sewers before reaching a glacier.
+    """
+
+    def __init__(self, categories: Optional[List[ConceptDefinition]] = None):
+        super().__init__(categories or CUTAWAY_CONCEPTS)
+
+    def _build_plan(self, **kwargs) -> ReelConceptPlan:
+        return PromptEngine.build_cutaway_plan(**kwargs)
+
+
 def provider_for_mode(content_mode: str) -> ContentProvider:
     """Maps a content_mode to the provider that produces it."""
     if content_mode == NARRATIVE_AMBIENT_STORY:
         return StoryContentProvider()
     if content_mode == HIDDEN_BUILD_STORY:
         return HiddenBuildContentProvider()
+    if content_mode == CUTAWAY_REVEAL_STORY:
+        return CutawayContentProvider()
     if content_mode == SILENT_STEP_BY_STEP:
         return TemplateContentProvider()
     raise ValueError(f"No content provider registered for content_mode '{content_mode}'")

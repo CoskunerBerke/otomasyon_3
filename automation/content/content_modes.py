@@ -34,6 +34,18 @@ NARRATIVE_AMBIENT_STORY = "narrative_ambient_story"
 # consistent across segments; see HiddenBuildPlanner.CRAFTSMAN.
 HIDDEN_BUILD_STORY = "hidden_build_story"
 
+# 2026-08-24: a curiosity format for the first channel. An ordinary surface -- a street, a
+# field, a dam wall -- is opened in cross-section and the working world inside it is
+# revealed. Same 30s three-beat skeleton and the same ambient-audio policy as
+# NARRATIVE_AMBIENT_STORY, and the same factual discipline: every concept names a real
+# kind of structure, so a Reel never claims something that is not there.
+#
+# The subject is deliberately hard-edged. Flow renders architecture, rock and machinery
+# well and organic interiors badly, so "what is inside this" is answered with engineering
+# rather than anatomy -- which also keeps the channel clear of the platforms' medical
+# misinformation policies.
+CUTAWAY_REVEAL_STORY = "cutaway_reveal_story"
+
 
 @dataclass(frozen=True)
 class ContentModeSpec:
@@ -51,6 +63,13 @@ _REGISTRY: Dict[str, ContentModeSpec] = {
         segment_count=3,
         live_eligible=True,
         description="Silent 30s step-by-step architectural construction (V3 original).",
+    ),
+    CUTAWAY_REVEAL_STORY: ContentModeSpec(
+        mode=CUTAWAY_REVEAL_STORY,
+        audio_policy=AUDIO_REQUIRED,
+        segment_count=3,
+        live_eligible=True,
+        description="30s cross-section reveal of what works inside an ordinary place.",
     ),
     NARRATIVE_AMBIENT_STORY: ContentModeSpec(
         mode=NARRATIVE_AMBIENT_STORY,

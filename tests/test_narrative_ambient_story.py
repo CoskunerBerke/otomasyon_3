@@ -95,10 +95,13 @@ def test_registered_modes_are_live_eligible_and_typos_are_not():
     # The set is asserted whole on purpose: a mode must never become live-eligible by
     # accident. Update this deliberately when a channel is added, as hidden_build_story
     # was for the second brand on 2026-08-21.
+    from automation.content.content_modes import CUTAWAY_REVEAL_STORY
+
     assert LIVE_ELIGIBLE_CONTENT_MODES == {
         SILENT_STEP_BY_STEP,
         NARRATIVE_AMBIENT_STORY,
         HIDDEN_BUILD_STORY,
+        CUTAWAY_REVEAL_STORY,
     }
 
     for bogus in ["narrative_story", "silent", "", None]:
@@ -431,9 +434,17 @@ def test_partially_published_week_counts_only_what_landed(tmp_path):
 
 
 def test_start_date_is_the_day_after_the_last_scheduled_video(tmp_path, monkeypatch):
-    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), [_scheduled_everywhere()] * 14)
+    """
+    Anchored to today rather than to a literal date. A fixed date made this pass only
+    until the calendar reached it, and the suite then failed for a reason that had
+    nothing to do with the behaviour under test.
+    """
+    first = datetime.date.today() + datetime.timedelta(days=10)
+    last = first + datetime.timedelta(days=6)
+    _make_week(tmp_path, "2026-W90", first, [_scheduled_everywhere()] * 14)
+
     pipe = _pipeline(tmp_path)
-    assert pipe._resolve_start_date() == datetime.date(2026, 8, 24)
+    assert pipe._resolve_start_date() == last + datetime.timedelta(days=1)
 
 
 def test_start_date_never_lands_in_the_past(tmp_path):
@@ -467,14 +478,20 @@ def test_first_ever_run_falls_back_to_the_calendar(tmp_path):
 
 
 def test_new_week_starts_where_the_last_one_ended(tmp_path):
-    _make_week(tmp_path, "2026-W34", datetime.date(2026, 8, 17), [_scheduled_everywhere()] * 14)
-    manifest = _pipeline(tmp_path)._get_or_create_manifest()
+    """Anchored to today, for the same reason as the test above."""
+    first = datetime.date.today() + datetime.timedelta(days=10)
+    last = first + datetime.timedelta(days=6)
+    _make_week(tmp_path, "2026-W91", first, [_scheduled_everywhere()] * 14)
 
-    assert manifest.start_date == "2026-08-24"
-    assert manifest.reels[0].scheduled_at_local == "2026-08-24 19:30:00"
-    assert manifest.reels[-1].scheduled_at_local == "2026-08-30 22:00:00"
+    manifest = _pipeline(tmp_path)._get_or_create_manifest()
+    new_first = last + datetime.timedelta(days=1)
+    new_last = new_first + datetime.timedelta(days=6)
+
+    assert manifest.start_date == new_first.isoformat()
+    assert manifest.reels[0].scheduled_at_local == f"{new_first.isoformat()} 19:30:00"
+    assert manifest.reels[-1].scheduled_at_local == f"{new_last.isoformat()} 22:00:00"
     # No date may be reused from the finished week.
-    assert all(r.scheduled_at_local > "2026-08-23 22:00:00" for r in manifest.reels)
+    assert all(r.scheduled_at_local > f"{last.isoformat()} 22:00:00" for r in manifest.reels)
 
 
 # ---------------------------------------------------------------- generate fail-fast
