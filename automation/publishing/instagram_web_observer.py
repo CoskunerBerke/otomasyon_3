@@ -31,6 +31,13 @@ CAPTION_PROBE_MS = 1500
 SCHEDULE_CONFIRM_TIMEOUT_SECONDS = 240
 UPLOAD_SETTLE_SECONDS = 5.0
 
+# The composer animates between crop, filter and caption, so the control under the cursor
+# is often still moving. Playwright refuses to click an unstable element, and one attempt
+# with a short timeout turns "mid-transition" into "cannot advance" -- which stopped a
+# live Instagram phase at its third Reel on 2026-08-27 with nothing actually wrong.
+CLICK_TIMEOUT_MS = 8000
+CLICK_RETRY_SECONDS = 20.0
+
 TR_MONTHS = {
     1: "Oca", 2: "Şub", 3: "Mar", 4: "Nis", 5: "May", 6: "Haz",
     7: "Tem", 8: "Ağu", 9: "Eyl", 10: "Eki", 11: "Kas", 12: "Ara",
@@ -83,17 +90,30 @@ class InstagramWebObserver:
         if loc is None:
             logger.warning(f"[IG WEB] '{what}' bulunamadi.")
             return False
-        try:
-            loc.scroll_into_view_if_needed(timeout=2000)
-        except Exception:
-            pass
-        try:
-            loc.click(timeout=3000)
-            time.sleep(0.8)
-            return True
-        except Exception as e:
-            logger.warning(f"[IG WEB] '{what}' tiklanamadi: {e}")
-            return False
+        # Retried, not attempted once: every control this helper drives is a navigation
+        # step -- open the composer, advance a screen, change the calendar month. None of
+        # them publish anything, so waiting out an animation costs nothing and giving up
+        # on one costs the Reel. The final 'Planla' is NOT driven from here; it has its
+        # own method and its own share-now guard.
+        deadline = time.time() + CLICK_RETRY_SECONDS
+        last_error: Optional[Exception] = None
+        while True:
+            try:
+                loc.scroll_into_view_if_needed(timeout=2000)
+            except Exception:
+                pass
+            try:
+                loc.click(timeout=CLICK_TIMEOUT_MS)
+                time.sleep(0.8)
+                return True
+            except Exception as e:
+                last_error = e
+                if time.time() >= deadline:
+                    break
+                time.sleep(1.0)
+
+        logger.warning(f"[IG WEB] '{what}' {CLICK_RETRY_SECONDS:.0f}s boyunca tiklanamadi: {last_error}")
+        return False
 
     # ------------------------------------------------------------------
     # composer

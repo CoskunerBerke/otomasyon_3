@@ -9,6 +9,21 @@ from pathlib import Path
 from typing import Optional
 from playwright.sync_api import Page, Download, Locator
 
+# How long the download button is given to become clickable.
+#
+# This was 2000ms, justified as "avoid Playwright waiting 30s for disabled elements" --
+# but the disabled case is already ruled out by the aria-disabled/is_enabled pre-check
+# a few lines above, so the short timeout was guarding a possibility that cannot reach
+# it. What it actually caught was a button that is enabled but still SETTLING: Flow
+# animates its result panel, and Playwright refuses to click an unstable element.
+#
+# CBM-REEL-2026-0027 failed exactly that way on 2026-08-27 -- the locator resolved, the
+# button was there and enabled, and the click gave up while it was still moving. The
+# video had already been generated, so the Flow credit was spent and the file simply
+# never came down.
+DOWNLOAD_CLICK_TIMEOUT_MS = 15000
+
+
 class FlowDownloader:
     """Manages file download events and verifies saved files."""
 
@@ -49,8 +64,10 @@ class FlowDownloader:
         download_succeeded = False
         try:
             with page.expect_download(timeout=timeout_seconds * 1000) as download_info:
-                # Fast 2-second timeout to avoid Playwright waiting 30s for disabled elements
-                download_button_locator.click(timeout=2000)
+                # One click, but given time to become actionable. Playwright's own
+                # actionability wait is the retry here -- a click that times out never
+                # dispatched, so there is no risk of starting two downloads.
+                download_button_locator.click(timeout=DOWNLOAD_CLICK_TIMEOUT_MS)
             download: Download = download_info.value
             download.save_as(str(target_path))
             download_succeeded = True
