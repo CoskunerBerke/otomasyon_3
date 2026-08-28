@@ -23,7 +23,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger("ReelsAIFactory.SimpleWeeklyPipeline")
 
@@ -485,6 +485,7 @@ class SimpleWeeklyPipeline:
 
         past_history = [{"id": r.reel_id, "title": r.title, "category": r.content_mode} for r in self.state_repo.list_all_reels()]
         concept_plans = self._plan_concepts(past_history)
+        self._refuse_a_repeat_of_last_week(concept_plans)
 
         reels: List[BatchReel] = []
         for i, (slot, reel_id, plan) in enumerate(zip(slot_plan.slots, reel_ids, concept_plans), start=1):
@@ -542,6 +543,85 @@ class SimpleWeeklyPipeline:
         self.batch_repo.ensure_progress_entries(week_id, reel_ids)
         return manifest
 
+    def _fresh_plans(
+        self,
+        engine: Any,
+        count: int,
+        past_history: List[Dict[str, Any]],
+        used_last_week: Set[str],
+    ) -> List[Any]:
+        """
+        `count` plans, skipping any concept the previous week already used.
+
+        Ranking alone does not rotate a pool. The diversity penalty is applied per
+        CATEGORY GROUP, and craftsbyman has three of them, so twenty-eight concepts
+        scored into the same order every week and the same top fourteen came out --
+        which is how a week came to be a copy of the one before it. Excluding last
+        week's concepts outright is what actually turns the pool over.
+
+        Only the previous week is excluded, not all history: a pool twice as deep as a
+        week is meant to alternate, and reaching back further would exhaust it for no
+        gain.
+        """
+        ranked = engine.generate_next_reels(
+            count=max(count * 4, 40), past_records=past_history, duration_seconds=10
+        )
+        fresh = [p for p in ranked if p.concept_def.id_slug not in used_last_week]
+        if len(fresh) >= count:
+            return fresh[:count]
+
+        # Not enough unseen concepts. Return what ranking gave so the caller's
+        # CONCEPT_POOL_EXHAUSTED check reports the real problem -- an empty-handed
+        # silent fallback is what let a repeat week through in the first place.
+        return ranked[:count]
+
+    def _last_week_concept_slugs(self) -> Dict[str, str]:
+        """Concept slug -> Reel id, for the most recent week this brand planned."""
+        if not self.batch_repo.batches_dir.exists():
+            return {}
+        weeks = sorted(
+            d.name for d in self.batch_repo.batches_dir.iterdir()
+            if d.is_dir() and self.brand.owns_week_id(d.name)
+        )
+        for week_id in reversed(weeks):
+            manifest = self.batch_repo.load_manifest(week_id)
+            if manifest and manifest.reels:
+                return {r.concept_id_slug: r.reel_id for r in manifest.reels if r.concept_id_slug}
+        return {}
+
+    def _refuse_a_repeat_of_last_week(self, plans: List[Any]) -> None:
+        """
+        Stop a week that would republish the one before it.
+
+        The concept pool ran exactly as deep as a week is long, so on 2026-08-28 the
+        second craftsbyman week came out as the first one again: same fourteen slugs,
+        same fourteen titles. Nothing objected. Eleven of them reached the channel before
+        the cross-week id guard -- which fires on the ID, not the content -- noticed that
+        verification kept finding LAST week's video under this week's title.
+
+        Diversity ranking cannot save a pool with nothing left to rank. This is the check
+        that says so out loud, before fourteen Flow generations are spent on a repeat.
+        """
+        previous = self._last_week_concept_slugs()
+        if not previous:
+            return
+
+        repeated = [
+            (plan.concept_def.id_slug, previous[plan.concept_def.id_slug])
+            for plan in plans
+            if plan.concept_def.id_slug in previous
+        ]
+        if not repeated:
+            return
+
+        listed = ", ".join(f"{slug} (= {reel})" for slug, reel in repeated[:5])
+        raise RuntimeError(
+            f"CONCEPT_POOL_EXHAUSTED: planlanan haftanin {len(repeated)}/{len(plans)} "
+            f"konsepti onceki haftayla ayni -- {listed}"
+            f"{' ...' if len(repeated) > 5 else ''}. Bu hafta gecen haftayi tekrar "
+            f"yayinlardi. '{self.content_mode}' havuzuna yeni konsept ekleyin."
+        )
+
     def _plan_concepts(self, past_history: List[Dict[str, Any]]) -> List[Any]:
         """
         The week's fourteen concept plans, in slot order.
@@ -555,20 +635,16 @@ class SimpleWeeklyPipeline:
         format's own pool: a cistern under a street and a ruined city are not near
         duplicates, and scoring them against each other would suppress neither.
         """
+        used_last_week = set(self._last_week_concept_slugs())
         primary = ContentEngine(content_mode=self.content_mode)
         alternate_mode = self.brand.alternate_content_mode
+
         if not alternate_mode or alternate_mode == self.content_mode:
-            return primary.generate_next_reels(
-                count=14, past_records=past_history, duration_seconds=10
-            )
+            return self._fresh_plans(primary, 14, past_history, used_last_week)
 
         evening_engine = ContentEngine(content_mode=alternate_mode)
-        morning_plans = primary.generate_next_reels(
-            count=7, past_records=past_history, duration_seconds=10
-        )
-        evening_plans = evening_engine.generate_next_reels(
-            count=7, past_records=past_history, duration_seconds=10
-        )
+        morning_plans = self._fresh_plans(primary, 7, past_history, used_last_week)
+        evening_plans = self._fresh_plans(evening_engine, 7, past_history, used_last_week)
         logger.info(
             f"[PLAN] Iki formatli hafta: 19:30 '{self.content_mode}', "
             f"22:00 '{alternate_mode}'."
