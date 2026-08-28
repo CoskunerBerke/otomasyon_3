@@ -252,3 +252,85 @@ def test_a_shared_remote_id_is_refused_on_the_soft_failure_path():
     assert "PLATFORM_SUCCESS_STATUSES" not in condition, (
         "gating the guard on success is what let the stale id through"
     )
+
+
+# --------------------------------------------------------------------------
+# One video id may never belong to two Reels -- including across weeks
+# --------------------------------------------------------------------------
+
+def test_a_remote_id_from_a_previous_week_is_refused(tmp_path):
+    """
+    Id capture falls through to the browser URL, and once a week rolls over that URL is
+    showing LAST week's video. On 2026-08-27 CBM-REEL-2026-0026 of W35 recorded
+    ry65v75_Hns -- which is W34's CBM-REEL-2026-0013, already scheduled and live. The
+    guard only scanned the current week, so nothing objected, and the new Reel's state
+    pointed at a finished week's video, which resume would have edited.
+    """
+    import json
+
+    from automation.brands import get_brand
+    from automation.orchestration.batch_manifest import BatchManifest, BatchReel
+    from automation.simple_weekly_pipeline import SimpleWeeklyPipeline
+
+    pipe = SimpleWeeklyPipeline(
+        base_dir=tmp_path, vault_path=tmp_path / "v", dry_run=True,
+        brand=get_brand("craftsbyman"),
+    )
+
+    # Last week: one Reel holding a real, live video id.
+    last = BatchManifest(
+        week_id="CBM-2026-W34", start_date="2026-08-22", status="LOCKED",
+        reels=[BatchReel(index=1, reel_id="CBM-REEL-2026-0013",
+                         scheduled_at_local="2026-08-28 19:30:00",
+                         scheduled_at_utc="2026-08-28 16:30:00")],
+    )
+    pipe.batch_repo.save_manifest(last)
+    pipe.batch_repo.ensure_progress_entries(last.week_id, ["CBM-REEL-2026-0013"])
+    progress = pipe.batch_repo.load_progress(last.week_id)
+    progress["CBM-REEL-2026-0013"]["youtube"]["remote_id"] = "ry65v75_Hns"
+    progress["CBM-REEL-2026-0013"]["youtube"]["status"] = "SCHEDULED"
+    pipe.batch_repo.save_progress(last.week_id, progress)
+
+    # This week: a different Reel, and the same id captured from a stale page.
+    this = BatchManifest(
+        week_id="CBM-2026-W35", start_date="2026-08-29", status="LOCKED",
+        reels=[BatchReel(index=1, reel_id="CBM-REEL-2026-0026",
+                         scheduled_at_local="2026-09-04 19:30:00",
+                         scheduled_at_utc="2026-09-04 16:30:00")],
+    )
+    pipe.batch_repo.save_manifest(this)
+    pipe.batch_repo.ensure_progress_entries(this.week_id, ["CBM-REEL-2026-0026"])
+
+    clash = pipe._reel_already_using_remote_id(
+        this, "youtube", "ry65v75_Hns", "CBM-REEL-2026-0026"
+    )
+    assert clash is not None, "a live video from another week must not be claimed again"
+    assert "CBM-REEL-2026-0013" in clash
+    assert "CBM-2026-W34" in clash, "the message must name the week, or nobody can find it"
+
+
+def test_a_reel_does_not_collide_with_itself(tmp_path):
+    """Re-recording its own id on a retry is normal and must not be refused."""
+    from automation.brands import get_brand
+    from automation.orchestration.batch_manifest import BatchManifest, BatchReel
+    from automation.simple_weekly_pipeline import SimpleWeeklyPipeline
+
+    pipe = SimpleWeeklyPipeline(
+        base_dir=tmp_path, vault_path=tmp_path / "v", dry_run=True,
+        brand=get_brand("craftsbyman"),
+    )
+    manifest = BatchManifest(
+        week_id="CBM-2026-W35", start_date="2026-08-29", status="LOCKED",
+        reels=[BatchReel(index=1, reel_id="CBM-REEL-2026-0026",
+                         scheduled_at_local="2026-09-04 19:30:00",
+                         scheduled_at_utc="2026-09-04 16:30:00")],
+    )
+    pipe.batch_repo.save_manifest(manifest)
+    pipe.batch_repo.ensure_progress_entries(manifest.week_id, ["CBM-REEL-2026-0026"])
+    progress = pipe.batch_repo.load_progress(manifest.week_id)
+    progress["CBM-REEL-2026-0026"]["youtube"]["remote_id"] = "abc123XYZ01"
+    pipe.batch_repo.save_progress(manifest.week_id, progress)
+
+    assert pipe._reel_already_using_remote_id(
+        manifest, "youtube", "abc123XYZ01", "CBM-REEL-2026-0026"
+    ) is None

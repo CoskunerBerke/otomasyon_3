@@ -912,13 +912,33 @@ class SimpleWeeklyPipeline:
     def _reel_already_using_remote_id(
         self, manifest: BatchManifest, platform: str, remote_id: str, this_reel_id: str
     ) -> Optional[str]:
-        """The other Reel of this week already recorded against `remote_id`, if any."""
-        progress = self.batch_repo.load_progress(manifest.week_id)
-        for reel in manifest.reels:
-            if reel.reel_id == this_reel_id:
+        """
+        Any other Reel of this BRAND already recorded against `remote_id`, if any.
+
+        Every week the brand owns is scanned, not just this one. Id capture falls through
+        to the browser URL, and after a week rolls over that URL is showing LAST week's
+        video -- so the collision that matters crosses weeks. On 2026-08-27
+        CBM-REEL-2026-0026 of W35 recorded ry65v75_Hns, which is W34's CBM-REEL-2026-0013,
+        a Reel already scheduled and live. A within-week check saw nothing wrong, and the
+        new Reel's state then pointed at a video belonging to a finished week -- which
+        resume would have edited.
+        """
+        if not remote_id:
+            return None
+
+        if not self.batch_repo.batches_dir.exists():
+            return None
+
+        for week_dir in sorted(self.batch_repo.batches_dir.iterdir()):
+            if not week_dir.is_dir() or not self.brand.owns_week_id(week_dir.name):
                 continue
-            if progress.get(reel.reel_id, {}).get(platform, {}).get("remote_id") == remote_id:
-                return reel.reel_id
+            progress = self.batch_repo.load_progress(week_dir.name)
+            for other_reel_id, entry in progress.items():
+                if other_reel_id == this_reel_id:
+                    continue
+                if (entry.get(platform) or {}).get("remote_id") == remote_id:
+                    where = "" if week_dir.name == manifest.week_id else f" ({week_dir.name})"
+                    return f"{other_reel_id}{where}"
         return None
 
     def _build_publish_record(self, reel: BatchReel, platform: Platform, progress_entry: Dict[str, Any]) -> PublishRecord:

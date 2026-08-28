@@ -2281,7 +2281,14 @@ class YouTubeStudioUIObserver:
         # A freshly uploaded Short sits in "Kontrol ediliyor..." for a while, and its
         # visibility cell stays blank until that finishes. These control how long a matched
         # row is given to fill that cell in before the result is called inconclusive.
-        ROW_SETTLE_ATTEMPTS = 5
+        # The row is found almost at once; what takes time is YouTube deciding what to
+        # print in the visibility cell, because its content check runs first. Fifteen
+        # seconds was not enough on 2026-08-27: three Reels were sitting in SHORTS with
+        # the cell still blank, verification called them unscheduled, and the run drove
+        # into a resume that could not work -- then repeated that for the whole
+        # thirty-minute hold. Waiting is the cheap half of this; the expensive half is
+        # concluding "not scheduled" about a video that is right there.
+        ROW_SETTLE_ATTEMPTS = 20
         ROW_SETTLE_SECONDS = 3.0
 
         clean_title = target_title.lower().strip()
