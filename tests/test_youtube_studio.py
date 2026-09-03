@@ -2133,3 +2133,46 @@ def test_ai_disclosure_corrupted_audience_fails_safely():
 
 
 
+
+
+def test_dialog_scrim_is_waited_out_before_title_is_typed():
+    """
+    CBM-REEL-2026-0041: Playwright called the title box visible, enabled and stable and
+    still could not click it -- ytcp-uploads-dialog's scrim was taking the pointer
+    events. The click must wait for the scrim, not be forced through it.
+    """
+    order = []
+    mock_page = MagicMock()
+
+    scrim = MagicMock()
+    scrim.first.wait_for.side_effect = lambda **kw: order.append("scrim")
+
+    def _locator(selector, *a, **k):
+        if "dialog-scrim" in selector:
+            return scrim
+        return MagicMock()
+
+    mock_page.locator.side_effect = _locator
+    observer = YouTubeStudioUIObserver(mock_page)
+
+    title_box = MagicMock()
+    title_box.click.side_effect = lambda: order.append("click")
+    title_box.inner_text.return_value = "Bir Postane Arsivi"
+    observer._resolve_visible = lambda *a, **k: title_box
+    observer.capture_error_snapshot = lambda name: None
+
+    observer.fill_details("Bir Postane Arsivi", "aciklama", ["#Shorts"])
+
+    assert order[:2] == ["scrim", "click"], f"scrim beklenmeden tiklanmis: {order}"
+    assert scrim.first.wait_for.call_args.kwargs.get("state") == "hidden"
+
+
+def test_scrim_that_never_clears_is_reported_not_forced():
+    """A scrim still up at the deadline returns False -- it never gets removed or bypassed."""
+    mock_page = MagicMock()
+    scrim = MagicMock()
+    scrim.first.wait_for.side_effect = RuntimeError("Timeout 30000ms exceeded")
+    mock_page.locator.return_value = scrim
+
+    observer = YouTubeStudioUIObserver(mock_page)
+    assert observer._wait_for_upload_dialog_scrim(timeout_seconds=0.01) is False

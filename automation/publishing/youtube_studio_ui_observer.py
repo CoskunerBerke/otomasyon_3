@@ -123,6 +123,8 @@ FILE_INPUT_WAIT_SECONDS = 20.0
 
 # How long the details step is given to mount its title field.
 TITLE_INPUT_WAIT_SECONDS = 15.0
+# The upload dialog's scrim takes pointer events while the dialog is still settling.
+DIALOG_SCRIM_WAIT_SECONDS = 30.0
 
 
 class YouTubeStudioUIObserver:
@@ -622,6 +624,34 @@ class YouTubeStudioUIObserver:
                 return None
             time.sleep(1.0)
 
+    def _wait_for_upload_dialog_scrim(self, timeout_seconds: float = DIALOG_SCRIM_WAIT_SECONDS) -> bool:
+        """
+        Wait for the upload dialog's scrim to retract before typing behind it.
+
+        Playwright called the title box "visible, enabled and stable" and still could not
+        click it: <div class="dialog-scrim style-scope ytcp-uploads-dialog"> was taking the
+        pointer events, so the retry loop burned the full timeout and CBM-REEL-2026-0041
+        kept YouTube's filename-derived title. The scrim is up while the dialog settles --
+        this is the familiar "not ready yet" read as "not there", one layer down.
+
+        Waiting is the fix. Forcing the click through the scrim or removing it is what
+        Kural 31 forbids, and it would mean typing into a dialog that is not ready.
+
+        Returns False if the scrim is still up at the deadline; the caller may still try,
+        and its own error path reports what actually happened.
+        """
+        try:
+            self.page.locator("ytcp-uploads-dialog .dialog-scrim").first.wait_for(
+                state="hidden", timeout=timeout_seconds * 1000
+            )
+            return True
+        except Exception:
+            logger.warning(
+                "YOUTUBE_DIALOG_SCRIM_STILL_UP: yukleme diyalogunun karartma katmani "
+                f"{timeout_seconds:.0f}s icinde cekilmedi; baslik yazma yine de denenecek."
+            )
+            return False
+
     def fill_details(self, title: str, description: str, hashtags: List[str]) -> bool:
         """
         Fill title and description inputs, and prove the title actually took.
@@ -641,6 +671,9 @@ class YouTubeStudioUIObserver:
             logger.error("YOUTUBE_TITLE_INPUT_NOT_FOUND: baslik alani bulunamadi.")
             return False
 
+        # The dialog's scrim swallows the click while it is still up -- wait it out first.
+        self._wait_for_upload_dialog_scrim()
+
         try:
             loc.click()
             self.page.keyboard.press("Control+A")
@@ -648,6 +681,7 @@ class YouTubeStudioUIObserver:
             loc.fill(full_title)
             logger.info(f"Filled YouTube Title: {full_title[:40]}...")
         except Exception as e:
+            self.capture_error_snapshot("title_fill_failed")
             logger.error(f"YOUTUBE_TITLE_FILL_FAILED: {e}")
             return False
 
