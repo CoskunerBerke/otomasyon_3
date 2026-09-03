@@ -575,6 +575,7 @@ class FlowPage:
         timeout_seconds = timeout_minutes * 60
         start_time = time.time()
         last_logged_state = None
+        stale_artifact_logged = False
 
         print("[FLOW] State Machine başlatıldı (Video üretimi izleniyor)...")
 
@@ -601,10 +602,30 @@ class FlowPage:
                     dl_btn = self.resolve_enabled_download_button(timeout_ms=1500)
 
                 if dl_btn:
+                    # An enabled download button is not proof that THIS segment's video is
+                    # ready. When a generation fails, Flow leaves the previous artifact on
+                    # screen with its button still enabled, and the decision engine reaches
+                    # DOWNLOAD_MEDIA through the MEDIA_GENERATING branch without any new
+                    # artifact. Downloading that produces a Reel whose segments are the same
+                    # ten seconds repeated -- CBM-REEL-2026-0032 shipped two identical ones.
+                    fingerprint = snapshot.new_artifact_fingerprint
+                    if session and (
+                        fingerprint is None
+                        or fingerprint in session.baseline_artifact_fingerprints
+                    ):
+                        if not stale_artifact_logged:
+                            print(
+                                "[FLOW] Indirme butonu etkin, ancak ekrandaki video bu segmentin "
+                                "ciktisi degil (baseline artifact) -- yeni uretim bekleniyor..."
+                            )
+                            stale_artifact_logged = True
+                        time.sleep(3.0)
+                        continue
+
                     print(f"[FLOW] Reel: {session.reel_id if session else target_filename}")
                     print(f"[FLOW] Project: {session.flow_project_url if session else self.page.url}")
                     print(f"[FLOW] Baseline artifacts: {len(session.baseline_artifact_fingerprints) if session else 0}")
-                    print(f"[FLOW] New artifact detected: {snapshot.new_artifact_fingerprint}")
+                    print(f"[FLOW] New artifact detected: {fingerprint}")
                     print(f"[FLOW] Artifact belongs to active session: YES")
                     print("[FLOW] Downloading...")
                     return self.downloader.trigger_and_save_download(

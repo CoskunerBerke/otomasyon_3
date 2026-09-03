@@ -28,6 +28,15 @@ from ..quality.frame_extractor import FrameExtractor
 from ..content.content_modes import requires_audio
 from ..quality.concatenator import VideoConcatenator
 
+
+def _segment_digest(path: Path) -> str:
+    """SHA-256 of a segment file, used to tell two segments apart by content."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 class VideoProvider(ABC):
     """Abstract video generation provider."""
 
@@ -118,6 +127,7 @@ class GoogleFlowWebProvider(VideoProvider):
             # -------------------------------------------------------------
             if segments:
                 completed_segment_paths: List[Path] = []
+                completed_segment_digests: set = set()
 
                 # Configure Settings once for the project
                 flow_page.configure_agent_settings(
@@ -136,11 +146,24 @@ class GoogleFlowWebProvider(VideoProvider):
                     seg_target_name = f"segment_{seg_idx:02d}.mp4"
                     seg_target_file = reel_segments_dir / seg_target_name
 
-                    # Check if segment already completed on disk
-                    if seg.status == "READY" and seg_target_file.exists() and seg_target_file.stat().st_size > 10000:
-                        print(f"[{reel_id}] Segment {seg_idx}/3 daha önce tamamlanmış: {seg_target_name} (Atlanıyor)")
-                        completed_segment_paths.append(seg_target_file)
-                        continue
+                    # Check if segment already completed on disk. seg.status is rebuilt as
+                    # PENDING on every run, so requiring it here re-generated segments a
+                    # previous process had already paid Flow credits for -- the file on disk
+                    # is the evidence that matters.
+                    if seg_target_file.exists() and seg_target_file.stat().st_size > 10000:
+                        disk_digest = _segment_digest(seg_target_file)
+                        if disk_digest in completed_segment_digests:
+                            # Identical to an earlier segment: this is the stale-artifact
+                            # bug's output, not a resumable result. Drop it and regenerate.
+                            print(f"[{reel_id}] Segment {seg_idx}/3 diskteki dosya önceki segmentle birebir aynı -- siliniyor, yeniden üretilecek.")
+                            seg_target_file.unlink()
+                        else:
+                            print(f"[{reel_id}] Segment {seg_idx}/3 daha önce tamamlanmış: {seg_target_name} (Atlanıyor)")
+                            completed_segment_paths.append(seg_target_file)
+                            completed_segment_digests.add(disk_digest)
+                            seg.local_file = seg_target_file
+                            seg.status = "READY"
+                            continue
 
                     print(f"\n[{reel_id}] >>> SEGMENT {seg_idx}/3 ÜRETİLİYOR ({seg.stage_name} — {seg.duration_seconds}s)")
 
@@ -182,6 +205,20 @@ class GoogleFlowWebProvider(VideoProvider):
                     if downloaded_seg != final_seg_path:
                         import shutil
                         shutil.copy2(str(downloaded_seg), str(final_seg_path))
+
+                    # Last line of defence for the stale-artifact case: if the file we just
+                    # downloaded is byte-identical to an earlier segment, Flow handed back
+                    # the previous video instead of this segment's. Concatenating it would
+                    # produce a Reel that repeats the same ten seconds.
+                    seg_digest = _segment_digest(final_seg_path)
+                    if seg_digest in completed_segment_digests:
+                        final_seg_path.unlink(missing_ok=True)
+                        raise RuntimeError(
+                            f"SEGMENT_DUPLICATE: Segment {seg_idx} indirilen video önceki bir segmentle "
+                            f"birebir aynı ({seg_digest[:12]}). Flow üretimi başarısız olmuş ve ekranda "
+                            f"duran eski video inmiş olabilir."
+                        )
+                    completed_segment_digests.add(seg_digest)
 
                     if self.agent_manager:
                         self.agent_manager.record_flow_segment_downloaded(reel_id, seg_idx)
