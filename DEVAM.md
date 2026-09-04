@@ -2,9 +2,11 @@
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
 Branch: **`stale-artifact-guard`** — `main`'e **HENÜZ MERGE EDİLMEDİ**.
-Son commit `d83bf45`. PR: https://github.com/CoskunerBerke/otomasyon_3/pull/new/stale-artifact-guard
+Son commit `73b06f2`. PR: https://github.com/CoskunerBerke/otomasyon_3/pull/new/stale-artifact-guard
 
 ⚠️ **İlk iş bu PR'ı merge et.** İçinde gece boyunca canlı üretimde bulunan gerçek hataların
+düzeltmesi var; merge edilmezse bir sonraki çalıştırma aynı hatalara düşer. Bu repoda
+düzeltmelerin dalda mahsur kalması daha önce yaşandı.
 düzeltmesi var; merge edilmezse bir sonraki çalıştırma aynı hatalara düşer. Bu repoda
 düzeltmelerin dalda mahsur kalması daha önce yaşandı.
 
@@ -31,14 +33,15 @@ ve `CRAFTSBYMAN_*` karşılıkları. Ortak: `FLOW_LOGIN.bat`, `INSTALL_FIRST_TIM
 
 ## Nerede kalındı
 
-Gece 3→4 Eylül'de iki hafta da sıfırdan üretilip yayına planlandı.
+Gece 3→4 Eylül'de iki hafta da sıfırdan üretilip yayına planlandı. **Açık iş yok.**
 
 | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|
-| `2026-W37` (BuildVerse) | 7–13 Eyl | 14/14 | **14/14** | **14/14** | **14/14** |
-| `CBM-2026-W36` (craftsbyman) | 4–10 Eyl | 14/14 | **12/14** | **14/14** | kapalı |
+| `2026-W37` (BuildVerse) | 7–13 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
+| `CBM-2026-W36` (craftsbyman) | 4–10 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 
-BuildVerse eksiksiz. Craftsbyman'da YouTube'un 2 Reel'i açık — aşağıda.
+28 video üretildi, 56 yayın planlandı. Bir sonraki hafta için sadece `.bat`:
+BuildVerse 14 Eylül'den, craftsbyman 11 Eylül'den başlar (kod son planlı slotun ertesini bulur).
 
 Önceki haftalar (BuildVerse W34–W36, CBM-W34) tamam. **`CBM-2026-W35` bilerek terk edildi**
 (operatör kararı, 4 Eyl 00:30): yarım kalmıştı, tamamlamak yerine yeni haftaya geçildi.
@@ -47,37 +50,29 @@ duruyor. YouTube'da 11'i, TikTok'ta 7'si planlı.
 
 ---
 
-## 🔴 Sabah kontrol listesi (operatör)
+## ⚠️ YouTube günlük yükleme kotası — gecenin en pahalı dersi
 
-Otomasyon bunları doğrulayamadı, insan gözü gerekiyor:
+Craftsbyman'ın YouTube'u 12/14'te takıldı ve saatlerce yanlış teşhis edildi. Gerçek sebep
+**doğrulanmamış kanalın günlük yükleme sınırı**ydı. Operatör tek seferlik doğrulamayı
+yapınca kalan 2 Reel ilk denemede, tek hata satırı olmadan geçti.
 
-1. **YouTube / craftsbyman** — İçerik → Shorts ve Yüklemeler'de `postbus-archive` ve
-   `caravan-bakery` var mı? Beklenti: **yok** (yükleme hiç tamamlanmadı). Yoksa → aşağıdaki
-   açık iş. Varsa → dokunma, elle başlığı düzeltip planla.
-2. **TikTok / @craftsbyman** — 14 video doğru hesapta mı? Sebep: yükleme sırasında 14 kez
-   `ACCOUNT_UNVERIFIED` çıktı (hesap adı sayfadan okunamadı, markaya özel Chrome profiline
-   güvenilerek devam edildi). Aynı uyarı BuildVerse/@kitchenverse360 için de çıkıyor.
-3. **TikTok / @kitchenverse360** — `ani-story` (REEL-2026-0059) **tek kopya** mı? İlk
-   denemede Planla'ya basıldı ama onay görünmedi (ağ kesintisi), ikinci deneme başarılı oldu.
-   `is_editor_open_for_reel` duplicate'i engellemeli, ama doğrulanmadı.
+Kotanın belirtileri şunlardı — **bir daha görülürse önce kotayı düşün**:
 
----
+```
+YOUTUBE_UPLOAD_COMPLETION_UNCONFIRMED: no enabled Next button after 120s
+[REMOTE_ID] Video ID 20s icinde okunamadi
+YOUTUBE_DIALOG_SCRIM_STILL_UP
+YOUTUBE_TITLE_FILL_FAILED
+```
 
-## Açık iş: craftsbyman'ın 2 YouTube Reel'i
+Yanıltıcı olan: bu zincir tam olarak bir UI hatası gibi görünüyor. Video karşıya geçiyor
+(başlık kutusunda YouTube'un dosya adından türettiği isim beliriyor), ama işleme
+tamamlanmadığı için diyalog yükleme modunda kalıyor, scrim çekilmiyor, başlık yazılamıyor.
+Her başarısız deneme kanalda bir taslak bırakıyor.
 
-`CBM-REEL-2026-0041` (postbus-archive, 10 Eyl 19:30) ve `CBM-REEL-2026-0042`
-(caravan-bakery, 10 Eyl 22:00) → `SCHEDULE_RESUME_REQUIRED`.
-
-Sıra: yükleme tamamlanmadı (`no enabled Next button after 120s`, `Video ID okunamadi`) →
-başlık yazılamadı → resume de çalışmadı, çünkü `[HARD UPLOAD GUARD] Record in resume state
-but draft wizard could not be opened, and the video is not scheduled either`.
-
-**Kilitlenme bu:** kayıt "resume" durumunda olduğu için yeniden yükleme reddediliyor, ama
-YouTube'da düzeltilecek bir taslak da yok.
-
-Çözüm (kontrol listesinin 1. maddesi doğrulandıktan sonra): iki Reel'in `youtube` kaydını
-`progress.json`'da `PENDING`'e çek, sonra `CRAFTSBYMAN_SADECE_YOUTUBE.bat`. Videolar hazır,
-Flow kredisi harcanmaz. **Önce YouTube'da olmadıklarını doğrula** — yoksa duplicate olur.
+Kod bu durumu kotadan ayırt edemiyor. **İyileştirme fırsatı:** yükleme tamamlanmıyorsa
+sayfadaki "Günlük yükleme sınırına ulaşıldı" uyarısını arayıp `YOUTUBE_DAILY_QUOTA_REACHED`
+ile durmak — 14 Reel'i tek tek denemekten ve taslak biriktirmekten iyi.
 
 ---
 
@@ -98,22 +93,38 @@ Flow kredisi harcanmaz. **Önce YouTube'da olmadıklarını doğrula** — yoksa
    şartı bellekte tutulduğu için süreç ölünce sıfırlanıyor, ödenmiş segmentler yeniden
    üretiliyordu. Artık diskteki dosya kanıt (kopya kontrolüyle).
 5. **YouTube başlık alanı tıklanamıyordu** (`youtube_studio_ui_observer.py`, `d83bf45`) —
-   `<div class="dialog-scrim ytcp-uploads-dialog">` pointer event'leri yutuyordu. Playwright
-   elementi "visible, enabled and stable" diyordu; sorun elementte değil önündeki katmandaydı.
-   Artık scrim'in çekilmesi bekleniyor (kaldırılmıyor, zorlanmıyor — Kural 31).
-   **Kanıtlandı:** craftsbyman'da YouTube 12/14 iken, düzeltmeden sonra BuildVerse 14/14.
+   `<div class="dialog-scrim ytcp-uploads-dialog">` pointer event'leri yutuyordu. Artık
+   scrim'in çekilmesi bekleniyor (kaldırılmıyor, zorlanmıyor — Kural 31). BuildVerse'te
+   YouTube'u 14/14 yapan düzeltme bu. **Ama craftsbyman'ın 12/14'ünü açıklayan o değildi**
+   — orada scrim de kotanın belirtisiydi. Düzeltme gerçek, teşhis kısmen yanlıştı.
+6. **`SCHEDULE_RESUME_REQUIRED` kendi kendini kilitliyordu**
+   (`youtube_studio_publisher.py:149`) — `has_remote_evidence` durumun kendisini uzak kanıt
+   sayıyor, sistem olmayan taslağı arayıp duruyordu. Bu sefer `progress.json`'da elle
+   `PENDING`'e çekilerek aşıldı; **kod düzeltmesi yapılmadı**, kalıcı çözüm gerekiyor.
 
 Testler: `tests/test_flow_stale_artifact.py` (4 yeni), `tests/test_youtube_studio.py` (60, 2'si yeni).
 
 ---
 
+## Doğrulanmamış kalanlar (operatör bakabilir, acil değil)
+
+- **YouTube / craftsbyman taslakları** — kota dolduğu dönemdeki başarısız denemeler kanalda
+  `postbus archive` / `caravan bakery` adlı taslak bırakmış olabilir. İçerik → Yüklemeler'de
+  bak, fazlalık varsa elle sil. Planlı olan ikisi doğru: `VcqiX_XD0Wo`, `HqwHg5Ax4_M`.
+- **TikTok hesap doğrulaması** — her Reel'de `ACCOUNT_UNVERIFIED` çıkıyor (her iki markada).
+  Hesap adı sayfadan okunamıyor, markaya özel Chrome profiline güvenilerek devam ediliyor.
+  28 videonun doğru hesaplarda olduğunu gözle doğrulamak iyi olur.
+- **REEL-2026-0059** (`ani-story`, BuildVerse/TikTok) — tek kopya mı? İlk denemede Planla'ya
+  basıldı ama ağ kesintisi yüzünden onay görünmedi; ikinci deneme başarılı oldu.
+
+---
+
 ## Bilinen, düzeltilmemiş gürültü
 
-- **`ACCOUNT_UNVERIFIED` (TikTok)** — her Reel'de, her iki markada. Hesap adı sayfadan
-  okunamıyor; yayın markaya özel Chrome profiline güvenerek devam ediyor. Yanlış hesap
-  riski profil ayrımıyla azaltılmış ama doğrulama gerçekte çalışmıyor.
+- **`CRAFTSBYMAN_SADECE_YOUTUBE.bat` yanlış haftaya sabitlenmiş** — içinde
+  `--week-id CBM-2026-W34` yazıyor. Kullanılacaksa hafta elle düzeltilmeli.
 - **Telegram bildirimleri** — gece DNS çözülemedi (`getaddrinfo failed`); geçici ağ
-  kesintisiydi, sonra düzeldi. Bildirim gitmedi, üretim etkilenmedi.
+  kesintisiydi. Bildirim gitmedi, üretim etkilenmedi.
 - **YouTube fazı stdout'a yazmıyor** — ilerlemeyi yalnızca `progress.json`'a yazıyor.
   Log sessizliği "takıldı" sanılabilir; izleme kurarken `progress.json`'ın mtime'ına bak.
 
