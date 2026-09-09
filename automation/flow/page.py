@@ -351,7 +351,26 @@ class FlowPage:
                     never_radio.click()
                     time.sleep(0.3)
                 except Exception:
-                    pass
+                    print("[FLOW] UYARI: 'Hicbir zaman' secenegi bulundu ama tiklanamadi.")
+            else:
+                # Skipping this silently is how a run reaches generation with Flow still
+                # asking to approve credits for every video: the agent posts the question
+                # and waits for an answer nobody gives, and the run stalls there. Whether
+                # this matters depends on what Flow already has saved -- so warn, capture
+                # the panel so the selector can be fixed from real DOM, and carry on.
+                self.capture_error_snapshot("approval_never_radio_missing")
+                print(
+                    "[FLOW] UYARI: Ajan ayarlarinda 'Hicbir zaman' secenegi bulunamadi -- "
+                    "Flow'da kayitli olan ayar gecerli olacak."
+                )
+                print(
+                    "        Kayitli ayar 'Her zaman' ise Flow her video icin kredi onayi "
+                    "sorar ve uretim orada bekler."
+                )
+                print(
+                    "        Elle duzeltme: Flow > Ajan ayarlari > 'Uretim isleminden once "
+                    "onaylayin' > 'Hicbir zaman' > Kaydet."
+                )
 
         # 2. Select 9:16 aspect ratios for both Image & Video
         for r_btn in self.page.locator("button:has-text('9:16')").all():
