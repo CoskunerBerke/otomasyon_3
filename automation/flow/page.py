@@ -294,25 +294,30 @@ class FlowPage:
         raise FlowUIChangedError("Yeni proje çalışma alanı ve prompt kutusu yüklenirken zaman aşımı oluştu.")
 
     def resolve_settings_button(self) -> Optional[Locator]:
-        """Resolve the tune/Settings button next to the prompt composer."""
-        candidates = []
+        """
+        The generation-settings button beside the prompt composer -- the 'tune' one.
+
+        Flow's top bar now carries a second settings button (aria-label "Kutu izgarasi
+        ayarlari", tooltip "Ayarlari goster") that opens view options: grid vs batch,
+        thumbnail size, a few toggles. Those apply immediately, so that panel has no Save
+        button. Matching "ayar" anywhere in a label accepted it, and it sits higher in the
+        DOM, so on 2026-09-09 every run opened view options, looked for Save, and stopped
+        with FLOW_SETTINGS_SAVE_FAILED -- with no code change on our side.
+
+        Two exact strategies identify the right button, and nothing looser: the 'tune'
+        icon, then an aria-label that IS "Ayarlar"/"Settings" rather than contains it.
+        """
         for btn in self.page.locator("button").all():
             try:
                 if not btn.is_visible():
                     continue
-                txt = (btn.text_content() or "").strip()
-                icon_loc = btn.locator("i.google-symbols, i, svg").first
-                icon_txt = (icon_loc.text_content() or "").strip() if icon_loc.count() > 0 else ""
-                if icon_txt == "tune" or "ayar" in txt.lower() or "setting" in txt.lower():
-                    candidates.append(btn)
+                icon_loc = btn.locator("i.google-symbols, i").first
+                if icon_loc.count() > 0 and (icon_loc.text_content() or "").strip() == "tune":
+                    return btn
             except Exception:
                 continue
 
-        if candidates:
-            return candidates[-1]
-
-        fallback = self.find_first_visible(FlowSelectors.SETTINGS_BUTTON_SELECTORS, timeout_ms=1000)
-        return fallback
+        return self.find_first_visible(FlowSelectors.SETTINGS_BUTTON_SELECTORS, timeout_ms=1000)
 
     def configure_agent_settings(
         self,

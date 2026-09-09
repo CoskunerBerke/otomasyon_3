@@ -90,13 +90,14 @@ class FlowSelectors:
     ]
 
     # Settings / Ayarlar button (tune icon next to prompt composer)
+    # Exact matches only. Flow's top bar has a second settings button whose label is
+    # "Kutu izgarasi ayarlari" -- a substring match on "Ayarlar" selects it, and it opens
+    # view options (grid/batch, thumbnail size) that have no Save button at all.
     SETTINGS_BUTTON_SELECTORS: List[str] = [
         "button:has(i.google-symbols:text-is('tune'))",
         "button:has(i:text-is('tune'))",
-        "button:has-text('Ayarlar')",
-        "button:has-text('Settings')",
-        "[aria-label*='Ayarlar' i]",
-        "[aria-label*='Settings' i]"
+        "button[aria-label='Ayarlar']",
+        "button[aria-label='Settings']"
     ]
 
     # Settings panel radio / controls
