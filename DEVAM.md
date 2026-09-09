@@ -1,16 +1,41 @@
-# Devam — Reels AI Factory (4 Eylül 2026, sabah)
+# Devam — Reels AI Factory (9 Eylül 2026)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
-Branch: **`stale-artifact-guard`** — `main`'e **HENÜZ MERGE EDİLMEDİ**.
-Son commit `73b06f2`. PR: https://github.com/CoskunerBerke/otomasyon_3/pull/new/stale-artifact-guard
-
-⚠️ **İlk iş bu PR'ı merge et.** İçinde gece boyunca canlı üretimde bulunan gerçek hataların
-düzeltmesi var; merge edilmezse bir sonraki çalıştırma aynı hatalara düşer. Bu repoda
-düzeltmelerin dalda mahsur kalması daha önce yaşandı.
-düzeltmesi var; merge edilmezse bir sonraki çalıştırma aynı hatalara düşer. Bu repoda
-düzeltmelerin dalda mahsur kalması daha önce yaşandı.
+Branch: **`main`** — gece düzeltmeleri merge edildi (`98f5901`), her şey push'lu.
 
 **Türkçe cevap ver. Detaylı rapor ver. Canlı çalıştırma (Flow/yayın) sadece açık talimatla.**
+
+---
+
+## Sıradaki hafta — `.bat`'a basmak yeterli
+
+| Marka | Yeni hafta başlangıcı | Komut |
+|---|---|---|
+| BuildVerse | **14 Eylül** | `BUILDVERSE_HAFTALIK_14_REEL.bat` |
+| Craftsbyman | **11 Eylül** | `CRAFTSBYMAN_HAFTALIK_14_REEL.bat` |
+
+Her ikisi de doğrulandı: yarım kalmış hafta yok, başlangıç tarihleri son planlı slotun
+ertesinden hesaplanıyor. `--week-id` gibi bir müdahaleye gerek yok.
+
+⚠️ İki haftalık `.bat`'ı **aynı anda çalıştırma** — ikisi de Flow'u aynı porttan kullanır.
+
+---
+
+## 9 Eylül temizliği
+
+Disk 3.8 GB → 1.5 GB. Silinenler: 68 eski Reel klasörü ve 96 eski final video
+(yayınlanmış haftalar, platformlarda duruyorlar), eski çalışma logları, hata ekran
+görüntüleri, ara kareler, karantina klasörü, `tmp_dl`, `calendar_dom.html` ve
+`_eski_batlar/` (20 adet marka sistemi öncesi `.bat`; içerikleri git geçmişinde).
+
+**Dokunulmayanlar:** aktif haftaların medyası (BuildVerse W37 ve Craftsbyman CBM-W36,
+14/14 dosya yerinde), `workspace/state`, `workspace/batches`, `13_PUBLISHING`, `secrets`.
+
+**`CBM-2026-W35` arşivlendi** → `workspace/_abandoned/`. Sebebi orada `NEDEN.md` içinde
+yazılı: terk edilmiş bir hafta `workspace/batches/` altında dururken `.bat` yeni hafta
+açmaz, o haftayı tamamlamaya çalışır. Videoları da silindiği için yeniden üretmeye kalkar
+ve Flow kredisi yanar. Kodda "terk edildi" diye bir manifest durumu yok (yalnızca DRAFT ve
+LOCKED) — **kalıcı çözüm bu: `ABANDONED` durumu eklemek.** Şimdilik klasörü taşımak tek yol.
 
 ---
 
