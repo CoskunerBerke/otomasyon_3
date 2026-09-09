@@ -1,7 +1,14 @@
-# Devam — Reels AI Factory (3 Eylül 2026)
+# Devam — Reels AI Factory (4 Eylül 2026, sabah)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
-Branch: **`main`** — her şey push edildi, son commit `4b9ef19`. Test paketi **706/706 yeşil**.
+Branch: **`stale-artifact-guard`** — `main`'e **HENÜZ MERGE EDİLMEDİ**.
+Son commit `73b06f2`. PR: https://github.com/CoskunerBerke/otomasyon_3/pull/new/stale-artifact-guard
+
+⚠️ **İlk iş bu PR'ı merge et.** İçinde gece boyunca canlı üretimde bulunan gerçek hataların
+düzeltmesi var; merge edilmezse bir sonraki çalıştırma aynı hatalara düşer. Bu repoda
+düzeltmelerin dalda mahsur kalması daha önce yaşandı.
+düzeltmesi var; merge edilmezse bir sonraki çalıştırma aynı hatalara düşer. Bu repoda
+düzeltmelerin dalda mahsur kalması daha önce yaşandı.
 
 **Türkçe cevap ver. Detaylı rapor ver. Canlı çalıştırma (Flow/yayın) sadece açık talimatla.**
 
@@ -26,56 +33,100 @@ ve `CRAFTSBYMAN_*` karşılıkları. Ortak: `FLOW_LOGIN.bat`, `INSTALL_FIRST_TIM
 
 ## Nerede kalındı
 
+Gece 3→4 Eylül'de iki hafta da sıfırdan üretilip yayına planlandı. **Açık iş yok.**
+
 | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|
-| `2026-W34` buildverse | 17–23 Ağu | 14/14 | 14/14 | 14/14 | 14/14 |
-| `2026-W35` buildverse | 24–30 Ağu | 14/14 | 14/14 | 14/14 | 14/14 |
-| `2026-W36` buildverse | 31 Ağu–6 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
-| `CBM-2026-W34` | 22–28 Ağu | 14/14 | 14/14 | 14/14 | kapalı |
-| **`CBM-2026-W35`** | **29 Ağu–4 Eyl** | 14/14 | **11/14** | **7/14** | kapalı |
+| `2026-W37` (BuildVerse) | 7–13 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
+| `CBM-2026-W36` (craftsbyman) | 4–10 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 
-### Açık iş: CBM-2026-W35'i tamamlamak
+28 video üretildi, 56 yayın planlandı. Bir sonraki hafta için sadece `.bat`:
+BuildVerse 14 Eylül'den, craftsbyman 11 Eylül'den başlar (kod son planlı slotun ertesini bulur).
 
-`CRAFTSBYMAN_HAFTALIK_14_REEL.bat` → kaldığı yerden devam eder, planlanmışlara dokunmaz.
-
-Eksikler:
-
-| Reel | Slot | YouTube | TikTok |
-|---|---|---|---|
-| 0022 | 1 Eyl 22:00 | ✓ | `UPLOAD_ATTEMPTED` |
-| 0023–0025 | 2–3 Eyl | ✓ | `PENDING` |
-| 0026 | 3 Eyl 22:00 | `FAILED_FATAL` | `PENDING` |
-| 0027–0028 | 4 Eyl | `SCHEDULE_RESUME_REQUIRED` | `PENDING` |
-
-Slotların çoğu **geçmişte kaldı** (bugün 3 Eylül). Geçmiş bir slota planlama yapılamaz —
-bu Reel'leri kurtarmak yerine haftayı kapatıp yeni haftaya geçmek daha mantıklı olabilir.
-Operatöre sor.
-
-`0026` özel: remote_id'si geçen haftanın videosuna (`ry65v75_Hns` = W34/0013) işaret
-ediyordu, temizlendi (`workspace/_backups/cross-week-id-*`). `FAILED_FATAL` durumu
-haftalar-arası korumanın onu bilinçli olarak durdurduğunu gösteriyor.
+Önceki haftalar (BuildVerse W34–W36, CBM-W34) tamam. **`CBM-2026-W35` bilerek terk edildi**
+(operatör kararı, 4 Eyl 00:30): yarım kalmıştı, tamamlamak yerine yeni haftaya geçildi.
+14 üretilmiş videosu `workspace/segments/CBM-REEL-2026-00{15..28}` altında kullanılmadan
+duruyor. YouTube'da 11'i, TikTok'ta 7'si planlı.
 
 ---
 
-## 🔴 Operatörün karar vermesi gereken: tekrar eden hafta
+## ⚠️ YouTube günlük yükleme kotası — gecenin en pahalı dersi
 
-**`CBM-2026-W35`'in 14 konseptinin 14'ü de `CBM-2026-W34` ile aynı** — aynı başlıklar,
-aynı videolar. Havuzda tam 14 konsept vardı, haftalık ihtiyaç da 14; ikinci hafta
-matematiksel olarak birincinin kopyası olmak zorundaydı.
+Craftsbyman'ın YouTube'u 12/14'te takıldı ve saatlerce yanlış teşhis edildi. Gerçek sebep
+**doğrulanmamış kanalın günlük yükleme sınırı**ydı. Operatör tek seferlik doğrulamayı
+yapınca kalan 2 Reel ilk denemede, tek hata satırı olmadan geçti.
 
-Bu hafta **düzeltmeden önce** planlandı ve 11'i YouTube'da, 7'si TikTok'ta zaten yayında
-ya da planlı. Sistem uzak içerik silemez → `MANUAL_REMOTE_CLEANUP_RECOMMENDED`.
-Silmek/bırakmak operatörün kararı.
+Kotanın belirtileri şunlardı — **bir daha görülürse önce kotayı düşün**:
 
-**Bir daha olmaz.** Üç katmanlı düzeltme (`4b9ef19`):
-1. Havuzlar büyüdü: `hidden_build` 14→**28**, `cutaway` 12→**16**, `story` 27.
-2. Geçen haftanın konseptleri aday havuzundan **çıkarılıyor** (puanlamaya güvenilmiyor —
-   çeşitlilik cezası kategori grubuna bakıyor, craftsbyman'de 3 grup var, o yüzden 28
-   konsept bile aynı sıralamayı veriyordu).
-3. `CONCEPT_POOL_EXHAUSTED` — bir hafta yine de öncekini tekrarlarsa **planlama anında**
-   durur, 14 Flow üretimi harcanmadan.
+```
+YOUTUBE_UPLOAD_COMPLETION_UNCONFIRMED: no enabled Next button after 120s
+[REMOTE_ID] Video ID 20s icinde okunamadi
+YOUTUBE_DIALOG_SCRIM_STILL_UP
+YOUTUBE_TITLE_FILL_FAILED
+```
 
-Doğrulandı: iki markada da iki ardışık hafta **sıfır ortak konsept**.
+Yanıltıcı olan: bu zincir tam olarak bir UI hatası gibi görünüyor. Video karşıya geçiyor
+(başlık kutusunda YouTube'un dosya adından türettiği isim beliriyor), ama işleme
+tamamlanmadığı için diyalog yükleme modunda kalıyor, scrim çekilmiyor, başlık yazılamıyor.
+Her başarısız deneme kanalda bir taslak bırakıyor.
+
+Kod bu durumu kotadan ayırt edemiyor. **İyileştirme fırsatı:** yükleme tamamlanmıyorsa
+sayfadaki "Günlük yükleme sınırına ulaşıldı" uyarısını arayıp `YOUTUBE_DAILY_QUOTA_REACHED`
+ile durmak — 14 Reel'i tek tek denemekten ve taslak biriktirmekten iyi.
+
+---
+
+## Gece düzeltilenler (hepsi `stale-artifact-guard` dalında)
+
+1. **FFmpeg PATH'te görünmüyordu.** Kurulu ve kullanıcı PATH'inde kayıtlı; Claude'un
+   başlattığı süreç PATH güncellenmeden önce açıldığı için göremiyordu. Operatör kendi
+   terminalinden `.bat`'a bassa çıkmayacak bir hata. *Kod değişikliği yok.*
+2. **Sessiz mock fallback** (`concatenator.py:98`) — FFmpeg yokken segment byte'larını
+   yapıştırıp "30 saniyelik final video oluşturuldu" diyordu; dosya 10 saniyelik bozuk bir
+   MP4'tü. QC'nin de çalışmaması yayına gitmesini engelledi. **HÂLÂ AÇIK:** ffprobe kurulu
+   olup ffmpeg olmayan bir makinede sessizce geçer. Yapılacak iş.
+3. **Bayat artifact indirme** (`page.py`, `54eb61d`) — Flow üretimi başarısız olunca ekranda
+   kalan önceki videoyu "yeni" sanıp indiriyordu; `CBM-REEL-2026-0032`'nin 1. ve 2. segmenti
+   birebir aynı dosya çıktı. Artık fingerprint baseline'a karşı doğrulanıyor, ayrıca
+   indirilen dosya öncekilerle hash karşılaştırılıyor (`SEGMENT_DUPLICATE`).
+4. **Segment resume çalışmıyordu** (`generator.py:140`, `54eb61d`) — `seg.status == "READY"`
+   şartı bellekte tutulduğu için süreç ölünce sıfırlanıyor, ödenmiş segmentler yeniden
+   üretiliyordu. Artık diskteki dosya kanıt (kopya kontrolüyle).
+5. **YouTube başlık alanı tıklanamıyordu** (`youtube_studio_ui_observer.py`, `d83bf45`) —
+   `<div class="dialog-scrim ytcp-uploads-dialog">` pointer event'leri yutuyordu. Artık
+   scrim'in çekilmesi bekleniyor (kaldırılmıyor, zorlanmıyor — Kural 31). BuildVerse'te
+   YouTube'u 14/14 yapan düzeltme bu. **Ama craftsbyman'ın 12/14'ünü açıklayan o değildi**
+   — orada scrim de kotanın belirtisiydi. Düzeltme gerçek, teşhis kısmen yanlıştı.
+6. **`SCHEDULE_RESUME_REQUIRED` kendi kendini kilitliyordu**
+   (`youtube_studio_publisher.py:149`) — `has_remote_evidence` durumun kendisini uzak kanıt
+   sayıyor, sistem olmayan taslağı arayıp duruyordu. Bu sefer `progress.json`'da elle
+   `PENDING`'e çekilerek aşıldı; **kod düzeltmesi yapılmadı**, kalıcı çözüm gerekiyor.
+
+Testler: `tests/test_flow_stale_artifact.py` (4 yeni), `tests/test_youtube_studio.py` (60, 2'si yeni).
+
+---
+
+## Doğrulanmamış kalanlar (operatör bakabilir, acil değil)
+
+- **YouTube / craftsbyman taslakları** — kota dolduğu dönemdeki başarısız denemeler kanalda
+  `postbus archive` / `caravan bakery` adlı taslak bırakmış olabilir. İçerik → Yüklemeler'de
+  bak, fazlalık varsa elle sil. Planlı olan ikisi doğru: `VcqiX_XD0Wo`, `HqwHg5Ax4_M`.
+- **TikTok hesap doğrulaması** — her Reel'de `ACCOUNT_UNVERIFIED` çıkıyor (her iki markada).
+  Hesap adı sayfadan okunamıyor, markaya özel Chrome profiline güvenilerek devam ediliyor.
+  28 videonun doğru hesaplarda olduğunu gözle doğrulamak iyi olur.
+- **REEL-2026-0059** (`ani-story`, BuildVerse/TikTok) — tek kopya mı? İlk denemede Planla'ya
+  basıldı ama ağ kesintisi yüzünden onay görünmedi; ikinci deneme başarılı oldu.
+
+---
+
+## Bilinen, düzeltilmemiş gürültü
+
+- **`CRAFTSBYMAN_SADECE_YOUTUBE.bat` yanlış haftaya sabitlenmiş** — içinde
+  `--week-id CBM-2026-W34` yazıyor. Kullanılacaksa hafta elle düzeltilmeli.
+- **Telegram bildirimleri** — gece DNS çözülemedi (`getaddrinfo failed`); geçici ağ
+  kesintisiydi. Bildirim gitmedi, üretim etkilenmedi.
+- **YouTube fazı stdout'a yazmıyor** — ilerlemeyi yalnızca `progress.json`'a yazıyor.
+  Log sessizliği "takıldı" sanılabilir; izleme kurarken `progress.json`'ın mtime'ına bak.
 
 ---
 
@@ -84,6 +135,13 @@ Doğrulandı: iki markada da iki ardışık hafta **sıfır ortak konsept**.
 Bir haftada **altı** ayrı olay aynı hatadan çıktı: *bir arayüzü erken okuyup "hazır değil"i
 "yok" sanmak.* TikTok dosya girişi, TikTok Planla butonu, YouTube dosya girişi, Instagram
 İleri butonu, Flow indirme butonu, YouTube görünürlük hücresi.
+**Yedincisi 4 Eylül'de geldi** ve biçimi biraz farklıydı: YouTube başlık kutusu gerçekten
+hazırdı, önündeki `dialog-scrim` hazır değildi. Yani örüntü artık sadece "elementi erken
+okuma" değil, **"sahneyi erken okuma"** — element hazır olabilir, sahne olmayabilir.
+
+Aynı gece örüntünün **tersi** de görüldü: Flow üretimi başarısız olunca ekranda duran eski
+video "yeni" sanıldı. "Hazır değil"i "yok" sanmak kadar, **"eski"yi "yeni" sanmak** da aynı
+kökten — arayüze tek bakışta güvenmek, elde karşılaştırılacak bir baseline varken.
 
 Mekanik kökü: **Playwright'ın `Locator.is_visible(timeout=N)` timeout'unu yok sayar** —
 anlık kontroldür, bekleme değil. 17 Ağustos'ta bulunup düzeltilmiş (104 çağrı) ama commit
