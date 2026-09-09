@@ -94,24 +94,27 @@ class FlowSelectors:
     # "Kutu izgarasi ayarlari" -- a substring match on "Ayarlar" selects it, and it opens
     # view options (grid/batch, thumbnail size) that have no Save button at all.
     SETTINGS_BUTTON_SELECTORS: List[str] = [
-        "button:has(i.google-symbols:text-is('tune'))",
+        "button:has(mat-icon:text-is('tune'))",
         "button:has(i:text-is('tune'))",
         "button[aria-label='Ayarlar']",
         "button[aria-label='Settings']"
     ]
 
     # Settings panel radio / controls
+    # Flow renders approval as an Angular Material radio group (mat-radio-button with a
+    # nested native input). The other settings are still segmented button[role='radio'],
+    # so matching on role alone picks an aspect-ratio button instead.
     APPROVAL_NEVER_SELECTORS: List[str] = [
+        "mat-radio-button:has-text('Hiçbir zaman')",
+        "mat-radio-button:has-text('Never')",
         "button[role='radio'][value='AUTO_APPROVE']",
-        "button[role='radio']:has-text('Never')",
-        "button[role='radio']:has-text('Hiçbir zaman')",
-        "div:has-text('Never'):has([role='radio'])",
-        "div:has-text('Hiçbir zaman'):has([role='radio'])"
+        "button[role='radio']:has-text('Hiçbir zaman')"
     ]
 
     APPROVAL_ALWAYS_SELECTORS: List[str] = [
+        "mat-radio-button:has-text('Her zaman')",
+        "mat-radio-button:has-text('Always')",
         "button[role='radio'][value='ALWAYS_ASK']",
-        "button[role='radio']:has-text('Always')",
         "button[role='radio']:has-text('Her zaman')"
     ]
 
@@ -122,6 +125,7 @@ class FlowSelectors:
 
     # Prompt text entry area (Slate.js contenteditable and textarea fallbacks)
     PROMPT_INPUT_SELECTORS: List[str] = [
+        "div.ProseMirror[contenteditable='true']",
         "div[data-slate-editor='true']",
         "div[role='textbox'][contenteditable='true']",
         "[contenteditable='true'][role='textbox']",
@@ -135,8 +139,10 @@ class FlowSelectors:
 
     # Generate / Create button in Project Editor
     GENERATE_BUTTON_SELECTORS: List[str] = [
+        "button[aria-label='Oluşturmaya başla']",
+        "button[type='submit']:has(mat-icon:text-is('arrow_forward'))",
+        "button:has(mat-icon:text-is('arrow_forward'))",
         "button:has(i:text-is('arrow_forward'))",
-        "button:has(i.google-symbols:text-is('arrow_forward'))",
         "button[aria-disabled='false']:has-text('Oluştur')",
         "button[aria-disabled='false']:has-text('Generate')",
         "button:has-text('Oluştur')",

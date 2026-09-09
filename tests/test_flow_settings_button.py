@@ -61,3 +61,40 @@ def test_settings_selectors_are_exact_not_substring():
     assert "has-text('Ayarlar')" not in joined, "gevsek metin eslesmesi geri gelmis"
     assert "button[aria-label='Ayarlar']" in joined
     assert "tune" in joined
+
+
+# ---------------------------------------------------------------------------
+# Flow's 2026-09-09 interface change. Every assertion below was read off the live
+# DOM (screenshots/errors/ + a live probe), not guessed.
+# ---------------------------------------------------------------------------
+
+def test_icon_selectors_target_mat_icon():
+    """
+    Icons moved from <i class="google-symbols"> to <mat-icon class="... google-symbols">.
+
+    Verified live: i.google-symbols count=0, mat-icon count=22. Every icon-based
+    selector in the codebase silently matched nothing, which is why the settings
+    button, the submit button and the download button all stopped resolving.
+    """
+    joined = " ".join(FlowSelectors.SETTINGS_BUTTON_SELECTORS)
+    assert "mat-icon:text-is('tune')" in joined
+
+
+def test_prompt_selectors_target_prosemirror():
+    """Flow replaced the Slate.js editor with ProseMirror; the old attribute is gone."""
+    sels = FlowSelectors.PROMPT_INPUT_SELECTORS
+    assert any("ProseMirror" in s for s in sels), "ProseMirror secicisi yok"
+    assert sels[0].startswith("div.ProseMirror"), "ProseMirror once denenmeli"
+
+
+def test_approval_selectors_target_material_radio():
+    """
+    Approval is a mat-radio-button group now.
+
+    The other settings in that panel are still segmented button[role='radio'] -- fifteen
+    of them -- so matching on the role alone selects an aspect-ratio button instead of
+    the approval mode. Verified live: mat-radio-button count=2, and the old
+    button[role='radio'] approval selectors count=0.
+    """
+    assert FlowSelectors.APPROVAL_NEVER_SELECTORS[0] == "mat-radio-button:has-text('Hiçbir zaman')"
+    assert FlowSelectors.APPROVAL_ALWAYS_SELECTORS[0] == "mat-radio-button:has-text('Her zaman')"

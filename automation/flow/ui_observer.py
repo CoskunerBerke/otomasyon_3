@@ -99,7 +99,7 @@ class FlowUIObserver:
         url = self.page.url
 
         # 1. Stop button check (indicating generation is active)
-        stop_btn = self.page.locator("button:has(i.google-symbols:text-is('stop')), button:has(i:text-is('stop')), button[aria-label*='Stop' i], button[aria-label*='Durdur' i]").first
+        stop_btn = self.page.locator("button:has(mat-icon:text-is('stop')), button:has(mat-icon:text-is('stop')), button:has(i:text-is('stop')), button[aria-label*='Stop' i], button[aria-label*='Durdur' i]").first
         stop_visible = bool(stop_btn.count() > 0 and stop_btn.is_visible())
 
         # 2. Extract new agent messages
@@ -117,7 +117,7 @@ class FlowUIObserver:
         # 4. Download button visibility & enabled check (skips disabled buttons instantly)
         dl_visible = False
         try:
-            dl_candidates = self.page.locator("button:has(i.google-symbols:text-is('download')), button:has(i:text-is('download')), button:has-text('İndir'), button:has-text('Download')").all()
+            dl_candidates = self.page.locator("button:has(mat-icon:text-is('download')), button:has(mat-icon:text-is('download')), button:has(i:text-is('download')), button:has-text('İndir'), button:has-text('Download')").all()
             for btn in dl_candidates:
                 if btn.is_visible() and btn.get_attribute("aria-disabled") != "true" and btn.is_enabled():
                     dl_visible = True
@@ -126,12 +126,12 @@ class FlowUIObserver:
             pass
 
         # 5. Generate button
-        gen_btn = self.page.locator("button:has(i.google-symbols:text-is('arrow_forward')), button:has(i:text-is('arrow_forward'))").first
+        gen_btn = self.page.locator("button:has(mat-icon:text-is('arrow_forward')), button:has(mat-icon:text-is('arrow_forward')), button:has(i:text-is('arrow_forward'))").first
         gen_visible = bool(gen_btn.count() > 0 and gen_btn.is_visible())
         gen_enabled = bool(gen_visible and gen_btn.get_attribute("aria-disabled") != "true")
 
         # 6. Prompt editable
-        prompt_input = self.page.locator("div[data-slate-editor='true'], div[role='textbox'][contenteditable='true']").first
+        prompt_input = self.page.locator("div.ProseMirror[contenteditable='true'], div[data-slate-editor='true'], div[role='textbox'][contenteditable='true']").first
         prompt_editable = bool(prompt_input.count() > 0 and prompt_input.is_visible())
 
         # 7. Settings panel open

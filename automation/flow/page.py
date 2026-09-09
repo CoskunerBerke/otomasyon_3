@@ -263,7 +263,7 @@ class FlowPage:
         """
         current_url = self.page.url.lower()
         if "/edit/" in current_url:
-            back_btn = self.page.locator("button:has(i:text-is('arrow_back')), button:has-text('Bitti')").first
+            back_btn = self.page.locator("button:has(mat-icon:text-is('arrow_back')), button:has(i:text-is('arrow_back')), button:has-text('Bitti')").first
             if back_btn.count() > 0 and back_btn.is_visible():
                 back_btn.click()
                 time.sleep(1.0)
@@ -311,7 +311,7 @@ class FlowPage:
             try:
                 if not btn.is_visible():
                     continue
-                icon_loc = btn.locator("i.google-symbols, i").first
+                icon_loc = btn.locator("mat-icon, i.google-symbols, i").first
                 if icon_loc.count() > 0 and (icon_loc.text_content() or "").strip() == "tune":
                     return btn
             except Exception:
@@ -462,7 +462,7 @@ class FlowPage:
                 if btn.get_attribute("aria-haspopup") == "dialog":
                     continue
 
-                icons = btn.locator("i.google-symbols, i, svg").all()
+                icons = btn.locator("mat-icon, i.google-symbols, i, svg").all()
                 has_arrow_forward = False
                 for ic in icons:
                     ic_text = (ic.text_content() or "").strip()
@@ -484,7 +484,7 @@ class FlowPage:
                     return c
             return candidates[0]
 
-        loc2 = self.page.locator("button:has(i:text-is('arrow_forward'))").first
+        loc2 = self.page.locator("button:has(mat-icon:text-is('arrow_forward')), button:has(i:text-is('arrow_forward'))").first
         if loc2.count() > 0 and loc2.is_visible():
             return loc2
 
@@ -501,8 +501,8 @@ class FlowPage:
         Instantly skips disabled buttons without waiting for Playwright's 30s click timeout.
         """
         selectors = [
-            "button:has(i.google-symbols:text-is('download'))",
-            "button:has(i:text-is('download'))",
+            "button:has(mat-icon:text-is('download')), button:has(mat-icon:text-is('download')), button:has(i:text-is('download'))",
+            "button:has(mat-icon:text-is('download')), button:has(i:text-is('download'))",
             "button:has-text('İndir')",
             "button:has-text('Download')"
         ]
@@ -575,7 +575,7 @@ class FlowPage:
                 time.sleep(1.0)
                 return True
 
-            play_btn = self.page.locator("button:has(i.google-symbols:text-is('play_circle')), button:has-text('play_circle')").first
+            play_btn = self.page.locator("button:has(mat-icon:text-is('play_circle')), button:has(mat-icon:text-is('play_circle')), button:has(i:text-is('play_circle')), button:has-text('play_circle')").first
             if play_btn.count() > 0 and play_btn.is_visible():
                 play_btn.click()
                 time.sleep(1.0)
