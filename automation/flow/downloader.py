@@ -24,6 +24,37 @@ from playwright.sync_api import Page, Download, Locator
 DOWNLOAD_CLICK_TIMEOUT_MS = 15000
 
 
+def _choose_original_quality(page: Page) -> None:
+    """
+    Flow's download control opens a quality menu instead of downloading.
+
+    The menu offers 270p GIF, 720p original, 1080p upscaled and 4K upscaled -- and the
+    upscaled entries spend credits, 50 of them for 4K. Only the original-size entry
+    re-downloads what was already generated, so that is the only one this will click.
+
+    A click that downloads directly (older UI, or a menu that never opens) is left alone.
+    """
+    try:
+        page.wait_for_selector("[role='menu']", timeout=4000)
+    except Exception:
+        return
+
+    for sel in ("button[role='menuitem']:has-text('Orjinal')",
+                "button[role='menuitem']:has-text('Original')"):
+        item = page.locator(sel).first
+        try:
+            if item.count() and item.is_visible():
+                item.click(timeout=5000)
+                return
+        except Exception:
+            continue
+
+    raise RuntimeError(
+        "DOWNLOAD_QUALITY_MENU_UNRECOGNISED: Indirme menusu acildi ancak 'Orjinal boyut' "
+        "secenegi bulunamadi. Kredi harcayan yukseltilmis secenekler bilerek secilmedi."
+    )
+
+
 class FlowDownloader:
     """Manages file download events and verifies saved files."""
 
@@ -68,6 +99,8 @@ class FlowDownloader:
                 # actionability wait is the retry here -- a click that times out never
                 # dispatched, so there is no risk of starting two downloads.
                 download_button_locator.click(timeout=DOWNLOAD_CLICK_TIMEOUT_MS)
+                # ...which now opens a quality menu rather than starting the download.
+                _choose_original_quality(page)
             download: Download = download_info.value
             download.save_as(str(target_path))
             download_succeeded = True

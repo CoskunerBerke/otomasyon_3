@@ -6,6 +6,7 @@ and strictly enabled download buttons.
 """
 from dataclasses import dataclass, field
 import hashlib
+import re
 from typing import List, Set, Optional
 from playwright.sync_api import Page
 
@@ -45,6 +46,21 @@ class FlowUIObserver:
         """Extract unique fingerprints of all video elements and edit links currently in the DOM."""
         fps: Set[str] = set()
         try:
+            # Flow renders generated media as <img> thumbnails inside flow-video-tile.
+            # The <video> elements and /edit/ links this used to rely on are gone as of
+            # 2026-09-09, so every poll saw an empty set, concluded no new artifact had
+            # appeared, and waited out the full timeout on a video that was sitting right
+            # there. The signed src carries an Expires= that changes between polls, so the
+            # media id in the path is what identifies the artifact.
+            for img in self.page.locator("img[src*='flow-content.google']").all():
+                if not img.is_visible():
+                    continue
+                src = img.get_attribute("src") or ""
+                if not src:
+                    continue
+                m = re.search(r"/(?:image|video)/([0-9A-Za-z-]{12,})", src)
+                fps.add(f"media:{m.group(1)}" if m else f"img:{src.split('?')[0]}")
+
             for v in self.page.locator("video").all():
                 if v.is_visible():
                     src = v.get_attribute("src") or ""
