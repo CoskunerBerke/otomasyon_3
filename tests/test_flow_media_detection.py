@@ -102,3 +102,34 @@ def test_no_menu_means_the_click_already_downloaded():
     page = MagicMock()
     page.wait_for_selector.side_effect = Exception("no menu")
     _choose_original_quality(page)  # returns quietly
+
+
+def test_detail_view_opens_by_clicking_the_tile():
+    """
+    The download control only exists inside the detail view, and the tile is what opens it.
+
+    recover_and_open_video_detail() tried an /edit/ link, a <video> element and a
+    play_circle button -- all removed in the redesign -- so it returned False on every
+    attempt while the finished video sat on the canvas, and the download loop ran out its
+    twenty minutes. Verified live: before the click the download button is not visible,
+    after it aria-label="Medyayı indir" is.
+    """
+    from automation.flow.page import FlowPage
+
+    clicked = []
+    page = MagicMock()
+
+    def locator(sel):
+        loc = MagicMock()
+        hit = sel == "flow-video-tile"
+        loc.first.count.return_value = 1 if hit else 0
+        loc.first.is_visible.return_value = hit
+        loc.first.click.side_effect = lambda: clicked.append(sel)
+        return loc
+
+    page.locator.side_effect = locator
+    fp = FlowPage.__new__(FlowPage)
+    fp.page = page
+
+    assert fp.recover_and_open_video_detail() is True
+    assert clicked == ["flow-video-tile"]

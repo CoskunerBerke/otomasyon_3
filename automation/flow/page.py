@@ -561,8 +561,25 @@ class FlowPage:
         self.check_auth_and_security()
 
     def recover_and_open_video_detail(self) -> bool:
-        """Self-recovery helper to open the generated video player / detail view."""
+        """
+        Open the generated video's detail view, where the download control lives.
+
+        Finished media is a flow-video-tile with an <img> thumbnail, and clicking the tile
+        opens the detail view. The strategies below it -- an /edit/ link, a <video>
+        element, a play_circle button -- all target markup the September redesign removed,
+        so this returned False on every attempt and the download loop spun for the full
+        twenty minutes with the finished video sitting on the canvas.
+
+        They are kept as fallbacks: they cost one count() each and would matter if Flow
+        rolls back.
+        """
         try:
+            tile = self.page.locator("flow-video-tile").first
+            if tile.count() > 0 and tile.is_visible():
+                tile.click()
+                time.sleep(1.5)
+                return True
+
             video_link = self.page.locator("a[href*='/edit/']").first
             if video_link.count() > 0 and video_link.is_visible():
                 video_link.click()
