@@ -1,41 +1,103 @@
-# Devam — Reels AI Factory (9 Eylül 2026)
+# Devam — Reels AI Factory (10 Eylül 2026, gece)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
-Branch: **`main`** — gece düzeltmeleri merge edildi (`98f5901`), her şey push'lu.
+Branch: **`main`** — her şey push'lu, son commit `4851292`.
 
 **Türkçe cevap ver. Detaylı rapor ver. Canlı çalıştırma (Flow/yayın) sadece açık talimatla.**
 
 ---
 
-## Sıradaki hafta — `.bat`'a basmak yeterli
+## 🔴 AÇIK SORUN: YouTube'a yanlış tarih yazılıyor
 
-| Marka | Yeni hafta başlangıcı | Komut |
-|---|---|---|
-| BuildVerse | **14 Eylül** | `BUILDVERSE_HAFTALIK_14_REEL.bat` |
-| Craftsbyman | **11 Eylül** | `CRAFTSBYMAN_HAFTALIK_14_REEL.bat` |
+Operatör 10 Eylül gecesi PC'yi kapattı; bu sorun **çözülmeyi bekliyor**.
 
-Her ikisi de doğrulandı: yarım kalmış hafta yok, başlangıç tarihleri son planlı slotun
-ertesinden hesaplanıyor. `--week-id` gibi bir müdahaleye gerek yok.
+`CBM-2026-W37` çalıştırmasında 7 Reel YouTube'a planlandı, **5'i doğru tarihe gitti, 2'si yanlış**:
 
-⚠️ İki haftalık `.bat`'ı **aynı anda çalıştırma** — ikisi de Flow'u aynı porttan kullanır.
+| Reel | topic | Beklenen slot | YouTube'da |
+|---|---|---|---|
+| CBM-REEL-2026-0046 | lifeboat-aquarium | 12 Eyl 22:00 | **11 Eyl** ✗ |
+| CBM-REEL-2026-0049 | doubledecker-library | 14 Eyl 19:30 | **11 Eyl** ✗ |
+
+Doğru gidenler: 0043 (11 Eyl 19:30), 0044 (11 Eyl 22:00), 0045 (12 Eyl 19:30),
+0047 (13 Eyl 19:30), 0048 (13 Eyl 22:00).
+
+**Manifest kusursuz** — her güne tam 2 slot, 11–17 Eylül. Yani planlama değil, **YouTube
+arayüzüne tarih yazma** adımı bozuk.
+
+### En güçlü hipotez
+
+Yanlış giden ikisi de **11 Eylül**'e düştü. 11 Eylül, çalıştırmanın yapıldığı günün
+(10 Eylül) ertesi günü — yani YouTube'un planlama ekranında hazır gelen **varsayılan
+tarih**. Tarih seçici bazen çalışmıyor ve video varsayılan tarihe kalıyor gibi görünüyor.
+
+### Bundan daha kötüsü
+
+Kod bu iki Reel'i **`SCHEDULED` olarak işaretledi**. Yani tarih doğrulaması ya hiç
+çalışmıyor ya da yazılan tarihi değil sadece "planlandı mı" bilgisini okuyor. CLAUDE.md
+"tarih/saat doğrulanmış olmalı (`set_schedule_datetime` + okuma-doğrulama)" diyor;
+uygulamada bu koruma tutmuyor.
+
+### İlk bakılacak yerler
+
+- `automation/publishing/youtube_studio_ui_observer.py` → `set_schedule_datetime`
+  ve takvim/saat seçici selector'leri
+- Aynı dosyada tarih **geri okuma** (readback) mantığı — yazılan tarihi gerçekten
+  doğruluyor mu, yoksa sadece "Planlandı" yazısını mı arıyor
+- 9–10 Eylül'de Flow'da yaşanan şey burada da olabilir: Studio takvimi de Angular
+  Material'a geçtiyse `mat-calendar` / `mat-datepicker` yapısına bakmak gerekir
+- `tests/test_youtube_studio.py` içinde takvim testleri var
+  (`test_youtube_studio_calendar_august_2026_navigation_and_day_16`,
+  `test_exact_19_30_time_setter_and_readback`) — bunlar mock, gerçek DOM'u yansıtmıyor
+  olabilir
+
+### Teşhis yöntemi (9 Eylül'de işe yarayan)
+
+Canlı sayfaya CDP ile bağlanıp gerçek DOM'u çıkarmak. Scriptler duruyor:
+`scratchpad/flow_probe.py`, `flow_probe2.py`, `verify_selectors.py`. Aynı yaklaşım
+YouTube Studio için de kullanılabilir (port `9234` craftsbyman, `9224` buildverse).
+**Tahmin etme, DOM'u al** — Kural 31.
 
 ---
 
-## 9 Eylül temizliği
+## CBM-2026-W37 nerede kaldı
 
-Disk 3.8 GB → 1.5 GB. Silinenler: 68 eski Reel klasörü ve 96 eski final video
-(yayınlanmış haftalar, platformlarda duruyorlar), eski çalışma logları, hata ekran
-görüntüleri, ara kareler, karantina klasörü, `tmp_dl`, `calendar_dom.html` ve
-`_eski_batlar/` (20 adet marka sistemi öncesi `.bat`; içerikleri git geçmişinde).
+| | Durum |
+|---|---|
+| Üretim | **14/14** ✅ (hepsi Flow'dan gerçek, 30 sn) |
+| YouTube | 7/14 planlandı (**2'si yanlış tarihte**), 0050 yarıda kesildi, 0051–0056 sırada |
+| TikTok | 0/14 — hiç başlamadı |
 
-**Dokunulmayanlar:** aktif haftaların medyası (BuildVerse W37 ve Craftsbyman CBM-W36,
-14/14 dosya yerinde), `workspace/state`, `workspace/batches`, `13_PUBLISHING`, `secrets`.
+Slotlar 11–17 Eylül. Bugün 10 Eylül, yani **ilk yayın yarın 19:30** — bu hafta için
+zaman var ama bol değil.
 
-**`CBM-2026-W35` arşivlendi** → `workspace/_abandoned/`. Sebebi orada `NEDEN.md` içinde
-yazılı: terk edilmiş bir hafta `workspace/batches/` altında dururken `.bat` yeni hafta
-açmaz, o haftayı tamamlamaya çalışır. Videoları da silindiği için yeniden üretmeye kalkar
-ve Flow kredisi yanar. Kodda "terk edildi" diye bir manifest durumu yok (yalnızca DRAFT ve
-LOCKED) — **kalıcı çözüm bu: `ABANDONED` durumu eklemek.** Şimdilik klasörü taşımak tek yol.
+Süreç operatör PC'yi kapatmadan önce elle durduruldu (`0050` UPLOAD_ATTEMPTED'de kaldı).
+
+---
+
+## Aynı gün çözülenler (Flow'un eylül arayüz değişikliği)
+
+Google Flow arayüzünü yeniledi ve otomasyonun **altı** varsayımı aynı anda geçersiz oldu.
+Hepsi canlı DOM'dan doğrulanarak düzeltildi, tahminle değil:
+
+| Kırılan | Eskiden | Şimdi | Commit |
+|---|---|---|---|
+| Ayarlar butonu | tek "ayarlar" | ikinci bir görünüm-ayarları butonu eklendi | `58f6e72` |
+| Onay modu sessiz atlanıyordu | `pass` | uyarı + snapshot | `048a8df` |
+| İkonlar | `<i class="google-symbols">` | `<mat-icon>` | `02f3a92` |
+| Prompt kutusu | Slate.js | ProseMirror | `02f3a92` |
+| Onay radio'su | `button[role='radio']` | `mat-radio-button` | `02f3a92` |
+| Gönder | ikon araması | `aria-label='Oluşturmaya başla'` | `02f3a92` |
+| Üretilen videoyu görme | `<video>` + `/edit/` linki | `<img>` küçük resim, `flow-video-tile` | `a3e960b` |
+| İndirme | tek tık | detay görünümü + kalite menüsü | `a3e960b`, `4851292` |
+
+⚠️ **Kalite menüsünde 4K seçeneği 50 kredi harcıyor.** Kod yalnızca "Orjinal boyut"
+girdisine tıklar; tanımadığı bir menüde `DOWNLOAD_QUALITY_MENU_UNRECOGNISED` ile durur.
+Bu koruma gevşetilmemeli.
+
+Flow hesabındaki "Üretim işleminden önce onaylayın" ayarı da güncelleme sırasında
+"Her zaman"a dönmüştü; **"Hiçbir zaman"a geri alındı ve kaydedildi**.
+
+13 yeni test: `tests/test_flow_settings_button.py`, `tests/test_flow_media_detection.py`.
 
 ---
 
@@ -56,7 +118,7 @@ ve `CRAFTSBYMAN_*` karşılıkları. Ortak: `FLOW_LOGIN.bat`, `INSTALL_FIRST_TIM
 
 ---
 
-## Nerede kalındı
+## Önceki haftalar (4 Eylül gecesi üretildi, hâlâ yayında)
 
 Gece 3→4 Eylül'de iki hafta da sıfırdan üretilip yayına planlandı. **Açık iş yok.**
 
@@ -75,7 +137,7 @@ duruyor. YouTube'da 11'i, TikTok'ta 7'si planlı.
 
 ---
 
-## ⚠️ YouTube günlük yükleme kotası — gecenin en pahalı dersi
+## ⚠️ YouTube günlük yükleme kotası (4 Eylül dersi)
 
 Craftsbyman'ın YouTube'u 12/14'te takıldı ve saatlerce yanlış teşhis edildi. Gerçek sebep
 **doğrulanmamış kanalın günlük yükleme sınırı**ydı. Operatör tek seferlik doğrulamayı
@@ -101,7 +163,7 @@ ile durmak — 14 Reel'i tek tek denemekten ve taslak biriktirmekten iyi.
 
 ---
 
-## Gece düzeltilenler (hepsi `stale-artifact-guard` dalında)
+## 4 Eylül gecesi düzeltilenler (main'e merge edildi, `98f5901`)
 
 1. **FFmpeg PATH'te görünmüyordu.** Kurulu ve kullanıcı PATH'inde kayıtlı; Claude'un
    başlattığı süreç PATH güncellenmeden önce açıldığı için göremiyordu. Operatör kendi
