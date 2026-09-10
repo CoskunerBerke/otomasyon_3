@@ -36,6 +36,10 @@ from automation.publishing.youtube_studio_publisher import (
     YouTubeStudioPublisher,
     MockYouTubeStudioPublisher,
 )
+from automation.publishing.youtube_publisher import (
+    YouTubePublisher,
+    MockYouTubePublisher,
+)
 from automation.publishing.tiktok_publisher import (
     BaseTikTokPublisher,
     TikTokPublisher,
@@ -891,10 +895,29 @@ class SimpleWeeklyPipeline:
     # =========================================================================
 
     def _init_youtube_publisher_if_needed(self) -> None:
+        """
+        Build the YouTube publisher this run needs: the Studio web UI, or the Data API.
+
+        'api' drives youtube.videos.insert with publishAt, so there is no calendar to
+        click and no locale-dependent date string to get wrong -- the two defects that
+        put CBM-REEL-2026-0046 and 0049 on the wrong day. It costs quota instead: 1600
+        units per upload against a default 10,000 per day, so about six videos a day
+        until an increase is granted.
+        """
         if self.yt_publisher is not None:
             return
+        mode = getattr(self.pub_config, "youtube_mode", "studio")
         if self.dry_run:
-            self.yt_publisher = MockYouTubeStudioPublisher(expected_handle=self.pub_config.youtube_expected_handle)
+            self.yt_publisher = (
+                MockYouTubeStudioPublisher(expected_handle=self.pub_config.youtube_expected_handle)
+                if mode == "studio" else MockYouTubePublisher()
+            )
+        elif mode == "api":
+            logger.info(
+                f"[YOUTUBE] Data API modu ({self.brand.brand_id}) -- token: "
+                f"{self.pub_config.youtube_token_path.name}"
+            )
+            self.yt_publisher = YouTubePublisher(self.pub_config)
         else:
             self.yt_publisher = YouTubeStudioPublisher(self.pub_config)
 

@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument("--single-live-test", action="store_true", help="Run single-reel live schedule test to unlock weekly batch")
     parser.add_argument("--preflight", action="store_true", help="Run Phase 1 PREFLIGHT: prepare UI forms up to final action button (0 clicks)")
     parser.add_argument("--commit", action="store_true", help="Run Phase 2 COMMIT: re-verify preflight states and click final schedule buttons")
+    parser.add_argument("--brand", type=str, default=None, help="Hangi kanal (buildverse / craftsbyman). OAuth token markaya gore ayrilir.")
     parser.add_argument("--youtube-auth", action="store_true", help="Run interactive YouTube OAuth 2.0 login flow")
     parser.add_argument("--youtube-studio-login", action="store_true", help="Launch dedicated Chrome instance on port 9224 for YouTube Studio login")
     parser.add_argument("--tiktok-login", action="store_true", help="Launch dedicated Chrome instance on port 9223 for TikTok login")
@@ -170,6 +171,14 @@ def main():
     args = parse_args()
     app_cfg = load_config()
     pub_cfg = load_publishing_config(base_dir=PROJECT_ROOT)
+
+    # One OAuth token authorises one channel. Without this the craftsbyman sign-in would
+    # write over buildverse's token and the next upload would go to the wrong channel.
+    from automation.brands import get_brand
+    brand = get_brand(args.brand)
+    pub_cfg = brand.apply_to_publishing_config(pub_cfg)
+    if args.brand:
+        print(f"[BRAND] {brand.display_name} ({brand.youtube_handle}) -> token: {pub_cfg.youtube_token_path.name}")
 
     if args.enable_live_publish:
         pub_cfg.live_publish_enabled = True

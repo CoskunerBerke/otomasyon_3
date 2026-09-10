@@ -123,6 +123,19 @@ class Brand:
         return _profile_root() / f"tiktok-profile{self.profile_suffix}"
 
     @property
+    def youtube_token_path(self) -> Path:
+        """
+        Where this brand's YouTube OAuth token lives.
+
+        One token authorises one channel, so the brands cannot share a file: signing in
+        for craftsbyman would overwrite buildverse's token, and the next run would upload
+        to whichever channel was authorised last. The default brand keeps the original
+        path, so nothing about the existing series changes.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+        return repo_root / "secrets" / "youtube" / f"token{self.profile_suffix}.json"
+
+    @property
     def instagram_profile_dir(self) -> Path:
         return _profile_root() / f"instagram-profile{self.profile_suffix}"
 
@@ -197,6 +210,7 @@ class Brand:
         cfg.youtube_expected_channel_id = self.youtube_channel_id
         cfg.youtube_studio_debug_port = self.youtube_port
         cfg.youtube_studio_profile_dir = self.youtube_profile_dir
+        cfg.youtube_token_path = self.youtube_token_path
         cfg.tiktok_expected_username = self.tiktok_username
         cfg.tiktok_debug_port = self.tiktok_port
         cfg.tiktok_profile_dir = self.tiktok_profile_dir
