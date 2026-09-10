@@ -175,10 +175,15 @@ def test_youtube_studio_date_and_time_picker_interaction():
         elif "16" in sel:
             return mock_days
         else:
+            # The date field and the time field are different inputs and read back
+            # different values. This mock used to return "19:30" for both, which passed
+            # only because reverify_date_match returned True whenever it could not parse
+            # anything -- the very fallthrough that let two Reels ship on the wrong day.
             loc = MagicMock()
             loc.is_visible.return_value = True
-            loc.input_value.return_value = "19:30"
-            loc.inner_text.return_value = "16 Ağu 2026"
+            is_date_field = ("date" in sel.lower()) or ("Tarih" in sel)
+            loc.input_value.return_value = "16 Ağu 2026" if is_date_field else "19:30"
+            loc.inner_text.return_value = "16 Ağu 2026" if is_date_field else "19:30"
             res.first = loc
         return res
 

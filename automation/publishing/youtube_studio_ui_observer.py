@@ -1933,10 +1933,21 @@ class YouTubeStudioUIObserver:
         day_str = str(target_day)
         day_clicked = False
 
-        day_selectors = [
-            f"ytcp-calendar [aria-label*='16 Ağustos 2026']",
-            f"ytcp-calendar [aria-label*='16 August 2026']",
-            f"ytcp-calendar [aria-label*='Aug 16, 2026']",
+        # The three aria-label entries here were pinned to "16 Agustos 2026" -- f-strings
+        # with no placeholder in them, left from the August incident. They matched nothing
+        # from September on, so the click always fell through to the generic day-number
+        # match, and when that missed too the field kept Studio's default date.
+        month_spellings = sorted(
+            {name for name, num in MONTH_MAP.items() if num == target_month},
+            key=len, reverse=True
+        )
+        aria_variants = []
+        for name in month_spellings:
+            pretty = name.capitalize()
+            aria_variants.append("ytcp-calendar [aria-label*='%d %s %d']" % (target_day, pretty, target_year))
+            aria_variants.append("ytcp-calendar [aria-label*='%s %d, %d']" % (pretty, target_day, target_year))
+
+        day_selectors = aria_variants + [
             f"ytcp-calendar td:not(.is-disabled):not(.is-outside-month):has-text('{day_str}')",
             f"ytcp-calendar div[role='gridcell']:not([aria-disabled='true']):has-text('{day_str}')",
             f"ytcp-calendar button:not([disabled]):has-text('{day_str}')",
@@ -2114,25 +2125,90 @@ class YouTubeStudioUIObserver:
             logger.error(f"Error setting time in YouTube Studio: {e}")
             return False, f"TIME_SET_FAILED: {e}"
 
-    def reverify_date_match(self, target_year: int = 2026, target_month: int = 8, target_day: int = 16) -> Tuple[bool, str]:
+    def parse_date_input_value(self, raw: str) -> Tuple[int, int, int]:
         """
-        Read back the date input value to ensure exact date match.
+        Read a Studio date field into (year, month, day); zeros where unreadable.
+
+        Studio writes the date in the account locale -- "11 Eyl 2026", "11.09.2026",
+        "Sep 11, 2026" -- so both numeric and named forms have to parse. Month names come
+        from MONTH_MAP, which already carries every Turkish and English spelling; the old
+        read-back hardcoded three August spellings instead.
         """
+        import re as _re
+
+        text = (raw or "").lower().strip()
+        if not text:
+            return 0, 0, 0
+
+        numeric = _re.match(r"^\s*(\d{1,2})[./-](\d{1,2})[./-](\d{4})\s*$", text)
+        if numeric:
+            d, m, y = (int(g) for g in numeric.groups())
+            return (y, m, d) if 1 <= m <= 12 else (0, 0, 0)
+
+        # Longest spelling wins so "eylul" is not shadowed by a shorter accidental match.
+        month, matched_len = 0, 0
+        for name, num in MONTH_MAP.items():
+            if name in text and len(name) > matched_len:
+                month, matched_len = num, len(name)
+        if month == 0:
+            return 0, 0, 0
+
+        year_m = _re.search(r"(20\d{2})", text)
+        year = int(year_m.group(1)) if year_m else 0
+
+        day = 0
+        for token in _re.findall(r"\d{1,2}", text):
+            value = int(token)
+            if 1 <= value <= 31:
+                day = value
+                break
+
+        return year, month, day
+
+    def reverify_date_match(self, target_year: int, target_month: int, target_day: int) -> Tuple[bool, str]:
+        """
+        Read the date field back and confirm it is the date that was asked for.
+
+        This used to test the day number against a hardcoded list of August spellings,
+        carry a special case for the number 17, and -- when nothing matched at all --
+        return True regardless. From September the month test could never pass, so every
+        call fell through to that unconditional success.
+
+        On 2026-09-10 two Reels of CBM-2026-W37 reached YouTube on the 11th when they
+        were due on the 12th and the 14th, and both were recorded as SCHEDULED. A wrong
+        date that reports success is worse than an outright failure: nothing downstream
+        re-checks it, and the slot is quietly lost.
+
+        An unreadable field is a failure now as well. Being unable to confirm the date is
+        not evidence that the date is right.
+        """
+        last_seen = ""
         for sel in YouTubeStudioSelectors.DATE_PICKER_INPUTS:
             try:
                 loc = self.page.locator(sel).first
                 loc.wait_for(state="visible", timeout=500)
                 val = loc.input_value() if hasattr(loc, "input_value") else loc.inner_text()
-                val_clean = val.lower().strip()
-                if str(target_day) in val_clean and any(m in val_clean for m in ["ağu", "aug", "08"]):
+                if not (val or "").strip():
+                    continue
+                last_seen = val
+                read_y, read_m, read_d = self.parse_date_input_value(val)
+                if read_d == 0 or read_m == 0:
+                    continue
+                if read_d == target_day and read_m == target_month and read_y in (0, target_year):
                     return True, "DATE_MATCH"
-                elif "17" in val_clean:
-                    logger.error(f"[DATE_MISMATCH] Date input shows 17 instead of {target_day}: '{val}'")
-                    return False, "DATE_MISMATCH"
+                logger.error(
+                    f"[DATE_MISMATCH] Beklenen {target_day:02d}.{target_month:02d}.{target_year}, "
+                    f"alanda okunan: '{val}'"
+                )
+                return False, (
+                    f"DATE_MISMATCH: beklenen {target_day:02d}.{target_month:02d}.{target_year}, "
+                    f"okunan '{val}'"
+                )
             except Exception:
-                pass
+                continue
 
-        return True, "DATE_MATCH"
+        logger.error(f"[DATE_UNREADABLE] Tarih alani okunamadi (son gorulen: '{last_seen}').")
+        return False, f"DATE_UNREADABLE: tarih alani okunamadi (son gorulen: '{last_seen}')"
 
     def set_schedule_datetime(self, local_iso_dt: str) -> bool:
         """
@@ -2157,9 +2233,16 @@ class YouTubeStudioUIObserver:
 
         # 2. Fallback: Type locale-aware string if calendar click was not successful
         if not calendar_success or not is_valid:
-            turkish_month_name = list(MONTH_MAP.keys())[list(MONTH_MAP.values()).index(target_month)].capitalize()
+            # index() returns the first spelling for the month, which is the short one
+            # ("Eyl"). Studio may want the full name, so offer every spelling MONTH_MAP
+            # knows, longest first, before falling back to the numeric forms.
+            spellings = sorted(
+                {name for name, num in MONTH_MAP.items() if num == target_month},
+                key=len, reverse=True
+            )
             locale_candidates = [
-                f"{target_day} {turkish_month_name} {target_year}",
+                f"{target_day} {name.capitalize()} {target_year}" for name in spellings
+            ] + [
                 f"{target_day:02d}.{target_month:02d}.{target_year}",
                 f"{target_day:02d}/{target_month:02d}/{target_year}"
             ]
