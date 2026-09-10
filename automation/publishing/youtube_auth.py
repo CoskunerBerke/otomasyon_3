@@ -13,6 +13,11 @@ logger = logging.getLogger("ReelsAIFactory.YouTubeAuth")
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
+    # Needed to change a video that is already on the channel: scheduling a draft, or
+    # correcting a publishAt that went in wrong. youtube.upload only covers creating new
+    # ones, so without this a mistake can be seen but not fixed -- which is how
+    # CBM-REEL-2026-0050 ended up stranded as an unscheduled draft.
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
 class YouTubeAuthError(Exception):
