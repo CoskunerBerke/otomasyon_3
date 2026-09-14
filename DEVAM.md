@@ -1,4 +1,4 @@
-# Devam — Reels AI Factory (11 Eylül 2026)
+# Devam — Reels AI Factory (14 Eylül 2026)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
 Branch: **`main`** — her şey push'lu.
@@ -11,10 +11,21 @@ Branch: **`main`** — her şey push'lu.
 
 | Marka | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|---|
-| BuildVerse | `2026-W37` | 7–13 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
+| BuildVerse | `2026-W38` | 14–20 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
 | Craftsbyman | `CBM-2026-W37` | 11–17 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 
-**Sıradaki haftalar:** BuildVerse 14 Eylül'den, Craftsbyman 18 Eylül'den. `.bat`'a basmak yeterli.
+BuildVerse W38'in YouTube'u **kanaldan tek tek doğrulandı**: 14 video var, 14 `publishAt`
+slotla dakikası dakikasına eşleşiyor. TikTok ve Instagram kayıtları `SCHEDULED` ama bu iki
+platform uzaktan okunamıyor; gözle bakmak gerekirse Studio'lardan.
+
+**Sıradaki haftalar:** BuildVerse 21 Eylül'den, Craftsbyman 18 Eylül'den. `.bat`'a basmak yeterli.
+
+**14 Eylül notu — Flow'un geçici ses hatası.** W38 üretilirken `REEL-2026-0076`'nın ikinci
+segmentinde Flow "Ses üretilemedi. Lütfen farklı bir istem kullanın" kartı verdi. Otomasyon
+bu kartı tanımadığı için 20 dakikalık zaman aşımına kadar bekledi, hafta 13/14'te kaldı ve
+yükleme fazına hiç geçilmedi. Aynı prompt ertesi sabah tek denemede üretildi — hata
+geçiciydi. İyileştirme fırsatı: "Başarısız" kartı görülünce 20 dakika beklemek yerine
+hemen durup yeniden denemek.
 
 Küçük açık iş: `CBM-REEL-2026-0051` YouTube'da **14 Eyl 22:30**'a planlı, diğer akşam
 yayınları 22:00. Web otomasyonundan kalma 30 dakikalık sapma. API ile düzeltilebilir
@@ -52,8 +63,11 @@ dakikasına oturdu.
 Console → OAuth consent screen → "In production" yapılmalı. Token `invalid_grant` verirse
 ilk buraya bak.
 
-⚠️ **Kota:** `videos.insert` 1600 birim, günlük varsayılan 10.000 → **günde ~6 yükleme**.
-14 Reel'lik hafta günlere yayılır. Artış için YouTube API audit formu gerekiyor.
+**Kota:** 11 Eylül'de "günde ~6 yükleme" diye tahmin edilmişti — **yanlıştı.** 14 Eylül'de
+BuildVerse'ün 14 videosu tek çalıştırmada API'den geçti ve kanaldan tek tek doğrulandı.
+Gerçek sınır Google Cloud Console → `reels-ai-publisher` → YouTube Data API v3 → Quotas
+ekranında. İki kanal aynı projeyi kullandığı için kota **paylaşımlı**; aynı gün iki
+kanalın haftası birden yüklenecekse oradan kontrol et.
 
 ### API'nin beklenmedik faydası
 

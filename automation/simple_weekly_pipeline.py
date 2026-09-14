@@ -900,9 +900,10 @@ class SimpleWeeklyPipeline:
 
         'api' drives youtube.videos.insert with publishAt, so there is no calendar to
         click and no locale-dependent date string to get wrong -- the two defects that
-        put CBM-REEL-2026-0046 and 0049 on the wrong day. It costs quota instead: 1600
-        units per upload against a default 10,000 per day, so about six videos a day
-        until an increase is granted.
+        put CBM-REEL-2026-0046 and 0049 on the wrong day. It costs quota instead; the
+        live limit is whatever the reels-ai-publisher project shows under YouTube Data
+        API v3 > Quotas. An early estimate of six uploads a day was wrong -- fourteen
+        went through in one run on 2026-09-14 -- so check the console, not this comment.
         """
         if self.yt_publisher is not None:
             return
