@@ -174,7 +174,7 @@ def test_every_story_concept_is_complete():
         assert c.real_basis, f"{c.id_slug} has no factual basis"
         assert set(c.ambient_sounds) == {"before", "turn", "after"}, c.id_slug
         assert all(c.ambient_sounds.values()), c.id_slug
-        assert c.narrative_frame in {"abandonment", "burial", "vanishing", "creation"}, c.id_slug
+        assert c.narrative_frame in {"abandonment", "burial", "vanishing", "creation", "left_behind"}, c.id_slug
 
 
 def test_story_plan_has_three_beats_with_sound_and_no_narration():
@@ -226,7 +226,7 @@ def test_story_selection_is_unique_and_spread_across_groups():
 
 def test_interleave_preserves_every_plan():
     plans = ContentEngine(content_mode=NARRATIVE_AMBIENT_STORY).generate_next_reels(
-        count=27, past_records=[], duration_seconds=10
+        count=len(STORY_CONCEPTS), past_records=[], duration_seconds=10
     )
     assert len(plans) == len(STORY_CONCEPTS)
     assert {p.concept_def.id_slug for p in plans} == {c.id_slug for c in STORY_CONCEPTS}

@@ -203,6 +203,16 @@ class PublishingMetadataBuilder:
             "{title}, Then and Now",
             "The Day {title} Was Left Behind",
         ],
+        # Abandoned as a city, but people live there or right beside it today: Hampi is a
+        # village, Fatehpur Sikri a town, and fishing families still live at Dhanushkodi.
+        # "Why Nobody Lives in X Anymore" is false for all of them, and "The Day X Was Left
+        # Behind" is false for any place that emptied over years rather than at once.
+        "left_behind": [
+            "{title}: The Place That Was Left Behind",
+            "What Happened to {title}",
+            "{title}, Then and Now",
+            "The Story of {title} in 30 Seconds",
+        ],
         # The cutaway format's payoff is a WORKING interior, so it cannot borrow the
         # abandonment titles the fallback would give it: "Why Nobody Lives Here Anymore"
         # is false for a dam that is running right now.

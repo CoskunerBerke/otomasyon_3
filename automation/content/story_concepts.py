@@ -41,6 +41,9 @@ class StoryConcept(ConceptDefinition):
     #   "burial"      -- nature or human hands covered it over
     #   "vanishing"   -- the water, not the people, went away
     #   "creation"    -- the story is how it came to exist
+    #   "left_behind" -- abandoned as a city or seat of power, but still lived in or beside
+    #                    today, so no title may say nobody lives there or that it emptied
+    #                    in a single day
     narrative_frame: str = "abandonment"
 
 
@@ -610,6 +613,142 @@ STORY_CONCEPTS: List[StoryConcept] = [
             "before": "open ocean ambience: heavy swell, wind, distant seabirds, nothing else",
             "turn": "violent underwater detonations, steam explosions, ash raining on water, hissing lava meeting sea",
             "after": "waves on new black rock, wind over ash, growing seabird colony calls",
+        },
+    ),
+
+    # ------------------------------------------------------------------------------
+    # India (2026-09-16). BuildVerse's Instagram audience is 60-70% Indian while not one
+    # place in this pool was, and people watch and share stories about their own country
+    # far more readily. Each entry sits in the existing theme group whose hashtags are
+    # true for it, so the round-robin spreads them across weeks instead of stacking them
+    # into one. Sound follows the same rule as every other entry: diegetic ambience only,
+    # and no instruments either -- "music soundtrack" is excluded, and a drum or reed
+    # described as ambience is exactly what Flow tends to render as a score.
+    # ------------------------------------------------------------------------------
+    StoryConcept(
+        id_slug="kuldhara",
+        narrative_frame="abandonment",
+        name="Kuldhara",
+        category_group="Abandoned Overnight",
+        real_basis="Village of Paliwal Brahmins near Jaisalmer in Rajasthan, India, settled around the 13th century and deserted by the early 19th century together with neighbouring villages; local tradition says every family left in a single night, while historians point to failing water supplies and heavy taxation by the Jaisalmer state. Its roofless sandstone houses still line the old streets.",
+        environments=["a planned desert village of parallel lanes on flat scrubland under a wide sky", "rows of courtyard houses beside a dry riverbed in the Thar Desert"],
+        architectures=["yellow sandstone courtyard houses with flat roofs and carved doorframes", "a small stone temple at the head of a straight village street"],
+        transformations=["the lanes emptying of people and cattle, doors left open, then roofs caving in and sand drifting against the thresholds", "desert wind stripping the timber and thatch away until only the stone walls stand in their grid"],
+        camera_styles=["slow forward dolly down the main village lane, same axis in every beat", "steady high crane over the rooftops looking along the street grid"],
+        lighting_schemes=["harsh white desert noon settling into amber dusk", "low golden light throwing long shadows across sandstone"],
+        materials=["yellow Jaisalmer sandstone", "packed earth floors", "wind-blown desert sand", "sun-bleached timber lintels"],
+        reveals=["street after street of roofless sandstone houses, doorways open to the sky, the temple still standing at the end of the lane", "the whole village grid seen from above as empty stone shells in the desert"],
+        default_title="Kuldhara",
+        topic_description="A Rajasthan desert village whose families had all gone by the early 19th century, its sandstone streets left standing empty",
+        ambient_sounds={
+            "before": "busy desert village ambience: cattle bells, a well pulley creaking, grain being ground by hand, birds in a neem tree, footsteps on packed earth",
+            "turn": "wind rising across open scrubland, loose doors banging, a roof beam cracking and falling, then long quiet",
+            "after": "dry desert wind through empty doorways, sand hissing along the lane, a lone kite calling overhead",
+        },
+    ),
+    StoryConcept(
+        id_slug="hampi",
+        narrative_frame="left_behind",
+        name="Hampi",
+        category_group="Abandoned Overnight",
+        real_basis="Vijayanagara, capital of the Vijayanagara Empire at Hampi in Karnataka, India, was among the largest cities in the world around 1500; after the empire's defeat at the Battle of Talikota in 1565 the city was plundered for months and abandoned. Its temples, bazaar streets and royal enclosures remain among giant granite boulders beside the Tungabhadra river.",
+        environments=["a vast city of temples and bazaar streets among hills of giant granite boulders", "a wide river valley with stone water channels and boulder-strewn ridges"],
+        architectures=["towering carved temple gateways and long pillared bazaar colonnades", "royal pavilions, stepped water tanks and domed stone elephant stables"],
+        transformations=["crowded bazaars and temple processions giving way to smoke and emptiness, then grass and scrub rising through the paving", "the city standing silent for centuries as weeds close in around the colonnades"],
+        camera_styles=["slow forward dolly along the long bazaar street toward the temple gateway, same axis in every beat", "steady crane rise from the temple courtyard to above the boulder hills"],
+        lighting_schemes=["bright south Indian sun turning to hazy golden evening", "warm sunrise across granite with soft river mist"],
+        materials=["grey and pink granite", "carved stone pillars", "traces of lime plaster", "dry grass and scrub"],
+        reveals=["a long empty bazaar colonnade leading to a great temple tower, boulders piled on the hills around it", "carved pillared halls standing open and silent, grass growing between the paving stones"],
+        default_title="Hampi",
+        topic_description="The Vijayanagara capital in Karnataka, one of the world's largest cities around 1500, plundered and abandoned after 1565",
+        ambient_sounds={
+            "before": "busy temple-city ambience: temple bells ringing, conch shells blowing, elephants, cart wheels on stone, the bustle of a market",
+            "turn": "distant fire crackling and timber falling, stone cracking, then wind and silence settling over the streets",
+            "after": "warm wind across granite, river water running in stone channels, parakeets and langur monkeys calling",
+        },
+    ),
+    StoryConcept(
+        id_slug="fatehpur-sikri",
+        narrative_frame="left_behind",
+        name="Fatehpur Sikri",
+        category_group="Abandoned Overnight",
+        real_basis="City built in red sandstone by the Mughal emperor Akbar near Agra in Uttar Pradesh, India, from 1571 and made his capital; within about fifteen years the court had moved away and the city was largely abandoned, most likely because of water shortages and the demands of governing the empire. Its palaces, courtyards and great mosque survive almost intact.",
+        environments=["a walled imperial city on a rocky ridge above open plains", "vast paved courtyards between palaces and a great mosque"],
+        architectures=["red sandstone palaces with carved pillars and open multi-storey pavilions", "a towering victory gateway at the top of a long flight of steps"],
+        transformations=["the court and its crowds leaving, courtyards falling silent and water channels running dry", "centuries of heat and wind weathering the empty palaces while the stone stays standing"],
+        camera_styles=["slow forward dolly across the great courtyard toward the five-storey pavilion, same axis in every beat", "steady crane rise up the gateway steps to look over the empty city"],
+        lighting_schemes=["hot north Indian sun on red stone turning to dusty orange evening", "soft winter morning haze over the ridge"],
+        materials=["red Sikri sandstone", "carved stone lattice screens", "white marble inlay", "dry dusty paving"],
+        reveals=["a complete palace city of red sandstone standing empty, courtyards swept bare and pavilions open to the wind", "the great gateway towering over deserted steps with the plains beyond"],
+        default_title="Fatehpur Sikri",
+        topic_description="Akbar's red sandstone capital near Agra, built from 1571 and largely abandoned within about fifteen years",
+        ambient_sounds={
+            "before": "imperial court ambience: fountains splashing, horses and elephants in the courtyard, a large bronze bell, footsteps and cloth rustling on stone",
+            "turn": "fountains running dry, wind rising through open pavilions, doors swinging, then deep silence",
+            "after": "hot dry wind across empty courtyards, pigeons flapping in the pavilions, distant crows",
+        },
+    ),
+    StoryConcept(
+        id_slug="dhanushkodi",
+        narrative_frame="left_behind",
+        name="Dhanushkodi",
+        category_group="Lost to the Water",
+        real_basis="Town at the southeastern tip of Rameswaram Island in Tamil Nadu, India, a railway terminus and ferry port for Sri Lanka until a cyclone on the night of 22-23 December 1964 destroyed it and swept a passenger train into the sea; it was declared unfit for habitation, and the shells of its church, station and houses still stand on the sand.",
+        environments=["a narrow sandy spit between two seas with a railway line running to its tip", "a small coastal town of houses, a church and a station beside a ferry jetty"],
+        architectures=["a coral-stone church with a tall arched gable", "a railway station, water tank and rows of low stone houses"],
+        transformations=["a storm surge sweeping over the spit at night, waves breaking through the streets and tearing roofs away", "the sea drawing back to leave broken walls standing in sand and shallow water"],
+        camera_styles=["slow orbit around the church gable, same radius in every beat", "steady low push along the old railway line toward the town"],
+        lighting_schemes=["bright tropical coastal sun turning to black storm light", "pale washed-out morning over wet sand and calm sea"],
+        materials=["coral stone and lime mortar", "rusted railway iron", "wet coastal sand", "salt-crusted plaster"],
+        reveals=["the roofless church gable standing alone on the sand between two seas, broken walls around it", "shells of houses and the old station half-buried in sand, calm water at the edge"],
+        default_title="Dhanushkodi",
+        topic_description="A Tamil Nadu port town destroyed by a cyclone in 1964 and never rebuilt, its church still standing on the sand",
+        ambient_sounds={
+            "before": "busy seaside town ambience: waves, a steam locomotive whistle and hiss, a ferry horn, gulls, fishing boats knocking against the jetty",
+            "turn": "cyclone wind screaming, heavy surf crashing through buildings, timber tearing, then the roar fading",
+            "after": "gentle waves on both shores, steady sea wind through empty window arches, terns calling",
+        },
+    ),
+    StoryConcept(
+        id_slug="ajanta-caves",
+        narrative_frame="left_behind",
+        name="Ajanta Caves",
+        category_group="Carved from Stone",
+        real_basis="Buddhist monasteries and prayer halls cut into a horseshoe-shaped basalt gorge in Maharashtra, India, carved and painted from about the 2nd century BCE to the 5th century CE; abandoned and hidden by forest for centuries, they came to wider attention in 1819 when a British officer hunting in the gorge noticed a cave entrance.",
+        environments=["a horseshoe-shaped river gorge with a row of cave entrances cut along its cliff face", "a forested basalt ravine above a winding stream"],
+        architectures=["rock-cut prayer halls with carved pillars and a stupa at the far end", "monastery halls with painted walls and small cells cut into the cliff"],
+        transformations=["monks and lamps disappearing from the halls, then vines and trees growing over the cliff until the entrances vanish in green", "centuries of forest closing across the gorge face, then undergrowth cut back to open the carved doorways again"],
+        camera_styles=["slow lateral track along the cliff face past the cave entrances, same line in every beat", "steady push from the gorge into a pillared prayer hall toward the stupa"],
+        lighting_schemes=["warm lamplight inside dark stone halls against bright gorge daylight", "green filtered monsoon light over wet basalt"],
+        materials=["dark basalt rock", "mineral-pigment wall paintings", "lime plaster", "monsoon vines and moss"],
+        reveals=["the curved cliff face open again with its line of carved entrances, forest all around the gorge", "a pillared prayer hall lit by daylight, faded paintings on the walls and a stupa at the far end"],
+        default_title="Ajanta Caves",
+        topic_description="Buddhist cave halls carved into a Maharashtra gorge, hidden by forest for centuries until 1819",
+        ambient_sounds={
+            "before": "quiet monastery ambience: oil lamps flickering, small bells, footsteps on stone, a stream in the gorge below, birdsong",
+            "turn": "monsoon rain and wind building, the stream swelling, then dense forest closing in: cicadas, rustling leaves, dripping",
+            "after": "water dripping and echoing inside a stone hall, forest birds, a waterfall somewhere in the gorge",
+        },
+    ),
+    StoryConcept(
+        id_slug="dholavira",
+        narrative_frame="burial",
+        name="Dholavira",
+        category_group="Buried by Nature",
+        real_basis="City of the Indus Valley Civilisation on Khadir Bet island in the Rann of Kutch, Gujarat, India, occupied from around 3000 BCE and later abandoned; built with stone walls, gateways and large reservoirs for storing rainwater, it lay beneath earth mounds until systematic excavation began in 1990.",
+        environments=["a walled stone city on a low island surrounded by flat salt desert", "a planned settlement of citadel and lower town beside dry seasonal streams"],
+        architectures=["dressed stone fortification walls with broad gateways", "large stone-lined reservoirs cut deep into the ground"],
+        transformations=["the city emptying and its walls slowly collapsing, then wind-blown silt and salt dust burying it into low grassy mounds", "excavation trenches cutting down through the mounds to expose stone walls and reservoir steps"],
+        camera_styles=["slow orbit around the citadel mound, same radius in every beat", "steady high crane over the reservoirs looking out toward the salt flats"],
+        lighting_schemes=["blinding white salt-desert glare softening into pink dusk", "flat hazy morning light across dry earth"],
+        materials=["dressed sandstone and limestone blocks", "mud brick", "salt crust and silt", "dry thorn scrub"],
+        reveals=["excavated stone walls and deep stepped reservoirs laid open on the island, white salt desert to the horizon", "the uncovered city plan seen from above, gateways and streets cut clean out of the mound"],
+        default_title="Dholavira",
+        topic_description="An Indus Valley city in Gujarat's salt desert, lived in from around 3000 BCE and buried under mounds until excavation in 1990",
+        ambient_sounds={
+            "before": "ancient town ambience: stone tools tapping, water poured into a reservoir, goats, wind moving over the walls",
+            "turn": "strong dry wind carrying dust and silt, stone blocks slipping and falling, then long muffled stillness",
+            "after": "wide open wind over salt flats, trowels scraping in an excavation trench, larks overhead",
         },
     ),
 ]
