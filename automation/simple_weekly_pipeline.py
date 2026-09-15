@@ -918,9 +918,43 @@ class SimpleWeeklyPipeline:
                 f"[YOUTUBE] Data API modu ({self.brand.brand_id}) -- token: "
                 f"{self.pub_config.youtube_token_path.name}"
             )
-            self.yt_publisher = YouTubePublisher(self.pub_config)
+            self.yt_publisher = YouTubePublisher(
+                self.pub_config, localizations_for=self._youtube_localizations
+            )
         else:
             self.yt_publisher = YouTubeStudioPublisher(self.pub_config)
+
+    def _youtube_localizations(self, record: PublishRecord) -> Dict[str, Dict[str, str]]:
+        """
+        Localized YouTube titles and descriptions for one Reel, or {} if it has none.
+
+        Resolved from the Reel's own manifest entry and concept library, the same way
+        _rebuild_concept_plan finds a concept, so the translation always belongs to the
+        concept that was actually generated -- never to one inferred from the title.
+        Only story and cutaway Reels have translations; every other mode returns {} and
+        publishes in English as before.
+        """
+        from automation.publishing.localizations import build_story_localizations
+
+        manifest = self.batch_repo.load_manifest(self.week_id) if self.week_id else None
+        reel = next((r for r in (manifest.reels if manifest else []) if r.reel_id == record.reel_id), None)
+        if reel is None:
+            return {}
+        if reel.content_mode == NARRATIVE_AMBIENT_STORY:
+            library = STORY_CONCEPTS
+        elif reel.content_mode == CUTAWAY_REVEAL_STORY:
+            library = CUTAWAY_CONCEPTS
+        else:
+            return {}
+        concept = next((c for c in library if c.id_slug == reel.concept_id_slug), None)
+        if concept is None:
+            return {}
+        return build_story_localizations(
+            reel_id=record.reel_id,
+            name=concept.name,
+            narrative_frame=concept.narrative_frame,
+            english_description=record.description,
+        )
 
     def _init_tiktok_publisher_if_needed(self) -> None:
         if self.tt_publisher is not None:

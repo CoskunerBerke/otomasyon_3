@@ -28,8 +28,16 @@ class BaseYouTubePublisher(ABC):
 class YouTubePublisher(BaseYouTubePublisher):
     """Production YouTube Data API v3 publisher."""
 
-    def __init__(self, config: PublishingConfig):
+    def __init__(self, config: PublishingConfig, localizations_for=None):
+        """
+        `localizations_for(record)` returns {lang: {"title", "description"}} or {}.
+
+        Optional so every existing caller keeps working unchanged, and computed at upload
+        time rather than stored on PublishRecord: the translations are deterministic from
+        the concept, so a resumed run rebuilds exactly the same ones.
+        """
         self.config = config
+        self.localizations_for = localizations_for
 
     def upload_and_schedule(self, record: PublishRecord) -> PublishRecord:
         """Upload video and schedule publication via YouTube Data API v3."""
@@ -91,6 +99,30 @@ class YouTubePublisher(BaseYouTubePublisher):
             }
         }
 
+        # Localized titles and descriptions. A failure here must never cost the upload:
+        # the Reel goes out in English, which is exactly what it did before this existed.
+        parts = "snippet,status"
+        localized = {}
+        if self.localizations_for is not None:
+            try:
+                localized = self.localizations_for(record) or {}
+            except Exception as e:
+                logger.warning(f"[{record.reel_id}] Localizations skipped, uploading in English only: {e}")
+                localized = {}
+        if localized:
+            hashtag_block = " ".join(record.hashtags)
+            # YouTube refuses localizations unless the snippet declares its own language.
+            body["snippet"]["defaultLanguage"] = "en"
+            body["localizations"] = {
+                lang: {
+                    "title": entry["title"][:100],
+                    "description": f"{entry['description']}\n\n{hashtag_block}" if hashtag_block else entry["description"],
+                }
+                for lang, entry in localized.items()
+            }
+            parts = "snippet,status,localizations"
+            logger.info(f"[{record.reel_id}] Localized metadata: {', '.join(sorted(localized))}")
+
         try:
             media = MediaFileUpload(
                 str(record.video_file),
@@ -100,7 +132,7 @@ class YouTubePublisher(BaseYouTubePublisher):
             )
 
             request = youtube.videos().insert(
-                part="snippet,status",
+                part=parts,
                 body=body,
                 media_body=media
             )
