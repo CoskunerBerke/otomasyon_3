@@ -63,6 +63,20 @@ class FlowSelectors:
         "button:has-text('Try again')"
     ]
 
+    # Flow asks to confirm the credit cost of a generation whenever the project's
+    # "Uretim islemi oncesinde onaylayin -> Hicbir zaman" setting did not take:
+    # "15 kredi karsiliginda bu 1 video uretimi islemini baslatmami ister misiniz?"
+    # with Onayla / Her zaman onayla / Reddet.
+    #
+    # Only the single-shot "Onayla" is ever pressed. "Her zaman onayla" writes a stored
+    # setting, and "Reddet" throws away the segment. Two strategies (Kural 31); the label
+    # check below is what keeps the substring match off the other two buttons, because
+    # has-text('Onayla') also matches "Her zaman onayla".
+    GENERATION_APPROVAL_SELECTORS: List[str] = [
+        "button:has-text('Onayla')",
+        "button:has-text('Approve')"
+    ]
+
     # Home page New Project button (TR / EN variations)
     NEW_PROJECT_BUTTON_SELECTORS: List[str] = [
         "button:has-text('Yeni proje')",
@@ -202,3 +216,19 @@ class FlowSelectors:
         "button[title*='Download' i]",
         "svg[data-icon='download']"
     ]
+
+
+def is_single_shot_approval_label(label: str) -> bool:
+    """
+    True only for the button that approves this one generation.
+
+    "Her zaman onayla" / "Always approve" changes a setting that outlives the run, and
+    "Reddet" discards the segment; neither is ours to press. A label long enough to be a
+    sentence means the selector matched a container, not the control.
+    """
+    text = (label or "").strip().lower()
+    if not text or len(text) > 40:
+        return False
+    if any(w in text for w in ("her zaman", "always", "reddet", "decline", "deny", "iptal")):
+        return False
+    return "onayla" in text or "approve" in text

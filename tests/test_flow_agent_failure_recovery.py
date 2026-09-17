@@ -20,6 +20,7 @@ import pytest
 from automation.flow.chat_classifier import classify_agent_message, AgentMessageType
 from automation.flow.downloader import FlowDownloader
 from automation.flow.page import FlowPage
+from automation.flow.selectors import is_single_shot_approval_label
 from automation.flow.state_machine import (
     FlowDecisionAction,
     FlowDecisionEngine,
@@ -29,10 +30,17 @@ from automation.flow.state_machine import (
 from automation.flow.ui_observer import FlowUIObserver, FlowUISnapshot
 
 
-def _page(retry_label=None):
-    """A Flow page where nothing is on screen except, optionally, the retry button."""
+def _page(retry_label=None, approval_labels=(), clicked=None):
+    """A Flow page showing only what a test puts on it: a retry button, an approval row."""
     page = MagicMock()
     page.url = "https://flow.google.com/project/x"
+
+    def button(label):
+        b = MagicMock()
+        b.is_visible.return_value = True
+        b.inner_text.return_value = label
+        b.click.side_effect = lambda timeout=None: (clicked if clicked is not None else []).append(label)
+        return b
 
     def locator(sel):
         loc = MagicMock()
@@ -45,12 +53,18 @@ def _page(retry_label=None):
             loc.first.count.return_value = 1
             loc.first.is_visible.return_value = True
             loc.first.inner_text.return_value = retry_label
+        elif approval_labels and "Onayla" in sel:
+            # has-text() is a substring match, so Flow's three buttons all come back here.
+            loc.all.return_value = [button(l) for l in approval_labels]
         else:
             loc.first.wait_for.side_effect = Exception("not visible")
         return loc
 
     page.locator.side_effect = locator
     return page
+
+
+APPROVAL_ROW = ("Onayla", "Her zaman onayla", "Reddet")
 
 
 def _session():
@@ -207,3 +221,82 @@ def test_an_older_file_in_downloads_is_not_mistaken_for_this_segment(home):
             download_button_locator=_download_button(),
             target_filename="segment_03.mp4",
         )
+
+
+# --- Flow's credit question -------------------------------------------------------
+#
+# CBM-REEL-2026-0062, 2026-09-17: "15 kredi karşılığında bu 1 video üretimi işlemini
+# başlatmamı ister misiniz?" with Onayla / Her zaman onayla / Reddet. Nothing generates
+# until it is answered and nothing times out either, so the Reel burned its whole
+# twenty-minute budget on a question and finished with no segments at all.
+
+
+@pytest.mark.parametrize("label", ["Onayla", "onayla", "Approve", "Approve "])
+def test_the_single_shot_approval_is_recognised(label):
+    assert is_single_shot_approval_label(label) is True
+
+
+@pytest.mark.parametrize("label", [
+    "Her zaman onayla", "Always approve", "Reddet", "Decline", "İptal",
+    "15 kredi karşılığında bu 1 video üretimi işlemini başlatmamı ister misiniz? Onayla",
+    "", None,
+])
+def test_the_other_buttons_are_never_ours_to_press(label):
+    """Her zaman onayla writes a stored setting; Reddet throws the segment away."""
+    assert is_single_shot_approval_label(label) is False
+
+
+def test_the_observer_sees_the_pending_credit_question():
+    assert _page_snapshot(approval_labels=APPROVAL_ROW).generation_approval_pending is True
+
+
+def test_a_page_without_the_question_reports_nothing_pending():
+    assert _page_snapshot().generation_approval_pending is False
+
+
+def test_always_approve_alone_is_not_a_pending_question():
+    """If the only match is the setting-changing button, there is nothing to press."""
+    assert _page_snapshot(approval_labels=("Her zaman onayla",)).generation_approval_pending is False
+
+
+def _page_snapshot(**kw):
+    return FlowUIObserver(_page(**kw)).take_snapshot()
+
+
+def test_the_question_is_answered_instead_of_waited_out():
+    engine = FlowDecisionEngine()
+    snap = _snapshot(agent_retry_available=False, generation_approval_pending=True)
+    assert engine.decide_next_action(snap, session=_session()) ==         FlowDecisionAction.APPROVE_GENERATION_ONCE
+
+
+def test_one_segment_gets_one_approval():
+    """A second question is not this segment's, so it goes to the operator."""
+    engine = FlowDecisionEngine()
+    session = _session()
+    snap = _snapshot(agent_retry_available=False, generation_approval_pending=True)
+    assert engine.decide_next_action(snap, session=session) ==         FlowDecisionAction.APPROVE_GENERATION_ONCE
+    assert engine.decide_next_action(snap, session=session) ==         FlowDecisionAction.USER_ACTION_REQUIRED
+
+
+def test_media_on_screen_still_wins_over_a_pending_question():
+    engine = FlowDecisionEngine()
+    snap = _snapshot(agent_retry_available=False, generation_approval_pending=True,
+                     download_button_visible=True, new_video_artifact_detected=True,
+                     new_artifact_fingerprint="media:abc")
+    assert engine.decide_next_action(snap, session=_session()) == FlowDecisionAction.DOWNLOAD_MEDIA
+    assert engine.generation_approvals_used == 0
+
+
+def test_only_onayla_is_pressed_never_her_zaman_onayla():
+    """The whole point: has-text('Onayla') matches all three, and two of them are not ours."""
+    clicked = []
+    fp = FlowPage.__new__(FlowPage)
+    fp.page = _page(approval_labels=APPROVAL_ROW, clicked=clicked)
+    assert fp.approve_generation_once() is True
+    assert clicked == ["Onayla"]
+
+
+def test_no_approval_button_reports_failure():
+    fp = FlowPage.__new__(FlowPage)
+    fp.page = _page()
+    assert fp.approve_generation_once() is False

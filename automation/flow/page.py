@@ -14,6 +14,7 @@ from playwright.sync_api import Page, Locator, TimeoutError as PlaywrightTimeout
 
 from .selectors import (
     FlowSelectors,
+    is_single_shot_approval_label,
     FlowPageState,
     FlowError,
     FlowUIChangedError,
@@ -555,6 +556,7 @@ class FlowPage:
         self._submit_attempted = True
         self.decision_engine.state = GenerationLifecycleState.PROMPT_SUBMITTED
         self.decision_engine.agent_retries_used = 0
+        self.decision_engine.generation_approvals_used = 0
         gen_btn.click()
         time.sleep(2.0)
 
@@ -582,6 +584,32 @@ class FlowPage:
             return True
         except Exception:
             return False
+
+    def approve_generation_once(self) -> bool:
+        """
+        Answer Flow's credit question for the generation this run just asked for.
+
+        Only the single-shot "Onayla" is pressed. "Her zaman onayla" writes a setting that
+        outlives the run and "Reddet" throws the segment away, so every candidate is
+        checked by its own label before it is clicked -- has-text('Onayla') matches "Her
+        zaman onayla" too, and picking the wrong one here is not undoable.
+        """
+        for sel in FlowSelectors.GENERATION_APPROVAL_SELECTORS:
+            try:
+                buttons = self.page.locator(sel).all()
+            except Exception:
+                continue
+            for btn in buttons:
+                try:
+                    if not btn.is_visible():
+                        continue
+                    if not is_single_shot_approval_label(btn.inner_text()):
+                        continue
+                    btn.click(timeout=5000)
+                    return True
+                except Exception:
+                    continue
+        return False
 
     def recover_and_open_video_detail(self) -> bool:
         """
@@ -711,6 +739,17 @@ class FlowPage:
                     continue
                 self.capture_error_snapshot("agent_retry_not_clickable")
                 print("[FLOW] 'Tekrar dene' butonuna basılamadı -- bir sonraki döngüde tekrar denenecek.")
+
+            # ACTION 2.6: answer Flow's credit question for our own generation
+            elif action == FlowDecisionAction.APPROVE_GENERATION_ONCE:
+                print("[FLOW] Flow üretim için kredi onayı istiyor -- bu run'ın kendi isteği olduğu için 'Onayla' tıklanıyor ('Her zaman onayla' asla tıklanmaz)...")
+                if self.approve_generation_once():
+                    print("[FLOW] Onay verildi, üretim başlıyor.")
+                    last_logged_state = None
+                    time.sleep(3.0)
+                    continue
+                self.capture_error_snapshot("generation_approval_not_clickable")
+                print("[FLOW] 'Onayla' butonuna basılamadı -- bir sonraki döngüde tekrar denenecek.")
 
             # ACTION 3: Answer duration question strictly once
             elif action == FlowDecisionAction.ANSWER_DURATION_ONCE:

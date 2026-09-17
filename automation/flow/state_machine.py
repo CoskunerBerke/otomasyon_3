@@ -31,6 +31,7 @@ class FlowDecisionAction(Enum):
     DOWNLOAD_MEDIA = "download_media"
     RECOVER_DOWNLOAD_UI = "recover_download_ui"
     RETRY_AGENT_GENERATION = "retry_agent_generation"
+    APPROVE_GENERATION_ONCE = "approve_generation_once"
     USER_ACTION_REQUIRED = "user_action_required"
     FAIL_SAFE = "fail_safe"
 
@@ -54,11 +55,16 @@ class FlowDecisionEngine:
     # attempt, so the budget is what stops a failing prompt from burning credits in a loop.
     MAX_AGENT_RETRIES_PER_SEGMENT = 2
 
+    # A segment needs exactly one generation, so it needs exactly one approval. Anything
+    # beyond that is not this segment's question and is handed to the operator.
+    MAX_GENERATION_APPROVALS_PER_SEGMENT = 1
+
     def __init__(self, initial_state: GenerationLifecycleState = GenerationLifecycleState.PROMPT_SUBMITTED):
         self.state = initial_state
         self.duration_followup_answered: bool = False
         self.automatic_chat_replies_count: int = 1
         self.agent_retries_used: int = 0
+        self.generation_approvals_used: int = 0
 
     def decide_next_action(
         self,
@@ -108,6 +114,25 @@ class FlowDecisionEngine:
             self.agent_retries_used += 1
             self.state = GenerationLifecycleState.MEDIA_GENERATION_STARTED
             return FlowDecisionAction.RETRY_AGENT_GENERATION
+
+        # CASE 3.6: Flow is holding this generation until its credit question is answered.
+        #
+        # "15 kredi karşılığında bu 1 video üretimi işlemini başlatmamı ister misiniz?"
+        # appears when the project's approval setting did not take. Nothing generates
+        # until it is answered and nothing times out either, so the run simply waits:
+        # CBM-REEL-2026-0062 burned its whole twenty minutes on this question on
+        # 2026-09-17 and failed with no segments at all.
+        #
+        # Approving here does not spend anything extra -- it confirms the generation this
+        # pipeline just requested, at the per-video price the whole batch is built on. The
+        # cap is what keeps it to that one generation.
+        if snapshot.generation_approval_pending and not snapshot.stop_button_visible:
+            if self.generation_approvals_used >= self.MAX_GENERATION_APPROVALS_PER_SEGMENT:
+                self.state = GenerationLifecycleState.FAILED
+                return FlowDecisionAction.USER_ACTION_REQUIRED
+            self.generation_approvals_used += 1
+            self.state = GenerationLifecycleState.MEDIA_GENERATION_STARTED
+            return FlowDecisionAction.APPROVE_GENERATION_ONCE
 
         # CASE 4: Active generation in progress (stop button visible)
         if snapshot.stop_button_visible:

@@ -11,7 +11,7 @@ from typing import List, Set, Optional
 from playwright.sync_api import Page
 
 from .chat_classifier import classify_agent_message, AgentMessageType
-from .selectors import FlowSelectors
+from .selectors import FlowSelectors, is_single_shot_approval_label
 
 @dataclass
 class FlowUISnapshot:
@@ -28,6 +28,7 @@ class FlowUISnapshot:
     download_button_visible: bool = False
     settings_panel_open: bool = False
     agent_retry_available: bool = False
+    generation_approval_pending: bool = False
 
 class FlowUIObserver:
     """Observes Flow Project Editor DOM and generates discrete, immutable UI snapshots."""
@@ -171,6 +172,19 @@ class FlowUIObserver:
         except Exception:
             pass
 
+        # 9. Flow is holding the generation until its credit question is answered.
+        approval_pending = False
+        try:
+            for sel in FlowSelectors.GENERATION_APPROVAL_SELECTORS:
+                for btn in self.page.locator(sel).all():
+                    if btn.is_visible() and is_single_shot_approval_label(btn.inner_text()):
+                        approval_pending = True
+                        break
+                if approval_pending:
+                    break
+        except Exception:
+            pass
+
         return FlowUISnapshot(
             page_url=url,
             latest_new_agent_messages=new_msgs,
@@ -184,5 +198,6 @@ class FlowUIObserver:
             new_artifact_fingerprint=new_fp,
             download_button_visible=dl_visible,
             settings_panel_open=settings_open,
-            agent_retry_available=retry_available
+            agent_retry_available=retry_available,
+            generation_approval_pending=approval_pending
         )
