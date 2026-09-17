@@ -98,6 +98,19 @@ Hepsi canlı DOM'dan kanıtla düzeltildi:
 girdisine tıklar; tanımadığı menüde `DOWNLOAD_QUALITY_MENU_UNRECOGNISED` ile durur.
 **Bu koruma gevşetilmemeli.**
 
+⚠️ **Ajan düşerse Flow kendi kurtarmasını sunuyor.** "Ajan başarısız oldu. Lütfen tekrar
+deneyin." + **"Tekrar dene"** butonu. O butona basılmadan hiçbir şey üretilmiyor; kod
+bunu görmezse 20 dakikalık timeout'a kadar bekliyor (2026-09-17, CBM-REEL-2026-0057 S3).
+Artık observer butonu görüyor, karar motoru `RETRY_AGENT_GENERATION` döndürüyor ve
+`FlowPage.click_agent_retry()` basıyor — **segment başına en fazla 2 kez**, çünkü her
+deneme gerçek bir üretim.
+
+⚠️ **Çalışan pipeline'a ikinci bir Playwright/CDP istemcisi bağlama.** Bağlanınca Chrome'un
+indirme davranışı sıfırlanıyor: video kullanıcının `Downloads` klasörüne iniyor, Playwright
+yine "indirme oldu" diyor, `save_as()` 0 bayt yazıyor ve hiçbir istisna fırlamıyor. Teşhis
+gerekiyorsa `http://127.0.0.1:9222/json/list` (düz HTTP) yeterli. `downloader.py` artık bu
+durumu da kurtarıyor ama sebebini yaratma.
+
 Ders: sağlayıcı arayüzü değiştirdiğinde tek tek selector kovalamak zaman kaybı. Doğrusu
 canlı sayfaya CDP ile bağlanıp tüm akışı bir kerede haritalamak. Yardımcı scriptler:
 `scratchpad/flow_probe.py`, `flow_probe2.py`, `verify_selectors.py`.
