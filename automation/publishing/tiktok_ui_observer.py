@@ -43,6 +43,11 @@ SCHEDULE_BUTTON_SETTLE_MS = 10000
 SCHEDULE_CLICK_TIMEOUT_MS = 8000
 MORE_OPTIONS_PROBE_MS = 800
 
+# The day cell lives in an animated popup; 400ms was tight enough that a slow frame
+# looked like a missing element and the click was skipped silently.
+DAY_CELL_VISIBLE_TIMEOUT_MS = 2000
+CALENDAR_PICK_ATTEMPTS = 2
+CALENDAR_PICK_RETRY_SECONDS = 0.8
 DATE_READBACK_ATTEMPTS = 6
 DATE_READBACK_INTERVAL_SECONDS = 0.5
 
@@ -1013,135 +1018,154 @@ class TikTokUIObserver:
             f"(Year: {target_year}, Month: {target_month}, Day: {target_day}) via Calendar UI..."
         )
 
-        try:
-            # 1. Open Calendar Picker
-            cal_wrapper = self.page.locator(".calendar-wrapper").first
-            is_cal_open = False
-            if hasattr(cal_wrapper, "wait_for"):
-                try:
-                    cal_wrapper.wait_for(state="visible", timeout=300)
-                    is_cal_open = True
-                except Exception:
-                    is_cal_open = False
-
-            if not is_cal_open:
-                if hasattr(date_loc, "scroll_into_view_if_needed"):
+        # Two attempts at the same two strategies (Kural 31 caps selector strategies, not
+        # tries). On 2026-09-17 CBM-REEL-2026-0063 wanted 21 September and the field
+        # stayed on the 17th; the snapshot taken at that moment shows the calendar still
+        # open with the 17th selected, so no click had landed on a day cell at all. The
+        # alternative to retrying here is the pipeline retrying the whole reel, which
+        # re-uploads the video to TikTok from scratch.
+        for attempt in range(1, CALENDAR_PICK_ATTEMPTS + 1):
+            try:
+                # 1. Open Calendar Picker
+                cal_wrapper = self.page.locator(".calendar-wrapper").first
+                is_cal_open = False
+                if hasattr(cal_wrapper, "wait_for"):
                     try:
-                        date_loc.scroll_into_view_if_needed(timeout=1000)
+                        cal_wrapper.wait_for(state="visible", timeout=300)
+                        is_cal_open = True
+                    except Exception:
+                        is_cal_open = False
+
+                if not is_cal_open:
+                    if hasattr(date_loc, "scroll_into_view_if_needed"):
+                        try:
+                            date_loc.scroll_into_view_if_needed(timeout=1000)
+                        except Exception:
+                            pass
+                    date_loc.click(timeout=2000)
+                    time.sleep(0.4)
+
+                # Wait for calendar wrapper
+                cal_wrapper = self.page.locator(".calendar-wrapper").first
+                if hasattr(cal_wrapper, "wait_for"):
+                    try:
+                        cal_wrapper.wait_for(state="visible", timeout=3000)
                     except Exception:
                         pass
-                date_loc.click(timeout=2000)
-                time.sleep(0.4)
 
-            # Wait for calendar wrapper
-            cal_wrapper = self.page.locator(".calendar-wrapper").first
-            if hasattr(cal_wrapper, "wait_for"):
-                try:
-                    cal_wrapper.wait_for(state="visible", timeout=3000)
-                except Exception:
-                    pass
+                # 2. Month and Year Navigation
+                for _ in range(24):
+                    month_title_loc = self.page.locator(".calendar-wrapper .month-title").first
+                    year_title_loc = self.page.locator(".calendar-wrapper .year-title").first
+                    raw_month = (month_title_loc.inner_text() if hasattr(month_title_loc, "inner_text") else "") or ""
+                    raw_year = (year_title_loc.inner_text() if hasattr(year_title_loc, "inner_text") else "") or ""
 
-            # 2. Month and Year Navigation
-            for _ in range(24):
-                month_title_loc = self.page.locator(".calendar-wrapper .month-title").first
-                year_title_loc = self.page.locator(".calendar-wrapper .year-title").first
-                raw_month = (month_title_loc.inner_text() if hasattr(month_title_loc, "inner_text") else "") or ""
-                raw_year = (year_title_loc.inner_text() if hasattr(year_title_loc, "inner_text") else "") or ""
+                    cur_month = self._parse_month_name(raw_month)
+                    m_year = re.search(r"\b(\d{4})\b", raw_year)
+                    cur_year = int(m_year.group(1)) if m_year else target_year
 
-                cur_month = self._parse_month_name(raw_month)
-                m_year = re.search(r"\b(\d{4})\b", raw_year)
-                cur_year = int(m_year.group(1)) if m_year else target_year
+                    logger.info(
+                        f"[TIKTOK DATE] Calendar header readback: "
+                        f"month={raw_month} ({cur_month}), year={cur_year} | "
+                        f"target: month={target_month}, year={target_year}"
+                    )
 
-                logger.info(
-                    f"[TIKTOK DATE] Calendar header readback: "
-                    f"month={raw_month} ({cur_month}), year={cur_year} | "
-                    f"target: month={target_month}, year={target_year}"
-                )
-
-                if (cur_year == target_year and cur_month == target_month) or cur_month == 0:
-                    break
-
-                arrows = self.page.locator(".calendar-wrapper .month-header-wrapper .arrow")
-                arrow_count = arrows.count() if hasattr(arrows, "count") else 2
-
-                if (cur_year, cur_month) < (target_year, target_month):
-                    # Next arrow (index 1)
-                    next_arrow = arrows.nth(1) if hasattr(arrows, "nth") else arrows.last
-                    if hasattr(next_arrow, "click"):
-                        next_arrow.click(timeout=1500)
-                    logger.info("[TIKTOK DATE] Clicked next month arrow")
-                else:
-                    # Prev arrow (index 0)
-                    prev_arrow = arrows.nth(0) if hasattr(arrows, "nth") else arrows.first
-                    if hasattr(prev_arrow, "click"):
-                        prev_arrow.click(timeout=1500)
-                    logger.info("[TIKTOK DATE] Clicked previous month arrow")
-                time.sleep(0.3)
-
-            # 3. Select Target Day
-            #
-            # Kural 31: two strategies, and both require `.valid`. The grid repeats the
-            # day number across months -- asking for "27" in August also matches 27 July
-            # in the leading row and, at month end, the trailing next-month days. Those
-            # spillover cells and past days render without `.valid`, so dropping that
-            # class from the selector is how a click lands on the wrong month and the
-            # date silently stays put (2026-08-19: REEL-2026-0032 wanted 27 Aug and the
-            # field never moved off 19 Aug).
-            day_selectors = [
-                f".calendar-wrapper .day-span-container:has(span.day.valid:text-is('{target_day_str}'))",
-                f".calendar-wrapper span.day.valid:text-is('{target_day_str}')",
-            ]
-            day_clicked = False
-            for d_sel in day_selectors:
-                try:
-                    candidates = self.page.locator(d_sel)
-                    cnt = candidates.count() if hasattr(candidates, "count") else 0
-                    if cnt == 0 and hasattr(candidates, "first"):
-                        cnt = 1
-                    for idx in range(cnt):
-                        d_loc = candidates.nth(idx) if hasattr(candidates, "nth") else candidates.first
-                        if not hasattr(d_loc, "wait_for"):
-                            continue
-                        try:
-                            d_loc.wait_for(state="visible", timeout=400)
-                        except Exception:
-                            continue
-                        if hasattr(d_loc, "scroll_into_view_if_needed"):
-                            d_loc.scroll_into_view_if_needed(timeout=1000)
-                        d_loc.click(timeout=1500)
-                        day_clicked = True
-                        logger.info(f"[TIKTOK DATE] Clicked day '{target_day_str}' ({d_sel})")
-                        time.sleep(0.3)
+                    if (cur_year == target_year and cur_month == target_month) or cur_month == 0:
                         break
-                    if day_clicked:
-                        break
-                except Exception:
-                    continue
 
-            # 4. Verify Readback
-            #
-            # The field updates a moment after the cell is clicked, and TikTok is not
-            # consistently quick about it -- REEL-2026-0031 set the very same date
-            # successfully while 0032 was read too early and reported a mismatch. Poll
-            # briefly instead of trusting one immediate read.
-            actual = self._read_locator_value(date_loc)
-            for _ in range(DATE_READBACK_ATTEMPTS):
-                if self._normalize_schedule_date(actual) == norm_expected:
-                    break
-                time.sleep(DATE_READBACK_INTERVAL_SECONDS)
+                    arrows = self.page.locator(".calendar-wrapper .month-header-wrapper .arrow")
+                    arrow_count = arrows.count() if hasattr(arrows, "count") else 2
+
+                    if (cur_year, cur_month) < (target_year, target_month):
+                        # Next arrow (index 1)
+                        next_arrow = arrows.nth(1) if hasattr(arrows, "nth") else arrows.last
+                        if hasattr(next_arrow, "click"):
+                            next_arrow.click(timeout=1500)
+                        logger.info("[TIKTOK DATE] Clicked next month arrow")
+                    else:
+                        # Prev arrow (index 0)
+                        prev_arrow = arrows.nth(0) if hasattr(arrows, "nth") else arrows.first
+                        if hasattr(prev_arrow, "click"):
+                            prev_arrow.click(timeout=1500)
+                        logger.info("[TIKTOK DATE] Clicked previous month arrow")
+                    time.sleep(0.3)
+
+                # 3. Select Target Day
+                #
+                # Kural 31: two strategies, and both require `.valid`. The grid repeats the
+                # day number across months -- asking for "27" in August also matches 27 July
+                # in the leading row and, at month end, the trailing next-month days. Those
+                # spillover cells and past days render without `.valid`, so dropping that
+                # class from the selector is how a click lands on the wrong month and the
+                # date silently stays put (2026-08-19: REEL-2026-0032 wanted 27 Aug and the
+                # field never moved off 19 Aug).
+                day_selectors = [
+                    f".calendar-wrapper .day-span-container:has(span.day.valid:text-is('{target_day_str}'))",
+                    f".calendar-wrapper span.day.valid:text-is('{target_day_str}')",
+                ]
+                day_clicked = False
+                day_candidates_seen = 0
+                for d_sel in day_selectors:
+                    try:
+                        candidates = self.page.locator(d_sel)
+                        cnt = candidates.count() if hasattr(candidates, "count") else 0
+                        if cnt == 0 and hasattr(candidates, "first"):
+                            cnt = 1
+                        for idx in range(cnt):
+                            d_loc = candidates.nth(idx) if hasattr(candidates, "nth") else candidates.first
+                            if not hasattr(d_loc, "wait_for"):
+                                continue
+                            try:
+                                d_loc.wait_for(state="visible", timeout=DAY_CELL_VISIBLE_TIMEOUT_MS)
+                            except Exception:
+                                continue
+                            if hasattr(d_loc, "scroll_into_view_if_needed"):
+                                d_loc.scroll_into_view_if_needed(timeout=1000)
+                            d_loc.click(timeout=1500)
+                            day_clicked = True
+                            logger.info(f"[TIKTOK DATE] Clicked day '{target_day_str}' ({d_sel})")
+                            day_candidates_seen = cnt
+                            time.sleep(0.3)
+                            break
+                        if day_clicked:
+                            break
+                    except Exception:
+                        continue
+
+                # 4. Verify Readback
+                #
+                # The field updates a moment after the cell is clicked, and TikTok is not
+                # consistently quick about it -- REEL-2026-0031 set the very same date
+                # successfully while 0032 was read too early and reported a mismatch. Poll
+                # briefly instead of trusting one immediate read.
                 actual = self._read_locator_value(date_loc)
+                for _ in range(DATE_READBACK_ATTEMPTS):
+                    if self._normalize_schedule_date(actual) == norm_expected:
+                        break
+                    time.sleep(DATE_READBACK_INTERVAL_SECONDS)
+                    actual = self._read_locator_value(date_loc)
 
-            if self._normalize_schedule_date(actual) == norm_expected:
-                logger.info(f"[TIKTOK DATE] Calendar UI selection SUCCESS: '{actual}'")
-                return True
-            else:
-                logger.warning(f"[TIKTOK DATE] Calendar UI readback mismatch: expected='{norm_expected}' got='{actual}'")
-                # The picker is still on screen here; capture it while the evidence exists.
-                # Without this a DATE_MISMATCH -- the one failure that halts TikTok
-                # outright -- left nothing behind to diagnose from.
-                self.capture_error_snapshot("tiktok_date_mismatch_calendar_open")
-        except Exception as e:
-            logger.debug(f"[TIKTOK DATE] Calendar UI attempt exception: {e}")
+                if self._normalize_schedule_date(actual) == norm_expected:
+                    logger.info(f"[TIKTOK DATE] Calendar UI selection SUCCESS: '{actual}'")
+                    return True
+                else:
+                    # At warning level on purpose: the run log shows warnings and swallows
+                    # info, so on 2026-09-17 the only trace of this failure was the mismatch
+                    # itself -- no way to tell a click that missed from a click never made.
+                    logger.warning(
+                        f"[TIKTOK DATE] Calendar UI readback mismatch (deneme {attempt}/{CALENDAR_PICK_ATTEMPTS}): "
+                        f"expected='{norm_expected}' got='{actual}' | "
+                        f"gun hucresi tiklandi={day_clicked}, aday sayisi={day_candidates_seen}"
+                    )
+                    if attempt >= CALENDAR_PICK_ATTEMPTS:
+                        # The picker is still on screen here; capture it while the evidence
+                        # exists. Without this a DATE_MISMATCH -- the one failure that halts
+                        # TikTok outright -- left nothing behind to diagnose from.
+                        self.capture_error_snapshot("tiktok_date_mismatch_calendar_open")
+            except Exception as e:
+                logger.debug(f"[TIKTOK DATE] Calendar UI attempt exception: {e}")
+            if attempt < CALENDAR_PICK_ATTEMPTS:
+                time.sleep(CALENDAR_PICK_RETRY_SECONDS)
 
         # Fallback (Keyboard / Fill if supported)
         for method in ("keyboard", "fill"):
