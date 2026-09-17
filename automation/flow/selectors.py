@@ -54,6 +54,15 @@ class FlowSelectors:
         "div.g-recaptcha"
     ]
 
+    # Flow's own recovery control. When the agent fails it renders
+    # "Ajan basarisiz oldu. Lutfen tekrar deneyin." with this button next to it; nothing
+    # generates until it is pressed, so a run that ignores it waits out its whole timeout.
+    # Two strategies, Turkish then English (Kural 31).
+    AGENT_RETRY_BUTTON_SELECTORS: List[str] = [
+        "button:has-text('Tekrar dene')",
+        "button:has-text('Try again')"
+    ]
+
     # Home page New Project button (TR / EN variations)
     NEW_PROJECT_BUTTON_SELECTORS: List[str] = [
         "button:has-text('Yeni proje')",

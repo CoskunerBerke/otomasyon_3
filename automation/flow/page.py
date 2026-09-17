@@ -554,11 +554,34 @@ class FlowPage:
 
         self._submit_attempted = True
         self.decision_engine.state = GenerationLifecycleState.PROMPT_SUBMITTED
+        self.decision_engine.agent_retries_used = 0
         gen_btn.click()
         time.sleep(2.0)
 
         self.check_credit_warnings()
         self.check_auth_and_security()
+
+    def click_agent_retry(self) -> bool:
+        """
+        Press Flow's own "Tekrar dene" after its agent fails.
+
+        This is a recovery control, not a publish control: it re-runs the generation the
+        agent could not finish, in the project that is already open. How many times it may
+        be pressed is the decision engine's business, so a prompt Flow simply refuses
+        cannot spin here.
+        """
+        btn = self.find_first_visible(FlowSelectors.AGENT_RETRY_BUTTON_SELECTORS, timeout_ms=2000)
+        if btn is None:
+            return False
+        try:
+            label = (btn.inner_text() or "").strip()
+            if len(label) > 40:
+                # Matched a container rather than the control; pressing it is a guess.
+                return False
+            btn.click(timeout=5000)
+            return True
+        except Exception:
+            return False
 
     def recover_and_open_video_detail(self) -> bool:
         """
@@ -675,6 +698,19 @@ class FlowPage:
                         target_filename=target_filename,
                         timeout_seconds=60
                     )
+
+            # ACTION 2.5: the agent failed and Flow is waiting to be told to try again
+            elif action == FlowDecisionAction.RETRY_AGENT_GENERATION:
+                used = self.decision_engine.agent_retries_used
+                cap = self.decision_engine.MAX_AGENT_RETRIES_PER_SEGMENT
+                print(f"[FLOW] Ajan başarısız oldu -- Flow'un kendi 'Tekrar dene' butonuna basılıyor ({used}/{cap})...")
+                if self.click_agent_retry():
+                    print("[FLOW] 'Tekrar dene' tıklandı, üretim yeniden başlatıldı.")
+                    last_logged_state = None
+                    time.sleep(5.0)
+                    continue
+                self.capture_error_snapshot("agent_retry_not_clickable")
+                print("[FLOW] 'Tekrar dene' butonuna basılamadı -- bir sonraki döngüde tekrar denenecek.")
 
             # ACTION 3: Answer duration question strictly once
             elif action == FlowDecisionAction.ANSWER_DURATION_ONCE:

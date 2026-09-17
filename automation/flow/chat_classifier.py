@@ -117,7 +117,12 @@ def classify_agent_message(text: str) -> AgentMessageType:
         r'kredi\s+yetersiz',
         r'out\s+of\s+credits',
         r'failed\s+to\s+generate',
-        r'üretilemedi'
+        r'üretilemedi',
+        # "Ajan basarisiz oldu. Lutfen tekrar deneyin." -- if the retry button is on screen
+        # the engine retries before ever reading this; classifying it matters for the case
+        # where the banner is there and the button is not.
+        r'ajan\s+ba[sş]ar[ıi]s[ıi]z',
+        r'agent\s+failed'
     ]
     if any(re.search(pat, clean_text, re.IGNORECASE) for pat in error_patterns):
         return AgentMessageType.ERROR

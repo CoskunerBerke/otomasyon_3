@@ -30,6 +30,7 @@ class FlowDecisionAction(Enum):
     MARK_MEDIA_READY = "mark_media_ready"
     DOWNLOAD_MEDIA = "download_media"
     RECOVER_DOWNLOAD_UI = "recover_download_ui"
+    RETRY_AGENT_GENERATION = "retry_agent_generation"
     USER_ACTION_REQUIRED = "user_action_required"
     FAIL_SAFE = "fail_safe"
 
@@ -48,10 +49,16 @@ class FlowDecisionEngine:
 
     MAX_AUTOMATIC_CHAT_REPLIES_PER_REEL = 2
 
+    # Flow's agent fails often enough to need a retry, and rarely enough that needing a
+    # third one means something is actually wrong. Each retry is a real generation
+    # attempt, so the budget is what stops a failing prompt from burning credits in a loop.
+    MAX_AGENT_RETRIES_PER_SEGMENT = 2
+
     def __init__(self, initial_state: GenerationLifecycleState = GenerationLifecycleState.PROMPT_SUBMITTED):
         self.state = initial_state
         self.duration_followup_answered: bool = False
         self.automatic_chat_replies_count: int = 1
+        self.agent_retries_used: int = 0
 
     def decide_next_action(
         self,
@@ -84,6 +91,23 @@ class FlowDecisionEngine:
             if not snapshot.stop_button_visible:
                 self.state = GenerationLifecycleState.MEDIA_READY
                 return FlowDecisionAction.RECOVER_DOWNLOAD_UI
+
+        # CASE 3.5: the agent failed and Flow is offering its own retry.
+        #
+        # Nothing generates until that button is pressed: the run sits in WAIT until the
+        # twenty-minute timeout, fails the Reel, and two of those in a row trip the batch
+        # circuit breaker. CBM-REEL-2026-0057 segment 3/3 stalled exactly this way on
+        # 2026-09-17 with two segments already downloaded.
+        #
+        # Deliberately below the artifact cases: a finished video always wins over a stale
+        # retry banner, so this can never throw away media that is already on screen.
+        if snapshot.agent_retry_available and not snapshot.stop_button_visible:
+            if self.agent_retries_used >= self.MAX_AGENT_RETRIES_PER_SEGMENT:
+                self.state = GenerationLifecycleState.FAILED
+                return FlowDecisionAction.USER_ACTION_REQUIRED
+            self.agent_retries_used += 1
+            self.state = GenerationLifecycleState.MEDIA_GENERATION_STARTED
+            return FlowDecisionAction.RETRY_AGENT_GENERATION
 
         # CASE 4: Active generation in progress (stop button visible)
         if snapshot.stop_button_visible:

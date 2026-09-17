@@ -11,6 +11,7 @@ from typing import List, Set, Optional
 from playwright.sync_api import Page
 
 from .chat_classifier import classify_agent_message, AgentMessageType
+from .selectors import FlowSelectors
 
 @dataclass
 class FlowUISnapshot:
@@ -26,6 +27,7 @@ class FlowUISnapshot:
     new_artifact_fingerprint: Optional[str] = None
     download_button_visible: bool = False
     settings_panel_open: bool = False
+    agent_retry_available: bool = False
 
 class FlowUIObserver:
     """Observes Flow Project Editor DOM and generates discrete, immutable UI snapshots."""
@@ -154,6 +156,21 @@ class FlowUIObserver:
         settings_panel = self.page.locator("[role='radiogroup'], div:has(button[role='radio'][value='AUTO_APPROVE'])").first
         settings_open = bool(settings_panel.count() > 0 and settings_panel.is_visible())
 
+        # 8. Flow's agent failed and is offering its own retry. The banner text does not
+        # reliably land in the chat paragraphs the classifier reads, so the button itself
+        # is the signal. A long label means we matched some container, not the control.
+        retry_available = False
+        try:
+            for sel in FlowSelectors.AGENT_RETRY_BUTTON_SELECTORS:
+                btn = self.page.locator(sel).first
+                if btn.count() > 0 and btn.is_visible():
+                    label = (btn.inner_text() or "").strip()
+                    if len(label) <= 40:
+                        retry_available = True
+                        break
+        except Exception:
+            pass
+
         return FlowUISnapshot(
             page_url=url,
             latest_new_agent_messages=new_msgs,
@@ -166,5 +183,6 @@ class FlowUIObserver:
             new_video_artifact_detected=new_video_detected,
             new_artifact_fingerprint=new_fp,
             download_button_visible=dl_visible,
-            settings_panel_open=settings_open
+            settings_panel_open=settings_open,
+            agent_retry_available=retry_available
         )

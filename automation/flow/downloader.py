@@ -127,6 +127,49 @@ def _choose_original_quality(page: Page) -> None:
     )
 
 
+# Anything smaller than this is not a video. Chrome leaves a 0-byte file behind when the
+# download never reached the automation client.
+MIN_VALID_DOWNLOAD_BYTES = 10000
+
+
+def _recover_from_user_downloads(target_path: Path, since: float) -> bool:
+    """
+    Copy a file Chrome saved to the user's own Downloads folder instead of handing it over.
+
+    Chrome does this whenever its download behaviour is not (or no longer) routed through
+    the automation client -- attaching a second CDP client to the same browser is enough
+    to reset it. Playwright still reports a download event, so save_as() leaves an empty
+    file and nothing raises: CBM-REEL-2026-0057 segment 3 failed on 2026-09-17 with a
+    0-byte segment_03.mp4 in the workspace while the real 5 MB video sat in ~/Downloads,
+    written one second earlier.
+
+    Only files modified after the download click are considered, so an unrelated older
+    file cannot be picked up as this segment's video.
+    """
+    user_downloads_dir = Path.home() / "Downloads"
+    if not user_downloads_dir.exists():
+        return False
+
+    # Chrome renames <name>.crdownload to <name>.mp4 only once the file is complete.
+    time.sleep(2.0)
+    recent = []
+    for f in user_downloads_dir.glob("*.mp4"):
+        try:
+            if f.stat().st_mtime >= since:
+                recent.append(f)
+        except OSError:
+            continue
+    if not recent:
+        return False
+
+    latest = max(recent, key=lambda f: f.stat().st_mtime)
+    if latest.stat().st_size <= MIN_VALID_DOWNLOAD_BYTES:
+        return False
+
+    shutil.copy2(str(latest), str(target_path))
+    return True
+
+
 class FlowDownloader:
     """Manages file download events and verifies saved files."""
 
@@ -160,11 +203,9 @@ class FlowDownloader:
             # If locator is stale / detached, fail fast to allow recovery
             raise RuntimeError(f"Download button check failed: {e}")
 
-        user_downloads_dir = Path.home() / "Downloads"
         pre_download_time = time.time() - 2
 
         # Method 1: Playwright expect_download event with fast click timeout
-        download_succeeded = False
         try:
             with page.expect_download(timeout=timeout_seconds * 1000) as download_info:
                 # One click, but given time to become actionable. Playwright's own
@@ -175,26 +216,20 @@ class FlowDownloader:
                 _choose_original_quality(page)
             download: Download = download_info.value
             download.save_as(str(target_path))
-            download_succeeded = True
         except Exception as e:
-            # Method 2: Fallback - if Chrome saved the download directly to user's Downloads folder
-            time.sleep(2.0)
-            if user_downloads_dir.exists():
-                recent_mp4s = [
-                    f for f in user_downloads_dir.glob("*.mp4")
-                    if f.stat().st_mtime >= pre_download_time
-                ]
-                if recent_mp4s:
-                    latest_mp4 = max(recent_mp4s, key=lambda f: f.stat().st_mtime)
-                    if latest_mp4.stat().st_size > 10000:
-                        shutil.copy2(str(latest_mp4), str(target_path))
-                        download_succeeded = True
-
-            if not download_succeeded and not target_path.exists():
+            # Method 2: Chrome saved the download to the user's own Downloads folder.
+            if not _recover_from_user_downloads(target_path, pre_download_time) and not target_path.exists():
                 raise RuntimeError(f"Download failed: {e}")
 
+        # The same fallback, for the case where nothing raised at all: Playwright reported
+        # a download it never received, save_as() wrote an empty file, and the real video
+        # is in the user's Downloads folder. Without this the segment fails with a 0-byte
+        # file while the video it needs is already on disk.
+        if not target_path.exists() or target_path.stat().st_size < MIN_VALID_DOWNLOAD_BYTES:
+            _recover_from_user_downloads(target_path, pre_download_time)
+
         # Verification
-        if not target_path.exists() or target_path.stat().st_size < 10000:
+        if not target_path.exists() or target_path.stat().st_size < MIN_VALID_DOWNLOAD_BYTES:
             raise RuntimeError(f"Downloaded file is missing or invalid size: {target_path}")
 
         return target_path
