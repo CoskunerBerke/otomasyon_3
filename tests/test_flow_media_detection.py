@@ -64,19 +64,38 @@ def test_hidden_thumbnails_are_ignored():
     assert _observer([_img(REAL, visible=False)]).get_visible_artifact_fingerprints() == set()
 
 
-def _menu_page(items):
+def _menu_page(items, visible=None):
+    """
+    A quality menu whose entries are the labels Flow actually renders.
+
+    Each entry is one [role=menuitem] whose text is the two visible lines joined, e.g.
+    "720p Orijinal boyut". has-text() is a case-insensitive substring match, so that is
+    what the fake locator does.
+    """
     page = MagicMock()
     page.wait_for_selector.return_value = None
     clicked = []
+    vis = [True] * len(items) if visible is None else visible
+
+    def _item(label, is_visible):
+        it = MagicMock()
+        it.is_visible.return_value = is_visible
+        it.inner_text.return_value = label
+        it.click.side_effect = lambda timeout=None: clicked.append(label)
+        return it
 
     def locator(sel):
         loc = MagicMock()
-        label = re.search(r"has-text\('([^']+)'\)", sel)
-        want = label.group(1) if label else None
-        hit = want is not None and any(want in it for it in items)
-        loc.first.count.return_value = 1 if hit else 0
-        loc.first.is_visible.return_value = hit
-        loc.first.click.side_effect = lambda timeout=None: clicked.append(want)
+        want = re.search(r"has-text\('([^']+)'\)", sel)
+        if want is None:
+            # The diagnostics read of the menu container; inert here.
+            loc.first.inner_text.side_effect = Exception("not modelled")
+            loc.count.return_value = 0
+            return loc
+        needle = want.group(1).casefold()
+        hits = [(lbl, v) for lbl, v in zip(items, vis) if needle in lbl.casefold()]
+        loc.count.return_value = len(hits)
+        loc.nth.side_effect = lambda i: _item(*hits[i])
         return loc
 
     page.locator.side_effect = locator
@@ -84,10 +103,25 @@ def _menu_page(items):
 
 
 def test_original_size_is_chosen_from_the_quality_menu():
-    page, clicked = _menu_page(["270p Hareketli GIF", "720p Orjinal boyut",
+    """
+    The entries below are the live menu of 2026-09-17, copied as it renders.
+
+    The code looked for "Orjinal", which is a substring of none of them -- Turkish spells
+    it "Orijinal". So the match failed on a menu that was perfectly recognisable, and the
+    run stopped at DOWNLOAD_QUALITY_MENU_UNRECOGNISED with the video already generated
+    and its Flow credit already spent (CBM-REEL-2026-0058).
+    """
+    page, clicked = _menu_page(["270p Hareketli GIF", "720p Orijinal boyut",
                                 "1080p Yükseltilmiş", "4K Yükseltilmiş · 50 kredi"])
     _choose_original_quality(page)
-    assert clicked == ["Orjinal"]
+    assert clicked == ["720p Orijinal boyut"]
+
+
+def test_the_english_menu_is_matched_too():
+    page, clicked = _menu_page(["270p Animated GIF", "720p Original size",
+                                "1080p Upscaled", "4K Upscaled · 50 credits"])
+    _choose_original_quality(page)
+    assert clicked == ["720p Original size"]
 
 
 def test_unrecognised_menu_refuses_rather_than_picking_a_paid_entry():
@@ -96,6 +130,27 @@ def test_unrecognised_menu_refuses_rather_than_picking_a_paid_entry():
     with pytest.raises(RuntimeError, match="DOWNLOAD_QUALITY_MENU_UNRECOGNISED"):
         _choose_original_quality(page)
     assert clicked == []
+
+
+def test_an_upscale_that_calls_itself_original_is_still_refused():
+    """
+    Matching on the word alone is not enough to protect the credits.
+
+    If Flow ever labels an upscale "Orijinal boyut - yükseltilmiş", the text match hits
+    it; the credit marker in the label is what stops the click.
+    """
+    page, clicked = _menu_page(["4K Orijinal boyut · Yükseltilmiş · 50 kredi"])
+    with pytest.raises(RuntimeError, match="DOWNLOAD_QUALITY_MENU_PAID_ONLY"):
+        _choose_original_quality(page)
+    assert clicked == []
+
+
+def test_a_panel_left_in_the_dom_does_not_swallow_the_click():
+    """Angular Material keeps closed panels around; the visible entry is the real one."""
+    page, clicked = _menu_page(["720p Orijinal boyut", "720p Orijinal boyut"],
+                               visible=[False, True])
+    _choose_original_quality(page)
+    assert clicked == ["720p Orijinal boyut"]
 
 
 def test_no_menu_means_the_click_already_downloaded():

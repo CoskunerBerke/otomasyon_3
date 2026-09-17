@@ -3,6 +3,7 @@ Download manager for capturing and saving completed video files from Google Flow
 Includes Playwright expect_download handling, fast-skip for disabled buttons,
 user Downloads folder fallback, and file integrity verification.
 """
+import re
 import time
 import shutil
 from pathlib import Path
@@ -24,6 +25,43 @@ from playwright.sync_api import Page, Download, Locator
 DOWNLOAD_CLICK_TIMEOUT_MS = 15000
 
 
+# Quality-menu entries that bill. The upscaled entries spend credits -- 50 for 4K -- so
+# an entry whose label carries an upscale or credit marker is never clicked, even if it
+# also says "original".
+_PAID_ENTRY_PATTERN = re.compile(
+    r"y[uü]kseltilmi[sş]|upscal|\d+\s*(kredi|credit)", re.IGNORECASE
+)
+
+
+def _is_paid_entry(label: str) -> bool:
+    return bool(_PAID_ENTRY_PATTERN.search(label or ""))
+
+
+def _capture_menu_diagnostics(page: Page) -> str:
+    """
+    Dump the open quality menu when no entry matched, and return its visible labels.
+
+    Without this, a refusal says only that the menu was unrecognised -- which is what the
+    2026-09-17 failure looked like, leaving no way to tell a wrong word from a wrong role
+    without another live run. The labels go into the error the operator sees, the markup
+    into screenshots/errors/ (Kural 31: fix from real DOM, never from a guess).
+    """
+    labels = ""
+    try:
+        menu = page.locator("[role='menu']").first
+        labels = " | ".join(t for t in (menu.inner_text() or "").splitlines() if t.strip())[:300]
+        html = menu.evaluate("el => el.outerHTML")
+        out_dir = Path(__file__).resolve().parents[2] / "screenshots" / "errors"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        (out_dir / f"error_download_quality_menu_{stamp}.html").write_text(
+            html, encoding="utf-8"
+        )
+    except Exception:
+        pass
+    return labels
+
+
 def _choose_original_quality(page: Page) -> None:
     """
     Flow's download control opens a quality menu instead of downloading.
@@ -39,19 +77,53 @@ def _choose_original_quality(page: Page) -> None:
     except Exception:
         return
 
-    for sel in ("button[role='menuitem']:has-text('Orjinal')",
-                "button[role='menuitem']:has-text('Original')"):
-        item = page.locator(sel).first
+    # The entry reads "720p / Orijinal boyut". Turkish spells it "Orijinal" -- the earlier
+    # "Orjinal" is a substring of nothing on that menu, so the match never happened and
+    # every download ended in the refusal below with the video already generated and its
+    # credit already spent (CBM-REEL-2026-0058, 2026-09-17).
+    #
+    # Two strategies for this one action, Turkish then English (Kural 31). The role picks
+    # the entry, the text keeps us off the paid ones, and the marker check below is what
+    # actually guards the credits if Flow ever renames an upscale to mention "original".
+    paid_lookalike = None
+    for sel in ("[role='menuitem']:has-text('Orijinal')",
+                "[role='menuitem']:has-text('Original')"):
+        items = page.locator(sel)
         try:
-            if item.count() and item.is_visible():
-                item.click(timeout=5000)
-                return
+            count = items.count()
         except Exception:
             continue
 
+        # Angular Material can leave a closed panel in the DOM, so the first match is not
+        # necessarily the one on screen -- walk them and take the first visible entry.
+        for i in range(count):
+            item = items.nth(i)
+            try:
+                if not item.is_visible():
+                    continue
+                label = (item.inner_text() or "").strip()
+            except Exception:
+                continue
+            if _is_paid_entry(label):
+                paid_lookalike = label
+                continue
+            try:
+                item.click(timeout=5000)
+                return
+            except Exception:
+                continue
+
+    if paid_lookalike:
+        raise RuntimeError(
+            "DOWNLOAD_QUALITY_MENU_PAID_ONLY: Indirme menusunde orijinal boyut girdisi yok; "
+            f"eslesen tek girdi kredi harciyor ({paid_lookalike!r}). Tiklanmadi."
+        )
+    seen = _capture_menu_diagnostics(page)
     raise RuntimeError(
-        "DOWNLOAD_QUALITY_MENU_UNRECOGNISED: Indirme menusu acildi ancak 'Orjinal boyut' "
-        "secenegi bulunamadi. Kredi harcayan yukseltilmis secenekler bilerek secilmedi."
+        "DOWNLOAD_QUALITY_MENU_UNRECOGNISED: Indirme menusu acildi ancak 'Orijinal boyut' "
+        "secenegi bulunamadi. Kredi harcayan yukseltilmis secenekler bilerek secilmedi. "
+        f"Menude gorulen girdiler: {seen or '(okunamadi)'} -- menunun HTML'i "
+        "screenshots/errors/ altina yazildi."
     )
 
 

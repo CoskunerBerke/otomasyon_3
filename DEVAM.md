@@ -94,7 +94,7 @@ Hepsi canlı DOM'dan kanıtla düzeltildi:
 | İndirme | tek tık | detay görünümü + kalite menüsü |
 | Detay açma | `/edit/` linki | tile'a tıklama |
 
-⚠️ **Kalite menüsünde 4K seçeneği 50 kredi harcıyor.** Kod yalnızca "Orjinal boyut"
+⚠️ **Kalite menüsünde 4K seçeneği 50 kredi harcıyor.** Kod yalnızca "Orijinal boyut"
 girdisine tıklar; tanımadığı menüde `DOWNLOAD_QUALITY_MENU_UNRECOGNISED` ile durur.
 **Bu koruma gevşetilmemeli.**
 
