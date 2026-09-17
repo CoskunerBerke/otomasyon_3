@@ -1,4 +1,4 @@
-# Devam — Reels AI Factory (14 Eylül 2026)
+# Devam — Reels AI Factory (17 Eylül 2026)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
 Branch: **`main`** — her şey push'lu.
@@ -12,13 +12,38 @@ Branch: **`main`** — her şey push'lu.
 | Marka | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|---|
 | BuildVerse | `2026-W38` | 14–20 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
-| Craftsbyman | `CBM-2026-W37` | 11–17 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
+| Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 
 BuildVerse W38'in YouTube'u **kanaldan tek tek doğrulandı**: 14 video var, 14 `publishAt`
 slotla dakikası dakikasına eşleşiyor. TikTok ve Instagram kayıtları `SCHEDULED` ama bu iki
 platform uzaktan okunamıyor; gözle bakmak gerekirse Studio'lardan.
 
-**Sıradaki haftalar:** BuildVerse 21 Eylül'den, Craftsbyman 18 Eylül'den. `.bat`'a basmak yeterli.
+**Sıradaki haftalar:** BuildVerse 21 Eylül'den, Craftsbyman 25 Eylül'den. `.bat`'a basmak yeterli.
+
+## 17 Eylül — Craftsbyman W38 ve Flow'un dört tökezlemesi
+
+Hafta tamamlandı (14/14 üretim, YouTube 14/14, TikTok 14/14, ilk yayın 18 Eyl 19:30).
+Yol boyunca dört ayrı durma noktası çıktı; dördü de düzeltildi ve teste bağlandı:
+
+| Belirti | Kök neden | Düzeltme |
+|---|---|---|
+| `DOWNLOAD_QUALITY_MENU_UNRECOGNISED` — video üretildi, dosya inmedi | Kod `Orjinal` arıyordu, Flow `Orijinal boyut` yazıyor | Doğru yazım + etikette kredi/upscale işareti kontrolü + menü HTML'ini `screenshots/errors/`'a dökme |
+| Segment 20 dk bekleyip düştü | Flow "Ajan başarısız oldu · **Tekrar dene**" gösteriyordu, kod bu ekranı tanımıyordu | Observer butonu görüyor, karar motoru `RETRY_AGENT_GENERATION`, segment başına en fazla 2 deneme |
+| İnen video 0 bayt, gerçek dosya `~/Downloads`'ta | Çalışan pipeline'a ikinci Playwright/CDP istemcisi bağlamak Chrome'un indirme davranışını sıfırlıyor | Kullanıcı Downloads kurtarması artık istisna atmadığında da çalışıyor. **Çalışan koşuya ikinci istemci bağlama** |
+| `DATE_MISMATCH` — TikTok 6/14'te durdu | Takvim açık, `day valid` hücresi yerinde, tıklama hiç düşmemiş | Aynı iki stratejiyle 2 deneme, gün hücresine 2 sn görünürlük payı, hata mesajına "tıklandı mı" bilgisi |
+
+Ayrıca Flow bir projede "15 kredi karşılığında… başlatmamı ister misiniz?" onayı sordu ve
+Reel 20 dakikayı soruya bakarak harcadı (`CBM-REEL-2026-0062`). Artık pipeline yalnızca
+tek seferlik **"Onayla"**ya basıyor; `Her zaman onayla` (kalıcı ayar) ve `Reddet` hiçbir
+dalda tıklanmıyor, segment başına 1 onay.
+
+⚠️ **TikTok hesap doğrulaması şu an devre dışı çalışıyor:** upload sayfasından
+`@craftsbyman` okunamadığı için (`ACCOUNT_UNVERIFIED`) yayın, markaya özel Chrome
+profiline güvenerek devam ediyor. Yanlış hesaba yüklemeye karşı tek koruma o profilin
+doğru hesapla girili olması. Kullanıcı adını gerçekten göründüğü bir yerden okuyacak
+şekilde doğrulamayı geri kazandırmak açık iş.
+
+---
 
 **14 Eylül notu — Flow'un geçici ses hatası.** W38 üretilirken `REEL-2026-0076`'nın ikinci
 segmentinde Flow "Ses üretilemedi. Lütfen farklı bir istem kullanın" kartı verdi. Otomasyon
