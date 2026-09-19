@@ -190,6 +190,18 @@ class PublishingMetadataBuilder:
         "Lost to the Water": ["#LostPlaces", "#Environment", "#History", "#Abandoned", "#Geography"],
         "Above the Clouds": ["#AncientWonders", "#LostCity", "#History", "#Archaeology", "#Mountains"],
         "Born from the Sea": ["#Volcano", "#Geology", "#Nature", "#Science", "#NewLand"],
+        # cutaway_reveal_story's three groups. Without an entry each one fell through to
+        # the "abandoned / lost places" fallback below, so a working dam gallery, a canal
+        # lock and a stadium's service floor all went out tagged as ruins: every one of
+        # the 21 cutaway Reels published between 2026-08-31 and 2026-09-20 carried the
+        # same five tags. The format was handed to an audience that came for abandonment
+        # and swiped past infrastructure, and it never reached the audience it was for.
+        #
+        # #Geology deliberately stays out of the group tags -- it is false for a crypt
+        # under a church floor and for an amphitheatre's hypogeum.
+        "Engineering Interiors": ["#Engineering", "#Infrastructure", "#CrossSection", "#CivilEngineering", "#HowItsBuilt"],
+        "Under the Ground": ["#Underground", "#CrossSection", "#HiddenPlaces", "#Archaeology", "#Engineering"],
+        "Under the City": ["#Underground", "#CityInfrastructure", "#Infrastructure", "#CityBeneath", "#History"],
     }
 
     # Titles are chosen per narrative_frame. A single shared pool would put "Why Nobody

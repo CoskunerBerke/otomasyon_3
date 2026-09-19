@@ -65,7 +65,7 @@ from automation.content.content_modes import (
     HIDDEN_BUILD_STORY,
     LIVE_ELIGIBLE_CONTENT_MODES,
 )
-from automation.content.engine import ContentEngine
+from automation.content.engine import ContentEngine, StoryContentProvider
 from automation.content.prompt_engine import PromptEngine, ReelConceptPlan
 from automation.content.story_concepts import STORY_CONCEPTS
 from automation.content.hidden_build_concepts import HIDDEN_BUILD_CONCEPTS
@@ -487,9 +487,17 @@ class SimpleWeeklyPipeline:
 
         reel_ids = self._allocate_reel_ids(count=14)
 
-        past_history = [{"id": r.reel_id, "title": r.title, "category": r.content_mode} for r in self.state_repo.list_all_reels()]
-        concept_plans = self._plan_concepts(past_history)
-        self._refuse_a_repeat_of_last_week(concept_plans)
+        # Only this brand's own history. list_all_reels() returns both channels, so
+        # BuildVerse concepts were being scored for novelty against craftsbyman titles --
+        # a comparison that means nothing and dilutes the one that does.
+        past_history = [
+            {"id": r.reel_id, "title": r.title, "category": r.content_mode}
+            for r in self.state_repo.list_all_reels()
+            if self.brand.owns_reel_id(r.reel_id)
+        ]
+        last_aired = self._concept_last_aired()
+        concept_plans = self._plan_concepts(past_history, start_date, last_aired)
+        self._refuse_a_repeat_within_days(concept_plans, last_aired, start_date)
 
         reels: List[BatchReel] = []
         for i, (slot, reel_id, plan) in enumerate(zip(slot_plan.slots, reel_ids, concept_plans), start=1):
@@ -547,86 +555,154 @@ class SimpleWeeklyPipeline:
         self.batch_repo.ensure_progress_entries(week_id, reel_ids)
         return manifest
 
+    # A concept rests this long before it may come back -- as far as its own pool can
+    # afford it (see _quarantine_days).
+    CONCEPT_QUARANTINE_DAYS = 21
+    # Below this the week is refused outright instead of published as a near-repeat.
+    CONCEPT_MIN_GAP_DAYS = 7
+
+    @staticmethod
+    def _quarantine_days(pool_size: int, per_week: int, ceiling: int) -> int:
+        """
+        The longest rest this pool can actually honour.
+
+        33 story concepts spending 7 a week can hold one out for three weeks; 16 cutaway
+        concepts cannot -- demanding 21 days there would leave a week with nothing to
+        publish and turn a rotation rule into an outage. So the rest adapts to the pool it
+        is applied to, and lengthens by itself as the pool grows.
+        """
+        if per_week <= 0:
+            return 0
+        weeks = max(1, pool_size // per_week)
+        return max(0, min(ceiling, (weeks - 1) * 7))
+
     def _fresh_plans(
         self,
         engine: Any,
         count: int,
         past_history: List[Dict[str, Any]],
-        used_last_week: Set[str],
+        last_aired: Dict[str, datetime.date],
+        week_start: datetime.date,
     ) -> List[Any]:
         """
-        `count` plans, skipping any concept the previous week already used.
+        `count` plans, longest-rested first.
 
-        Ranking alone does not rotate a pool. The diversity penalty is applied per
-        CATEGORY GROUP, and craftsbyman has three of them, so twenty-eight concepts
-        scored into the same order every week and the same top fourteen came out --
-        which is how a week came to be a copy of the one before it. Excluding last
-        week's concepts outright is what actually turns the pool over.
+        What was here excluded exactly one week of concepts, which is what pinned the
+        channel to a fortnight: skip last week and the week before it is free to return.
+        It did. 2026-W38 published eleven of 2026-W36's fourteen concepts, several under a
+        byte-identical title -- "Machu Picchu, Then and Now" went out on 26 August,
+        5 September and 17 September. Ranking cannot fix that either: with the category
+        penalty inert the scores sit inside a 0.06 band, so the same order comes out every
+        week.
 
-        Only the previous week is excluded, not all history: a pool twice as deep as a
-        week is meant to alternate, and reaching back further would exhaust it for no
-        gain.
+        So the order is the channel's own history instead. A concept that has never aired
+        goes first -- that is how the six Indian places added on 2026-09-15 finally reach
+        a slot -- then whichever has waited longest. The engine's ranking survives as the
+        tie-break, and the week is regrouped afterwards so that putting the never-aired
+        first cannot open a week with four of the same category in a row.
         """
         ranked = engine.generate_next_reels(
             count=max(count * 4, 40), past_records=past_history, duration_seconds=10
         )
-        fresh = [p for p in ranked if p.concept_def.id_slug not in used_last_week]
-        if len(fresh) >= count:
-            return fresh[:count]
+        pool_size = len(getattr(engine.provider, "categories", None) or ranked)
+        quarantine = self._quarantine_days(pool_size, count, self.CONCEPT_QUARANTINE_DAYS)
 
-        # Not enough unseen concepts. Return what ranking gave so the caller's
-        # CONCEPT_POOL_EXHAUSTED check reports the real problem -- an empty-handed
-        # silent fallback is what let a repeat week through in the first place.
-        return ranked[:count]
+        def rested(plan):
+            when = last_aired.get(plan.concept_def.id_slug)
+            if when is None:
+                return 10000  # never aired: always at the front of the queue
+            return (week_start - when).days
 
-    def _last_week_concept_slugs(self) -> Dict[str, str]:
-        """Concept slug -> Reel id, for the most recent week this brand planned."""
+        by_rest = [ranked[i] for i in sorted(range(len(ranked)), key=lambda i: (-rested(ranked[i]), i))]
+
+        # Round-robin across category groups over the CANDIDATES, not over the chosen few.
+        # Interleaving after truncation cannot rescue a week whose seven picks all came
+        # from one group, and putting never-aired concepts first makes that likely: five
+        # of the six places added on 2026-09-15 sit in the same two groups.
+        ordered = StoryContentProvider._interleave_by_group(by_rest)
+        chosen = [p for p in ordered if rested(p) >= quarantine][:count]
+
+        if len(chosen) < count:
+            # The pool cannot give everyone the full rest. Take the longest-rested of what
+            # is left rather than refusing the week -- and say so, because a rotation that
+            # quietly shortens itself is exactly what nobody noticed last time.
+            picked = {id(p) for p in chosen}
+            filler = sorted((p for p in ordered if id(p) not in picked),
+                            key=lambda p: -rested(p))[:count - len(chosen)]
+            chosen += filler
+            logger.warning(
+                f"[PLAN] Havuz {pool_size} konsept, haftalik {count} -- {quarantine} gunluk "
+                f"dinlenme tam saglanamadi. En uzun beklemis {len(filler)} konsept erken geri "
+                f"alindi (en kisa aralik {min((rested(p) for p in filler), default=0)} gun). "
+                f"Havuzu derinlestirmek bu uyariyi kaldirir."
+            )
+        else:
+            never = sum(1 for p in chosen if p.concept_def.id_slug not in last_aired)
+            logger.info(
+                f"[PLAN] Konsept rotasyonu: havuz {pool_size}, dinlenme {quarantine} gun, "
+                f"bu haftada hic yayinlanmamis {never} konsept."
+            )
+
+        return StoryContentProvider._interleave_by_group(chosen)
+
+    def _concept_last_aired(self):
+        """
+        Concept slug -> the most recent date this brand scheduled it, across every week.
+
+        The question this replaces was narrower -- what did LAST week use -- and that is
+        the whole of why the channel repeated itself on a fourteen-day cycle. Rotation
+        needs the history, not its last page.
+        """
+        aired = {}
         if not self.batch_repo.batches_dir.exists():
-            return {}
-        weeks = sorted(
-            d.name for d in self.batch_repo.batches_dir.iterdir()
-            if d.is_dir() and self.brand.owns_week_id(d.name)
-        )
-        for week_id in reversed(weeks):
-            manifest = self.batch_repo.load_manifest(week_id)
-            if manifest and manifest.reels:
-                return {r.concept_id_slug: r.reel_id for r in manifest.reels if r.concept_id_slug}
-        return {}
+            return aired
+        for entry in self.batch_repo.batches_dir.iterdir():
+            if not entry.is_dir() or not self.brand.owns_week_id(entry.name):
+                continue
+            manifest = self.batch_repo.load_manifest(entry.name)
+            if not manifest or not manifest.reels:
+                continue
+            for reel in manifest.reels:
+                slug = getattr(reel, "concept_id_slug", "") or ""
+                day = (getattr(reel, "scheduled_at_local", "") or "")[:10]
+                if not slug or not day:
+                    continue
+                try:
+                    when = datetime.date.fromisoformat(day)
+                except ValueError:
+                    continue
+                if slug not in aired or when > aired[slug]:
+                    aired[slug] = when
+        return aired
 
-    def _refuse_a_repeat_of_last_week(self, plans: List[Any]) -> None:
+    def _refuse_a_repeat_within_days(self, plans, last_aired, week_start) -> None:
         """
-        Stop a week that would republish the one before it.
+        Stop a week that would republish something the channel has only just shown.
 
-        The concept pool ran exactly as deep as a week is long, so on 2026-08-28 the
-        second craftsbyman week came out as the first one again: same fourteen slugs,
-        same fourteen titles. Nothing objected. Eleven of them reached the channel before
-        the cross-week id guard -- which fires on the ID, not the content -- noticed that
-        verification kept finding LAST week's video under this week's title.
-
-        Diversity ranking cannot save a pool with nothing left to rank. This is the check
-        that says so out loud, before fourteen Flow generations are spent on a repeat.
+        The old check compared against the previous week alone, so the repeat it was
+        written to catch -- 2026-W38 republishing 2026-W36 -- walked straight past it.
+        The question is not "was this last week" but "how long ago was this", and a
+        concept coming back inside a week is a pool problem no ranking can solve.
         """
-        previous = self._last_week_concept_slugs()
-        if not previous:
-            return
-
-        repeated = [
-            (plan.concept_def.id_slug, previous[plan.concept_def.id_slug])
+        gaps = [
+            (plan.concept_def.id_slug, (week_start - last_aired[plan.concept_def.id_slug]).days)
             for plan in plans
-            if plan.concept_def.id_slug in previous
+            if plan.concept_def.id_slug in last_aired
         ]
-        if not repeated:
-            return
+        too_soon = [(slug, gap) for slug, gap in gaps if gap < self.CONCEPT_MIN_GAP_DAYS]
+        if too_soon:
+            listed = ", ".join(f"{slug} ({gap} gun once)" for slug, gap in too_soon[:5])
+            raise RuntimeError(
+                f"CONCEPT_POOL_EXHAUSTED: planlanan haftanin {len(too_soon)}/{len(plans)} "
+                f"konsepti {self.CONCEPT_MIN_GAP_DAYS} gunden kisa sure once yayinlandi -- "
+                f"{listed}{' ...' if len(too_soon) > 5 else ''}. "
+                f"'{self.content_mode}' havuzuna yeni konsept ekleyin."
+            )
+        if gaps:
+            slug, gap = min(gaps, key=lambda g: g[1])
+            logger.info(f"[PLAN] En kisa tekrar araligi: {gap} gun ({slug}).")
 
-        listed = ", ".join(f"{slug} (= {reel})" for slug, reel in repeated[:5])
-        raise RuntimeError(
-            f"CONCEPT_POOL_EXHAUSTED: planlanan haftanin {len(repeated)}/{len(plans)} "
-            f"konsepti onceki haftayla ayni -- {listed}"
-            f"{' ...' if len(repeated) > 5 else ''}. Bu hafta gecen haftayi tekrar "
-            f"yayinlardi. '{self.content_mode}' havuzuna yeni konsept ekleyin."
-        )
-
-    def _plan_concepts(self, past_history: List[Dict[str, Any]]) -> List[Any]:
+    def _plan_concepts(self, past_history, week_start, last_aired) -> List[Any]:
         """
         The week's fourteen concept plans, in slot order.
 
@@ -639,16 +715,15 @@ class SimpleWeeklyPipeline:
         format's own pool: a cistern under a street and a ruined city are not near
         duplicates, and scoring them against each other would suppress neither.
         """
-        used_last_week = set(self._last_week_concept_slugs())
         primary = ContentEngine(content_mode=self.content_mode)
         alternate_mode = self.brand.alternate_content_mode
 
         if not alternate_mode or alternate_mode == self.content_mode:
-            return self._fresh_plans(primary, 14, past_history, used_last_week)
+            return self._fresh_plans(primary, 14, past_history, last_aired, week_start)
 
         evening_engine = ContentEngine(content_mode=alternate_mode)
-        morning_plans = self._fresh_plans(primary, 7, past_history, used_last_week)
-        evening_plans = self._fresh_plans(evening_engine, 7, past_history, used_last_week)
+        morning_plans = self._fresh_plans(primary, 7, past_history, last_aired, week_start)
+        evening_plans = self._fresh_plans(evening_engine, 7, past_history, last_aired, week_start)
         logger.info(
             f"[PLAN] Iki formatli hafta: 19:30 '{self.content_mode}', "
             f"22:00 '{alternate_mode}'."
