@@ -128,7 +128,22 @@ class InstagramWebObserver:
         that opens a different dialog with no scheduling at all, so a missing button is
         reported rather than silently swapped for the wrong flow.
         """
+        if self._composer_is_open():
+            return True
         if self._click(InstagramWebSelectors.OPEN_COMPOSER_BUTTONS, "İçeriği planla"):
+            return True
+
+        # The click can land, open the composer, and still be reported as a failure: the
+        # dialog then sits on top of the button, and every retry of that click waits for
+        # an element that no longer receives pointer events until it times out. That is
+        # exactly what REEL-2026-0082 hit on 2026-09-21 -- the snapshot taken at the
+        # "failure" shows "Yeni gönderi oluştur" open with "Bilgisayardan seç" ready.
+        #
+        # Accepting it here cannot swap in the wrong flow: the page was just navigated to
+        # /scheduled_content/ and the only thing clicked was its own entry button, and a
+        # composer without a schedule toggle fails ENABLE_SCHEDULE loudly further on.
+        if self._composer_is_open():
+            logger.info("[IG WEB] 'İçeriği planla' tiklamasi hata bildirdi ama composer acik -- devam ediliyor.")
             return True
 
         self.capture_error_snapshot("composer_button_not_found")
@@ -139,6 +154,15 @@ class InstagramWebObserver:
         logger.error("Needed: outerHTML of that button and its parent/wrapper.")
         logger.error("=" * 50)
         return False
+
+    def _composer_is_open(self) -> bool:
+        """Whether the new-post composer is already on screen, waiting for a file."""
+        try:
+            return visible(
+                self.page.locator(InstagramWebSelectors.SELECT_FROM_COMPUTER_BUTTONS[0]).first, 1500
+            )
+        except Exception:
+            return False
 
     def upload_file(self, video_path: Path) -> bool:
         """Attach the video. Prefers the hidden file input; falls back to the visible

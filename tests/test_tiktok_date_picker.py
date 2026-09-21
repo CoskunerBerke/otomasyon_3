@@ -175,6 +175,10 @@ def test_the_mismatch_says_whether_a_day_was_clicked_at_all():
     assert "tiklandi=" in warning and "aday sayisi=" in warning, (
         "a halting failure must say whether the cell was found and clicked"
     )
+    # 2026-09-21: "tiklandi=False" alone could not tell a selector that matched nothing
+    # from a cell that never became visible or a click that raised -- the snapshot showed
+    # the cell right there, and the warning could not say which of the three happened.
+    assert "strateji=" in warning, "each strategy's count / visibility / error must be logged"
 
 
 def _flaky_calendar(date_val, clicks, works_on_click):

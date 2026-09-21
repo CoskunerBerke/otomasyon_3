@@ -1105,10 +1105,20 @@ class TikTokUIObserver:
                 ]
                 day_clicked = False
                 day_candidates_seen = 0
+                # One entry per strategy: how many cells matched, how many never became
+                # visible, and what a click raised. On 2026-09-21 the warning said only
+                # that nothing was clicked, while the snapshot showed the cell sitting
+                # there as `day valid` -- "never matched", "matched but invisible" and
+                # "click raised" all read the same, and each needs a different fix.
+                day_probe = []
                 for d_sel in day_selectors:
+                    probe = {"eslesen": -1, "gorunmedi": 0, "hata": ""}
+                    day_probe.append(probe)
                     try:
                         candidates = self.page.locator(d_sel)
                         cnt = candidates.count() if hasattr(candidates, "count") else 0
+                        probe["eslesen"] = cnt
+                        day_candidates_seen = max(day_candidates_seen, cnt)
                         if cnt == 0 and hasattr(candidates, "first"):
                             cnt = 1
                         for idx in range(cnt):
@@ -1118,18 +1128,19 @@ class TikTokUIObserver:
                             try:
                                 d_loc.wait_for(state="visible", timeout=DAY_CELL_VISIBLE_TIMEOUT_MS)
                             except Exception:
+                                probe["gorunmedi"] += 1
                                 continue
                             if hasattr(d_loc, "scroll_into_view_if_needed"):
                                 d_loc.scroll_into_view_if_needed(timeout=1000)
                             d_loc.click(timeout=1500)
                             day_clicked = True
                             logger.info(f"[TIKTOK DATE] Clicked day '{target_day_str}' ({d_sel})")
-                            day_candidates_seen = cnt
                             time.sleep(0.3)
                             break
                         if day_clicked:
                             break
-                    except Exception:
+                    except Exception as exc:
+                        probe["hata"] = f"{type(exc).__name__}: {str(exc).splitlines()[0][:120]}"
                         continue
 
                 # 4. Verify Readback
@@ -1155,7 +1166,8 @@ class TikTokUIObserver:
                     logger.warning(
                         f"[TIKTOK DATE] Calendar UI readback mismatch (deneme {attempt}/{CALENDAR_PICK_ATTEMPTS}): "
                         f"expected='{norm_expected}' got='{actual}' | "
-                        f"gun hucresi tiklandi={day_clicked}, aday sayisi={day_candidates_seen}"
+                        f"gun hucresi tiklandi={day_clicked}, aday sayisi={day_candidates_seen}, "
+                        f"strateji={day_probe}"
                     )
                     if attempt >= CALENDAR_PICK_ATTEMPTS:
                         # The picker is still on screen here; capture it while the evidence
