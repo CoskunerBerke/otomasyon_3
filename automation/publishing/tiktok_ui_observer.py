@@ -48,6 +48,28 @@ MORE_OPTIONS_PROBE_MS = 800
 DAY_CELL_VISIBLE_TIMEOUT_MS = 2000
 CALENDAR_PICK_ATTEMPTS = 2
 CALENDAR_PICK_RETRY_SECONDS = 0.8
+
+
+def _scroll_best_effort(loc, timeout_ms: int = 1000) -> None:
+    """
+    Scroll a picker cell into view if Playwright manages it quickly; never let it stop
+    the click that follows.
+
+    Inside TikTok's date popup this call times out on a cell that is already on screen.
+    REEL-2026-0085 on 2026-09-21: the 24 September cell matched exactly once, passed the
+    visibility wait, and then scroll_into_view_if_needed raised "Timeout 996ms exceeded"
+    on both strategies and both attempts. The exception was swallowed with the click
+    still unmade, so the date never moved off today -- the DATE_MISMATCH that stopped
+    TikTok on 2026-08-19, 2026-09-17 and twice on 2026-09-21. click() performs its own
+    scroll-into-view as part of its actionability checks, so a failed pre-scroll loses
+    nothing by being skipped.
+    """
+    if not hasattr(loc, "scroll_into_view_if_needed"):
+        return
+    try:
+        loc.scroll_into_view_if_needed(timeout=timeout_ms)
+    except Exception:
+        pass
 DATE_READBACK_ATTEMPTS = 6
 DATE_READBACK_INTERVAL_SECONDS = 0.5
 
@@ -1130,8 +1152,7 @@ class TikTokUIObserver:
                             except Exception:
                                 probe["gorunmedi"] += 1
                                 continue
-                            if hasattr(d_loc, "scroll_into_view_if_needed"):
-                                d_loc.scroll_into_view_if_needed(timeout=1000)
+                            _scroll_best_effort(d_loc)
                             d_loc.click(timeout=1500)
                             day_clicked = True
                             logger.info(f"[TIKTOK DATE] Clicked day '{target_day_str}' ({d_sel})")
@@ -1276,8 +1297,7 @@ class TikTokUIObserver:
                     if not hasattr(h_loc, "wait_for"):
                         continue
                     h_loc.wait_for(state="visible", timeout=500)
-                    if hasattr(h_loc, "scroll_into_view_if_needed"):
-                        h_loc.scroll_into_view_if_needed(timeout=1000)
+                    _scroll_best_effort(h_loc)
                     h_loc.click(timeout=1500)
                     hour_clicked = True
                     logger.info(f"[TIKTOK TIME] Clicked hour '{target_hour}' ({h_sel})")
@@ -1301,8 +1321,7 @@ class TikTokUIObserver:
                     if not hasattr(m_loc, "wait_for"):
                         continue
                     m_loc.wait_for(state="visible", timeout=500)
-                    if hasattr(m_loc, "scroll_into_view_if_needed"):
-                        m_loc.scroll_into_view_if_needed(timeout=1000)
+                    _scroll_best_effort(m_loc)
                     m_loc.click(timeout=1500)
                     min_clicked = True
                     logger.info(f"[TIKTOK TIME] Clicked minute '{target_minute}' ({m_sel})")

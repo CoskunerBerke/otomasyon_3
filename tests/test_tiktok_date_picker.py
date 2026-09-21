@@ -258,3 +258,31 @@ def test_a_cell_that_never_takes_still_fails_and_leaves_evidence(monkeypatch):
     assert observer._set_schedule_date(date_input, "2026-09-21") is False
     assert len(clicks) == CALENDAR_PICK_ATTEMPTS
     assert captured == ["tiktok_date_mismatch_calendar_open"], "evidence exactly once"
+
+
+def test_a_pre_scroll_that_times_out_does_not_cancel_the_click(monkeypatch):
+    """
+    The actual cause, found by the per-strategy probe on 2026-09-21: REEL-2026-0085's
+    24 September cell matched once and was visible, and scroll_into_view_if_needed
+    raised "Timeout 996ms exceeded" right before the click -- on both strategies, both
+    attempts. The exception was swallowed with the click unmade. click() scrolls on its
+    own, so a failed pre-scroll must not stop it.
+    """
+    monkeypatch.setattr(tiktok_mod.time, "sleep", lambda *_: None)
+    date_val = ["2026-09-17"]  # the fake grid's cell sets 2026-09-21 when clicked
+    clicks = []
+
+    date_input = MagicMock()
+    date_input.is_visible.return_value = True
+    date_input.get_attribute.side_effect = lambda a: date_val[0] if a == "value" else None
+    date_input.input_value.side_effect = lambda: date_val[0]
+
+    page = _flaky_calendar(date_val, clicks, works_on_click=1)
+    day = page.locator(".calendar-wrapper span.day.valid:text-is('21')").first
+    day.scroll_into_view_if_needed.side_effect = TimeoutError(
+        "Locator.scroll_into_view_if_needed: Timeout 996ms exceeded."
+    )
+    observer = TikTokUIObserver(page)
+
+    assert observer._set_schedule_date(date_input, "2026-09-21") is True
+    assert len(clicks) == 1, "the click must happen even though the pre-scroll timed out"
