@@ -12,7 +12,7 @@ Branch: **`main`** — her şey push'lu.
 | Marka | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|---|
 | BuildVerse | `2026-W38` | 14–20 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
-| BuildVerse | `2026-W39` | **22–28 Eyl** (kaydırıldı) | 14/14 | **0/14** (token) | 14/14 | 14/14 |
+| BuildVerse | `2026-W39` | 22–28 Eyl (kaydırıldı) | 14/14 | 14/14 | 14/14 | 14/14 |
 | Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | **0/14** (token) | 14/14 | kapalı |
 
@@ -21,6 +21,8 @@ slotla dakikası dakikasına eşleşiyor. TikTok ve Instagram kayıtları `SCHED
 platform uzaktan okunamıyor; gözle bakmak gerekirse Studio'lardan.
 
 **Sıradaki haftalar:** BuildVerse W40 29 Eylül'den, Craftsbyman W40 2 Ekim'den.
+
+✅ **BuildVerse W39 YouTube kanaldan doğrulandı (22 Eylül 02:1x):** 14 video, hepsi `private`, 14 `publishAt` kaydırılmış slotlarla dakikası dakikasına eşleşiyor, 14'ünde 5 dil (`en,hi,id,ja,tr`) — lokalizasyonun kanala ilk gerçek çıkışı. BuildVerse token'ı yenilendi; **Crafts By Man'inki hâlâ ölü**, `CBM-2026-W39` YouTube'u 0/14.
 
 🔴 **İki kanalın YouTube OAuth token'ı da ölü (22 Eylül).** Google Cloud OAuth onay ekranı Testing modunda: refresh token 7 günde iptal oluyor. Dosyanın değişme tarihi refresh token'ın verildiği an DEĞİL (her access-token yenilemesinde yeniden yazılıyor) — süre ondan tahmin edilemez. Yenileme: BuildVerse `YOUTUBE_LOGIN.bat`; Crafts By Man `.venv\Scripts\python.exe automation\publish.py --brand craftsbyman --youtube-auth` (`CRAFTSBYMAN_GIRIS.bat` token'a dokunmaz, sadece tarayıcı profillerini açar). Yeniledikten sonra YouTube'u tamamlamak için **haftayı adıyla ver**: `--week-id 2026-W39` / `--week-id CBM-2026-W39` — TikTok artık planlı olduğu için düz `.bat` yeni bir hafta planlamaya başlar. Kalıcı çözüm: OAuth onay ekranını **In production** yapmak.
 
