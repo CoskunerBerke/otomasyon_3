@@ -12,14 +12,17 @@ Branch: **`main`** — her şey push'lu.
 | Marka | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|---|
 | BuildVerse | `2026-W38` | 14–20 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
-| BuildVerse | `2026-W39` | **22–28 Eyl** (kaydırıldı) | 14/14 | **0/14** | **0/14** | **0/14** |
+| BuildVerse | `2026-W39` | **22–28 Eyl** (kaydırıldı) | 14/14 | **0/14** (token) | 14/14 | 14/14 |
 | Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
+| Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | **0/14** (token) | 14/14 | kapalı |
 
 BuildVerse W38'in YouTube'u **kanaldan tek tek doğrulandı**: 14 video var, 14 `publishAt`
 slotla dakikası dakikasına eşleşiyor. TikTok ve Instagram kayıtları `SCHEDULED` ama bu iki
 platform uzaktan okunamıyor; gözle bakmak gerekirse Studio'lardan.
 
-**Sıradaki haftalar:** BuildVerse W40 29 Eylül'den, Craftsbyman 25 Eylül'den.
+**Sıradaki haftalar:** BuildVerse W40 29 Eylül'den, Craftsbyman W40 2 Ekim'den.
+
+🔴 **İki kanalın YouTube OAuth token'ı da ölü (22 Eylül).** Google Cloud OAuth onay ekranı Testing modunda: refresh token 7 günde iptal oluyor. Dosyanın değişme tarihi refresh token'ın verildiği an DEĞİL (her access-token yenilemesinde yeniden yazılıyor) — süre ondan tahmin edilemez. Yenileme: BuildVerse `YOUTUBE_LOGIN.bat`; Crafts By Man `.venv\Scripts\python.exe automation\publish.py --brand craftsbyman --youtube-auth` (`CRAFTSBYMAN_GIRIS.bat` token'a dokunmaz, sadece tarayıcı profillerini açar). Yeniledikten sonra YouTube'u tamamlamak için **haftayı adıyla ver**: `--week-id 2026-W39` / `--week-id CBM-2026-W39` — TikTok artık planlı olduğu için düz `.bat` yeni bir hafta planlamaya başlar. Kalıcı çözüm: OAuth onay ekranını **In production** yapmak.
 
 ⚠️ **BuildVerse W39 üretildi ama yayınlanmadı (21 Eylül).** YouTube OAuth token'ı (`secrets/youtube/token.json`, 14 Eylül) `invalid_grant` veriyor — Google Cloud OAuth ekranı Testing modunda, refresh token 7 günde ölüyor. Haftanın ilk iki slotu (21 Eyl 19:30 ve 22:00) boş geçtiği için hafta bir gün kaydırıldı: manifest `start_date` ve 14 `ReelState`'in zamanlaması 22–28 Eylül. Yedek: `workspace/_backups/W39-shift-20260921_231049/`. Yayını düz `.bat` ile **22 Eylül 13:30'dan sonra** başlatma: 6 saatlik ön-süre kuralı başlangıcı 23'üne iter ve `WEEK_ID_COLLISION` verir — `--week-id 2026-W39` ya da `--start-date 2026-09-22` ile çalıştır.
 
