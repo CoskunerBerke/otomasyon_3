@@ -363,6 +363,43 @@ def test_the_other_two_modes_still_produce_their_own_plans():
     assert all(p.content_mode == SILENT_STEP_BY_STEP for p in silent)
 
 
+def test_a_hidden_build_week_is_titled_with_each_concept_s_own_hook(tmp_path):
+    """
+    A hidden_build concept's default_title is already the finished YouTube title. Wrapped
+    in the construction templates it came out as "Constructing He Buried a Grain Silo..."
+    or "From Ruins to The Tram Was Never Coming Back" -- 62 of the channel's first 70.
+    Planned through the real week path, every title must be a hook verbatim.
+    """
+    from automation.publishing.metadata_builder import PublishingMetadataBuilder
+
+    pipeline = SimpleWeeklyPipeline(base_dir=tmp_path, vault_path=tmp_path / "v",
+                                    dry_run=True, brand=get_brand("craftsbyman"))
+    manifest = pipeline._get_or_create_manifest()
+
+    hooks = {c.default_title for c in HIDDEN_BUILD_CONCEPTS}
+    assert len(manifest.reels) == 14
+    for reel in manifest.reels:
+        assert reel.content_mode == HIDDEN_BUILD_STORY
+        assert reel.title in hooks, reel.title
+        for tmpl in PublishingMetadataBuilder.YOUTUBE_TITLE_VARIATIONS:
+            prefix, _, suffix = tmpl.partition("{title}")
+            assert not (prefix and reel.title.startswith(prefix)), reel.title
+            assert not (suffix and reel.title.endswith(suffix)), reel.title
+
+
+def test_the_hidden_build_title_fix_leaves_description_and_hashtags_alone():
+    from automation.publishing.metadata_builder import PublishingMetadataBuilder
+
+    args = dict(reel_id="CBM-REEL-2026-0099", title="He Buried a Submarine and Trains Inside It",
+                category="Vessels", environment="sea wall", architecture="gym")
+    title, desc, tags = PublishingMetadataBuilder.build_hidden_build_youtube_metadata(**args)
+    _old_title, old_desc, old_tags = PublishingMetadataBuilder.build_youtube_metadata(**args)
+
+    assert title == "He Buried a Submarine and Trains Inside It"
+    assert (desc, tags) == (old_desc, old_tags)
+    assert not any(tag in desc for tag in tags)
+
+
 # ---------------------------------------------------------------- switched-off platforms
 
 def test_the_original_channel_still_publishes_everywhere():

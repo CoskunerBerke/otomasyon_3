@@ -512,7 +512,12 @@ class SimpleWeeklyPipeline:
                     narrative_frame=concept.narrative_frame,
                 )
             else:
-                yt_title, _yt_desc, yt_tags = PublishingMetadataBuilder.build_youtube_metadata(
+                builder = (
+                    PublishingMetadataBuilder.build_hidden_build_youtube_metadata
+                    if plan.content_mode == HIDDEN_BUILD_STORY
+                    else PublishingMetadataBuilder.build_youtube_metadata
+                )
+                yt_title, _yt_desc, yt_tags = builder(
                     reel_id=reel_id,
                     title=plan.title,
                     category=plan.category,

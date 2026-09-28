@@ -100,6 +100,37 @@ class PublishingMetadataBuilder:
         return yt_title, yt_desc, all_tags[:6]
 
     @classmethod
+    def build_hidden_build_youtube_metadata(
+        cls,
+        reel_id: str,
+        title: str,
+        category: str,
+        environment: str = "",
+        architecture: str = "",
+        transformation: str = "",
+        reveal: str = ""
+    ) -> Tuple[str, str, List[str]]:
+        """
+        (title, description, hashtags) for a hidden_build_story Reel.
+
+        The concept's default_title is already the finished hook ("He Buried a Submarine
+        and Trains Inside It"), so it is the title verbatim. Routing it through
+        YOUTUBE_TITLE_VARIATIONS is what produced "Constructing He Buried a Grain Silo..."
+        and "From Ruins to The Tram Was Never Coming Back" -- 62 of Crafts By Man's first
+        70 titles. Description and hashtags stay those of the construction family.
+        """
+        _title, yt_desc, yt_tags = cls.build_youtube_metadata(
+            reel_id=reel_id,
+            title=title,
+            category=category,
+            environment=environment,
+            architecture=architecture,
+            transformation=transformation,
+            reveal=reveal
+        )
+        return title.strip()[:100], yt_desc, yt_tags
+
+    @classmethod
     def build_tiktok_metadata(
         cls,
         reel_id: str,
