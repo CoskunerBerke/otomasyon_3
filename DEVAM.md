@@ -1,26 +1,44 @@
-# Devam — Reels AI Factory (17 Eylül 2026)
+# Devam — Reels AI Factory (29 Eylül 2026)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
-Branch: **`main`** — her şey push'lu.
+Branch: **`fix/cbm-youtube-titles`** (push'lu, PR bekliyor) — main'e alınmadan main'e geçilirse
+CBM başlık düzeltmesi kaybolur.
 
 **Türkçe cevap ver. Detaylı rapor ver. Canlı çalıştırma (Flow/yayın) sadece açık talimatla.**
 
 ---
 
-## Durum: iki kanal da tam
+## Durum: W40 iki kanalda üretildi, YouTube token bekliyor
 
 | Marka | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|---|
 | BuildVerse | `2026-W38` | 14–20 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
 | BuildVerse | `2026-W39` | 22–28 Eyl (kaydırıldı) | 14/14 | 14/14 | 14/14 | 14/14 |
+| BuildVerse | `2026-W40` | 29 Eyl–5 Eki | 14/14 | **0/14** (token) | 14/14 | 14/14 |
 | Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
-| Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | **0/14** (token) | 14/14 | kapalı |
+| Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | 14/14 | 14/14 | kapalı |
+| Craftsbyman | `CBM-2026-W40` | 2–8 Eki | 14/14 | **0/14** (token) | 14/14 | kapalı |
+
+🔴 **29 Eylül: iki kanalın YouTube token'ı yine öldü (~02:00).** W40'lar 01:22–06:20 arasında
+üretildi; TikTok/Instagram planlandı, YouTube `AUTH_REQUIRED` ile 0/14. Tamamlamak için önce
+token'ları yenile (BuildVerse `YOUTUBE_LOGIN.bat`; Crafts By Man
+`.venv\Scripts\python.exe automation\publish.py --brand craftsbyman --youtube-auth`), sonra
+**haftayı adıyla ver**: `--week-id 2026-W40` / `--week-id CBM-2026-W40`. BuildVerse'ün ilk
+slotu **29 Eylül 19:30**. Kalıcı çözüm hâlâ OAuth onay ekranını **In production** yapmak.
+
+✅ **Crafts By Man başlık düzeltmesi (29 Eylül, `41b2828`):** `hidden_build_story` artık
+konseptin kendi cümlesini başlık yapıyor ("They Buried a School Bus. Look What's Under It");
+eskiden inşaat şablonuna girip "Constructing He Buried…" oluyordu (70'te 62). CBM W40'ın 14
+başlığı temiz. Kanaldaki eski 62 başlık **değiştirilmedi** — o karar operatörde.
+
+Not: 17 Eylül'deki "CBM W39 YouTube 0/14" bilgisi eskiydi — 22 Eylül 02:16'da 14/14
+planlanmış (her birinde YouTube video id'si var), sadece bu dosyaya işlenmemişti.
 
 BuildVerse W38'in YouTube'u **kanaldan tek tek doğrulandı**: 14 video var, 14 `publishAt`
 slotla dakikası dakikasına eşleşiyor. TikTok ve Instagram kayıtları `SCHEDULED` ama bu iki
 platform uzaktan okunamıyor; gözle bakmak gerekirse Studio'lardan.
 
-**Sıradaki haftalar:** BuildVerse W40 29 Eylül'den, Craftsbyman W40 2 Ekim'den.
+**Sıradaki haftalar:** BuildVerse W41 6 Ekim'den, Craftsbyman W41 9 Ekim'den.
 
 ✅ **BuildVerse W39 YouTube kanaldan doğrulandı (22 Eylül 02:1x):** 14 video, hepsi `private`, 14 `publishAt` kaydırılmış slotlarla dakikası dakikasına eşleşiyor, 14'ünde 5 dil (`en,hi,id,ja,tr`) — lokalizasyonun kanala ilk gerçek çıkışı. BuildVerse token'ı yenilendi; **Crafts By Man'inki hâlâ ölü**, `CBM-2026-W39` YouTube'u 0/14.
 
