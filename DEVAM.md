@@ -8,7 +8,7 @@ CBM başlık düzeltmesi kaybolur.
 
 ---
 
-## Durum: W40 iki kanalda üretildi, YouTube token bekliyor
+## Durum: W40 iki kanalda tam (29 Eylül 11:27)
 
 ⚠️ **MANUAL_REMOTE_CLEANUP_RECOMMENDED — BuildVerse kanalında çift video (29 Eylül 11:14).**
 `--week-id 2026-W40` YouTube koşusu yükleme sırasında Ctrl+C ile kesildi; `REEL-2026-0096`'nın
@@ -25,7 +25,10 @@ yüklüyor — ayrı düzeltme işi açıldı. **YouTube yüklemesi sürerken Ct
 | BuildVerse | `2026-W40` | 29 Eyl–5 Eki | 14/14 | 14/14 (kanaldan doğrulandı) | 14/14 | 14/14 |
 | Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | 14/14 | 14/14 | kapalı |
-| Craftsbyman | `CBM-2026-W40` | 2–8 Eki | 14/14 | **0/14** (token) | 14/14 | kapalı |
+| Craftsbyman | `CBM-2026-W40` | 2–8 Eki | 14/14 | 14/14 (kanaldan doğrulandı) | 14/14 | kapalı |
+
+✅ Token'lar 29 Eylül 11:09 / 11:23'te yenilendi, iki haftanın YouTube'u tamamlandı; CBM W40'ın 14 başlığı
+kanalda temiz. Bir sonraki ölüm ~6 Ekim.
 
 🔴 **29 Eylül: iki kanalın YouTube token'ı yine öldü (~02:00).** W40'lar 01:22–06:20 arasında
 üretildi; TikTok/Instagram planlandı, YouTube `AUTH_REQUIRED` ile 0/14. Tamamlamak için önce
