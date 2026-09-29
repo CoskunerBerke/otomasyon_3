@@ -10,11 +10,19 @@ CBM başlık düzeltmesi kaybolur.
 
 ## Durum: W40 iki kanalda üretildi, YouTube token bekliyor
 
+⚠️ **MANUAL_REMOTE_CLEANUP_RECOMMENDED — BuildVerse kanalında çift video (29 Eylül 11:14).**
+`--week-id 2026-W40` YouTube koşusu yükleme sırasında Ctrl+C ile kesildi; `REEL-2026-0096`'nın
+yüklemesi YouTube'da tamamlanmıştı ama `progress.json`'a yazılamadı, yeniden koşu onu tekrar
+yükledi. Kayıtlı doğru kopya `Zb9-QvbR6Fw`; fazlası **`3oM5RHnsd6I`** (private, publishAt
+29 Eyl 22:00) — operatör Studio'dan silecek. Kalan 14 video kanalla birebir eşleşiyor (başlık,
+`publishAt`, 5 dil). Kök neden: API yükleyicisi `UPLOAD_ATTEMPTED` kaydını dikkate almadan baştan
+yüklüyor — ayrı düzeltme işi açıldı. **YouTube yüklemesi sürerken Ctrl+C'ye basma.**
+
 | Marka | Hafta | Slotlar | Üretim | YouTube | TikTok | Instagram |
 |---|---|---|---|---|---|---|
 | BuildVerse | `2026-W38` | 14–20 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
 | BuildVerse | `2026-W39` | 22–28 Eyl (kaydırıldı) | 14/14 | 14/14 | 14/14 | 14/14 |
-| BuildVerse | `2026-W40` | 29 Eyl–5 Eki | 14/14 | **0/14** (token) | 14/14 | 14/14 |
+| BuildVerse | `2026-W40` | 29 Eyl–5 Eki | 14/14 | 14/14 (kanaldan doğrulandı) | 14/14 | 14/14 |
 | Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W40` | 2–8 Eki | 14/14 | **0/14** (token) | 14/14 | kapalı |
