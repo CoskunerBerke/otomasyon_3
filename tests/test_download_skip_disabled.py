@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 from automation.flow.downloader import FlowDownloader
 
-def test_disabled_download_button_skipped_immediately():
-    downloader = FlowDownloader(downloads_dir=Path("./tmp_dl"))
+def test_disabled_download_button_skipped_immediately(tmp_path: Path):
+    downloader = FlowDownloader(downloads_dir=tmp_path / "tmp_dl")
 
     mock_page = MagicMock()
     mock_btn = MagicMock()
@@ -39,6 +39,9 @@ def test_enabled_download_button_clicks_successfully(tmp_path: Path):
     target_file = dl_dir / "success.mp4"
 
     mock_page = MagicMock()
+    # The click downloads directly (no quality menu opens). Without this the MagicMock page
+    # "opens" a menu whose entries have MagicMock labels, which no real page can produce.
+    mock_page.wait_for_selector.side_effect = TimeoutError("no quality menu")
     mock_btn = MagicMock()
     mock_btn.get_attribute.return_value = "false"
     mock_btn.is_enabled.return_value = True
