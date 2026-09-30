@@ -1,391 +1,135 @@
-# REELS AI FACTORY — OBSIDIAN + GOOGLE FLOW FULL AUTOMATION
+# Reels AI Factory (otomasyon_3)
 
-Windows üzerinde çalışan, harici ücretli LLM API (OpenAI, Claude) veya CapCut gerektirmeyen, **Google Flow** web arayüzünü Playwright ile kullanarak tamamen otomatik **sessiz / global satisfying Reels videoları** üreten, teknik kalite kontrolünden geçiren ve Obsidian kasanızla (`Reels_AI_Studio`) senkronize çalışan üretim sistemi.
+End-to-end automation that plans, generates, quality-checks and schedules short vertical videos (Reels / Shorts) on YouTube, TikTok and Instagram, with an Obsidian vault as the production log.
 
----
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-2EAD33?logo=playwright&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?logo=ffmpeg&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=white)
+![YouTube Data API](https://img.shields.io/badge/YouTube_Data_API-v3-FF0000?logo=youtube&logoColor=white)
+![Meta Graph API](https://img.shields.io/badge/Meta_Graph_API-Instagram-0467DF?logo=meta&logoColor=white)
+![Obsidian](https://img.shields.io/badge/Obsidian-7C3AED?logo=obsidian&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+![Railway](https://img.shields.io/badge/Railway-0B0D0E?logo=railway&logoColor=white)
+![Telegram](https://img.shields.io/badge/Telegram-bot-26A5E4?logo=telegram&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-0A9EDC?logo=pytest&logoColor=white)
 
-## 0. Klasörde Ne Nerede?
+> **Status:** personal automation project, in active use for the weekly schedule of two of my own channels
+> (BuildVerse and Crafts By Man). Windows-first; the cloud control plane runs in Docker.
 
-Çift tıklayacağın her şey **kökte**. Alt klasörler koda ve verilere ait.
+## Overview
 
-### Tıkladığın dosyalar (kök)
+Every week the factory produces a 14-Reel series (7 days × 2 time slots) per channel. It reads past Reels from an Obsidian vault to avoid repeating topics, writes an English video prompt, drives the **Google Flow** web app with Playwright to generate the clips, validates and assembles the final MP4 with FFmpeg, and then uses each platform's **native scheduler** so nothing has to be online at publish time. A small cloud service on Railway handles Telegram approvals and an optional Instagram worker.
 
-| Dosya | Ne yapar |
+## Features
+
+- **Weekly pipeline** — `PLAN → GENERATE → VALIDATE → LOCK → YOUTUBE → TIKTOK → INSTAGRAM → DONE`; a phase starts only when the previous one is complete, and the content plan is immutable once locked.
+- **Idea and prompt engine** — topic history and diversity scoring, multiple content modes (silent step-by-step builds, narrated real-history stories with ambient audio, hidden-build and cutaway-reveal stories).
+- **Google Flow automation** — connects to a real Chrome session over CDP, sets 9:16, submits prompts, resumes and downloads segments; stops with `USER_ACTION_REQUIRED` instead of bypassing logins or CAPTCHAs.
+- **Quality control** — FFprobe checks for aspect ratio and duration, frame sampling for black or frozen frames, audio handling per content mode, faststart, and 3 × 10 s segment concatenation into a 30 s Reel.
+- **Publishing** — YouTube (Data API v3 or YouTube Studio), TikTok Studio and Instagram (web scheduler or Meta Graph API), with localized metadata (en, tr, hi, id, ja on YouTube) and AI-content disclosure.
+- **Safety by design** — idempotent uploads (`reel_id + platform` + SHA-256), per-platform failure isolation, never clicks "post now", never deletes remote content, brand isolation so one channel's video cannot reach another channel, single-run lock and a hard cap per run.
+- **Multi-brand** — each channel has its own accounts, Chrome profiles, ports, ID prefix and inventory.
+- **Obsidian integration** — Reel notes move through `03_SCRIPTS → 04_PRODUCTION → 05_READY / 07_REJECTED`, plus a publishing queue, an agent control center and graph-view links.
+- **Cloud control plane** — HTTP service with Telegram webhook approvals, weekly scheduler, local-worker command queue, S3-compatible media storage and health checks.
+- **Test suite** — about 780 pytest tests, including regression tests for past production incidents.
+
+## Tech stack
+
+| Area | Tools |
 |---|---|
-| `INSTALL_FIRST_TIME.bat` | Tek seferlik kurulum (Python, bağımlılıklar, Playwright) |
-| `FLOW_LOGIN.bat` | Google Flow oturumu — **iki kanal için ortak** (tek Flow hesabı) |
-| **BuildVerse (1. kanal)** | |
-| `BUILDVERSE_GIRIS.bat` | Kanalın tarayıcılarını giriş için açar (YT 9224 · TT 9223 · IG 9225) |
-| `BUILDVERSE_HAFTALIK_14_REEL.bat` | Haftalık 14 Reel — üretir ve YT+TT+IG'ye planlar |
-| `BUILDVERSE_SADECE_YOUTUBE.bat` | Yalnızca YouTube'daki eksikleri tamamlar |
-| `BUILDVERSE_SADECE_TIKTOK.bat` | Yalnızca TikTok'taki eksikleri tamamlar |
-| `BUILDVERSE_SADECE_INSTAGRAM.bat` | Yalnızca Instagram'daki eksikleri tamamlar |
-| **Crafts By Man (2. kanal)** | |
-| `CRAFTSBYMAN_GIRIS.bat` | Kanalın tarayıcılarını açar (YT 9234 · TT 9233 — **Instagram kapalı**) |
-| `CRAFTSBYMAN_HAFTALIK_14_REEL.bat` | Haftalık 14 Reel — üretir ve YT+TT'ye planlar |
-| `CRAFTSBYMAN_SADECE_YOUTUBE.bat` | Yalnızca YouTube'daki eksikleri tamamlar |
-| `CRAFTSBYMAN_SADECE_TIKTOK.bat` | Yalnızca TikTok'taki eksikleri tamamlar |
-| **Diğer** | |
-| `YOUTUBE_LOGIN.bat` | YouTube **API** yetkilendirmesi (OAuth) — haftalık akış bunu kullanmaz |
-| `BASLAT.bat` | Pipeline'ı elle argümanla çalıştırır (ileri seviye) |
+| Language | Python 3.10+ (Docker image: 3.11) |
+| Browser automation | Playwright (Chrome over CDP) |
+| Media | FFmpeg / FFprobe, OpenCV, Pillow, NumPy |
+| Platforms | YouTube Data API v3 (google-api-python-client, OAuth), TikTok Studio, Instagram web + Meta Graph API |
+| Cloud | Python `http.server`, PostgreSQL (psycopg) or SQLite, boto3 (S3-compatible storage), Telegram Bot API |
+| Knowledge base | Obsidian (Markdown notes, graph view) |
+| Ops | Docker, Railway (`railway.toml`), Windows `.bat` launchers, pytest |
 
-> Her kanalın kendi Chrome profili ve portu var; biri diğerini etkilemez. Bir oturum
-> düşerse hata mesajı **o markanın** giriş dosyasını adıyla söyler.
->
-> `SADECE_*` dosyaları tek faz çalıştırır ve 30 dk'lık bekleme döngüsüne girmez —
-> yarım kalmış bir haftayı tamamlamak için bunları kullanın.
+## Project structure
 
-
-### Klasörler
-
-| Klasör | İçindekiler |
-|---|---|
-| `automation/` | Bütün kaynak kod |
-| `tests/` | Test paketi |
-| `docs/` | Railway ve Telegram kurulum kılavuzları |
-| `_eski_batlar/` | Artık kullanılmayan eski `.bat` dosyaları |
-| `workspace/` | **Üretim verisi** — segmentler, final MP4'ler, haftalık state. Silme. |
-| `13_PUBLISHING/` | Yayın kayıtları (`PUB-*.md`) |
-| `screenshots/` · `logs/` | Hata görüntüleri ve çalışma logları |
-| `secrets/` · `.env` | Kimlik bilgileri — git'e girmez, paylaşılmaz |
-
-`CLAUDE.md` bu repoda geçerli kalıcı güvenlik kurallarını, `DEVAM.md` ise
-en son nerede kalındığını tutar.
-
----
-
-## 1. Sistem Ne Yapıyor?
-
-Masaüstündeki `.bat` dosyasına tıkladığınızda sistem otomatik olarak:
-
-1. **Obsidian Kasasını Okur:** `03_SCRIPTS`, `04_PRODUCTION`, `05_READY`, `06_PUBLISHED`, `07_REJECTED` klasörlerini tarar.
-2. **Geçmişi Analiz Eder & Tekrarı Engeller:** Daha önce üretilmiş `topic_key` ve kategorileri çıkarır, yakın semantik benzerlikleri ve son kullanılan kategorileri tespit eder.
-3. **Yeni Fikir & İngilizce Prompt Üretir:** 40+ kategoriden (fütüristik şehir, ada tesisi, çöl megakenti, solarpunk, uzay üssü vb.) en yüksek çeşitlilik (diversity) puanına sahip konseptleri seçer ve dikey 9:16 formatında kaliteli İngilizce master prompt hazırlar.
-4. **Obsidian Kaydı Açar:** `03_SCRIPTS/REEL-YYYY-NNNN.md` dosyasını otomatik oluşturur.
-5. **Google Flow Otomasyonunu Çalıştırır:** Kalıcı tarayıcı profili ile Google Flow'u açar, 9:16 formatını seçer, promptu girer ve üretimi başlatır.
-6. **İndirme & Güvenlik Kontrolü:** Üretilen videoyu `workspace/downloads/` altına indirir.
-7. **FFmpeg & Görsel Kalite Kontrolü (QC):** 
-   - 9:16 en-boy oranını doğrular.
-   - Tüm ses kanallarını FFmpeg ile sıfırlar (tamamen sessiz ve temiz video).
-   - Faststart bayrağı ekler (sosyal medya optimizasyonu).
-   - 5 farklı kareden (0%, 25%, 50%, 75%, 100%) siyah ekran, donma veya bozukluk analizi yapar.
-8. **Masaüstüne Kaydeder:** Final MP4 ve eşlik eden detaylı metadata JSON dosyasını `C:\Users\<Kullanıcı>\Desktop\AI_Reels\YYYY-MM-DD\` altına kaydeder.
-9. **Obsidian'ı Günceller:** Notu `status: READY` yaparak `05_READY` klasörüne taşır.
-10. **Windows Bildirimi Gönderir:** İşlem tamamlandığında sağ altta bildirim gösterir.
-
----
-
-## 2. Sistem Gereksinimleri
-
-- **İşletim Sistemi:** Windows 10 / 11 (64-bit)
-- **Python:** Python 3.10 veya daha yenisi (PATH'e ekli olmalı)
-- **FFmpeg & FFprobe:** Sistem PATH'inde kurulu olmalı (`ffmpeg -version` çalışmalı)
-- **Google Hesabı:** Google Flow erişimi olan bir Google hesabı
-- **Obsidian:** `Reels_AI_Studio` kasası
-
----
-
-## 3. İlk Kurulum (30 Saniye)
-
-Klasör içindeki:
-
-👉 **`INSTALL_FIRST_TIME.bat`**
-
-dosyasına çift tıklayın.
-
-Bu işlem:
-- Python ve FFmpeg kontrollerini yapar.
-- `.venv` sanal ortamını oluşturur.
-- Gerekli tüm Python kütüphanelerini (`requirements.txt`) kurar.
-- Playwright Chromium tarayıcısını indirir.
-- `config.local.json` dosyasını hazırlar.
-
----
-
-## 4. Google Flow'a İlk Giriş (Google Chrome ile Manuel Giriş)
-
-Google'ın otomasyon algılama engeline takılmamak için giriş işlemi doğrudan gerçek Google Chrome üzerinden yapılır:
-
-👉 **`FLOW_LOGIN.bat`**
-
-dosyasına çift tıklayın.
-1. Gerçek Google Chrome penceresi dedicated profili ile (`%LOCALAPPDATA%\ReelsAIFactory\chrome-profile`) açılır.
-2. Açılan Chrome penceresinde Google hesabınızla tamamen **manuel** olarak oturum açın.
-3. Google Flow ana ekranına ulaştığınızdan emin olun.
-4. **Google Chrome penceresini AÇIK BIRAKIN.**  
-   *(Otomasyon, Playwright `connect_over_cdp` ile bu açık Chrome oturumuna bağlanarak videoları üretecektir.)*
-
-Oturumunuz kalıcı olarak `%LOCALAPPDATA%\ReelsAIFactory\chrome-profile` klasörüne (OneDrive dışında) kaydedilir. Artık sonraki üretimlerde sizden tekrar şifre istenmez.
-
----
-
-## 5. Kredi Harcamadan Test (Dry Run)
-
-Sistem mantığını, Obsidian okumasını ve prompt üretimini sıfır kredi harcayarak test etmek için:
-
-```powershell
-python automation\run.py --count 1 --dry-run
+```text
+automation/
+├── simple_weekly_pipeline.py   # live weekly entry point (phase by phase)
+├── run.py, publish.py          # generation / publishing CLIs
+├── brands.py                   # per-channel accounts, profiles, ID prefixes
+├── agents/                     # history, idea, segment planner, flow, quality, publish agents
+├── content/                    # concepts, content modes, prompt engine, diversity rules
+├── flow/                       # Google Flow browser automation
+├── quality/                    # ffprobe checks, frame analysis, concatenation
+├── publishing/                 # YouTube, TikTok, Instagram publishers + guards
+├── orchestration/              # weekly manifests, slots, state, reconciliation
+├── obsidian/                   # vault reader / writer
+└── cloud/                      # Railway control plane, Telegram bot, workers, storage
+tests/                          # pytest suite
+docs/                           # RAILWAY_DEPLOYMENT.md, TELEGRAM_SETUP.md
+*.bat                           # one-click Windows launchers
 ```
 
-veya sanal ortamda:
+## Getting started (Windows)
+
+Requirements: Windows 10/11, Python 3.10+, FFmpeg and FFprobe on `PATH`, a Google account with Flow access, and an Obsidian vault.
+
+1. `INSTALL_FIRST_TIME.bat` — creates `.venv`, installs `requirements.txt` and Playwright Chromium, prepares `config.local.json` (template: `config.example.json`).
+2. `FLOW_LOGIN.bat` — opens a dedicated Chrome profile; sign in to Google Flow manually and leave the window open.
+3. `BUILDVERSE_GIRIS.bat` / `CRAFTSBYMAN_GIRIS.bat` — sign in to each channel's platforms once.
+4. Rehearse without spending credits or uploading:
 
 ```powershell
 .venv\Scripts\python automation\run.py --count 1 --dry-run
-```
-
-Bu modda Obsidian kasası taranır, sıradaki Reel ID'si belirlenir, yeni bir konsept seçilip `03_SCRIPTS/` altına not yazılır; fakat **tarayıcı açılmaz ve video üretilmez.**
-
----
-
-## 6. Günlük Kullanım (1-Click Desktop Automation)
-
-Masaüstünde tek tıkla video üretmek için iki hazır batch dosyası mevcuttur:
-
-### 1 Video Üretmek İçin (Test & Güvenli Üretim):
-👉 **`1_YENI_REEL_URET.bat`**
-
-### 3 Video Üretmek İçin (Günlük Toplu Üretim):
-👉 **`3_YENI_REEL_URET.bat`**
-
----
-
-## 7. Çıktılar Nerede Saklanır?
-
-Başarılı videolar otomatik olarak Windows'un gerçek Masaüstü (OneDrive yönlendirmesi dahil) klasörüne tarih bazlı kaydedilir:
-
-`<GERÇEK_WINDOWS_MASAÜSTÜ>\AI_Reels\YYYY-MM-DD\`  
-*(Örn: `C:\Users\berke\OneDrive\Masaüstü\AI_Reels\2026-08-15\`)*
-
-Örnek çıktı:
-- `REEL-2026-0003_Luxury_Island_Resort.mp4` *(Sessiz, 9:16, Faststart optimize MP4)*
-- `REEL-2026-0003_Luxury_Island_Resort.json` *(Tüm prompt, çözünürlük, süre, QC ve üretim zamanı metadata kaydı)*
-
----
-
-## 8. Obsidian Kasası Entegrasyonu
-
-Otomasyon `Reels_AI_Studio` kasasını şu yaşam döngüsüyle yönetir:
-
-1. **`03_SCRIPTS/REEL-YYYY-NNNN.md`**: Yeni fikir ve prompt oluşturulduğunda (`status: PROMPT_READY`).
-2. **`04_PRODUCTION/REEL-YYYY-NNNN.md`**: Google Flow'a gönderildiğinde (`status: GENERATING`).
-3. **`05_READY/REEL-YYYY-NNNN.md`**: Video üretilip QC'den geçtiğinde dosya yolu ve metadata eklenerek taşınır (`status: READY`).
-4. **`07_REJECTED/REEL-YYYY-NNNN.md`**: Herhangi bir teknik hata veya QC reddinde hata sebebiyle buraya taşınır (`status: REJECTED`).
-
-Ayrıca kasaya iki standart kılavuz dosyası yerleştirilmiştir:
-- `00_SYSTEM/SILENT_VISUAL_RULES.md`
-- `09_TEMPLATES/SILENT_REEL_TEMPLATE.md`
-
----
-
-## 9. Flow UI Değişirse Ne Yapılır?
-
-Google Flow web arayüzünde butonların yerleri veya isimleri değişirse:
-
-1. **Hata Ekran Görüntüsünü İnceleyin:**
-   Playwright bir öğeyi bulamadığında otomatik olarak `screenshots/errors/` klasörüne tam ekran görüntüsü ve sayfa HTML'ini kaydeder.
-2. **Merkezi Seçicileri Güncelleyin:**
-   `automation/flow/selectors.py` dosyasını açarak ilgili buton veya metin seçicisini ekleyin.
-   Örnek:
-   ```python
-   GENERATE_BUTTON_SELECTORS = [
-       "button:has-text('Generate')",
-       "button:has-text('Create Video')",  # Yeni eklenen alternatif
-   ]
-   ```
-
----
-
-## 10. CAPTCHA / Yeniden Giriş Durumu (`USER_ACTION_REQUIRED`)
-
-Sistem bot korumalarını bypass etmeye çalışmaz. Eğer:
-- Google oturumu zaman aşımına uğrarsa,
-- Güvenlik doğrulaması veya CAPTCHA çıkarsa,
-
-Otomasyon güvenli bir şekilde durur, konsolda `[USER_ACTION_REQUIRED]` uyarısı verir ve Windows bildirimi gönderir:
-> *"Google Flow kullanıcı müdahalesi bekliyor."*
-
-Bu durumda:
-1. `FLOW_LOGIN.bat` dosyasını çalıştırın.
-2. Açılan pencerede doğrulamayı tamamlayıp tarayıcıyı kapatın.
-3. Otomasyonu tekrar başlatın.
-
----
-
-## 11. Güvenlik ve Kredi Limitleri
-
-- **Hard Safety Cap:** `--count` parametresine 100 bile verilse sistem maksimum 5 video üretir (`MAX_VIDEOS_PER_RUN = 5`).
-- **Tekil Çalışma Kilidi:** `automation.lock` dosyası sayesinde aynı anda iki batch dosyasının çalışıp kredileri çift tüketmesi engellenir.
-- **Sıralı Üretim:** Videolar paralel değil, sırayla (Video 1 -> Tamamla -> QC -> Video 2) üretilir.
-- **Retry Limiti:** Teknik aksaklıklarda maksimum 1 defa tekrar denenir (`MAX_RETRIES_PER_VIDEO = 1`), sonsuz döngüye girilmez.
-
----
-
-## 12. Yapılandırma (`config.local.json`)
-
-```json
-{
-  "vault_path": "C:\\Users\\berke\\obsidian\\Reels_AI_Studio",
-  "output_path": "%USERPROFILE%\\Desktop\\AI_Reels",
-  "videos_per_run": 1,
-  "video_duration": 5,
-  "video_ratio": "9:16",
-  "audio_enabled": false,
-  "generation_timeout_minutes": 20,
-  "max_retries_per_video": 1,
-  "browser_headless": false,
-  "reject_wrong_ratio": true,
-  "flow_url": "https://labs.google/fx/tools/flow"
-}
-```
-
----
-
-## 13. Testlerin Çalıştırılması
-
-Tüm birim testleri (ID üretimi, çeşitlilik puanlaması, prompt motoru, Obsidian okuma/yazma, FFprobe QC, 3x10s V3 mimarisi, Multi-Agent MessageBus ve Graph Node testleri) çalıştırmak için:
-
-```powershell
+.venv\Scripts\python automation\publish.py --count 14 --dry-run
 pytest -v tests/
 ```
 
----
+5. Weekly run: `BUILDVERSE_HAFTALIK_14_REEL.bat` or `CRAFTSBYMAN_HAFTALIK_14_REEL.bat`; the `*_SADECE_*` launchers finish a single platform for a half-done week.
 
-## 14. AGENT CONTROL CENTER VE GRAPH VIEW NASIL KULLANILIR?
+If Google Flow's UI changes, error screenshots and HTML are saved under `screenshots/errors/`, and selectors live in `automation/flow/selectors.py`.
 
-Reels AI Factory, arka planda çalışan deterministik Agent'ların durumlarını, aralarındaki gerçek mesajları ve üretim akışını Obsidian içinde **canlı bir dashboard** ve **interaktif bir Knowledge Graph** olarak görselleştirir.
+### Environment variables (names only)
 
-### 🚀 Kullanım Adımları:
+See `.env.example` and `.env.railway.example`: `META_GRAPH_VERSION`, `META_APP_ID`, `META_APP_SECRET`, `META_ACCESS_TOKEN`, `INSTAGRAM_ACCOUNT_ID`, `INSTAGRAM_EXPECTED_USERNAME`, `INSTAGRAM_DRY_RUN`, `INSTAGRAM_ALLOW_UPLOAD`, `INSTAGRAM_ALLOW_PUBLISH`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `PUBLIC_BASE_URL`, `WEEKLY_APPROVAL_DAY`, `WEEKLY_APPROVAL_LOCAL_TIME`, `APP_TIMEZONE`, `APP_ENV`, `DATABASE_URL`, `LOCAL_WORKER_API_KEY`, `LOCAL_WORKER_POLL_SECONDS`, `MEDIA_STORAGE_BACKEND`, `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `ENABLE_TELEGRAM_WEBHOOK`, `ENABLE_WEEKLY_SCHEDULER`, `ENABLE_INSTAGRAM_WORKER`.
+OAuth files and tokens live in `secrets/` and are git-ignored.
 
-1. **Obsidian'ı Açın:** `Reels_AI_Studio` kasanızı açın.
-2. **Control Center'ı Açın:** Kasa kök dizinindeki `AGENT_CONTROL_CENTER.md` dosyasını açın (veya sağ panele sabitleyin).
-3. **Üretimi Başlatın:** Masaüstünden `1_YENI_REEL_URET.bat` veya `3_YENI_REEL_URET.bat` dosyasına tıklayın.
-4. **Canlı Durumu İzleyin:**
-   - `CONTENT_DIRECTOR`: Üretim planını ve batch koordinasyonunu yürütür.
-   - `HISTORY_AGENT`: Geçmiş videoları analiz edip çeşitlilik kriterlerini belirler.
-   - `IDEA_AGENT`: Özgün konsepti seçer.
-   - `SEGMENT_PLANNER_AGENT`: 3 aşamalı (10s x 3) inşa planını hazırlar.
-   - `FLOW_AGENT`: Google Flow üzerinde segmentleri sırayla üretip indirir.
-   - `QUALITY_AGENT`: Kalite kontrol, ses temizleme ve 30s final FFmpeg birleştirmesini yapar.
-   - `LAST AGENT MESSAGE`: En son gerçekleşen Agent mesajını gösterir.
+## Deployment
 
-### 🌐 Obsidian Graph View Kullanımı:
-
-1. **Graph View'u Açın:** Sol menüden **Open graph view** butonuna tıklayın veya `Ctrl + G` kısayolunu kullanın.
-2. **Global Graph vs. Local Graph:**
-   - **Global Graph:** Tüm kasanın genel bağlantı ağını gösterir. Zamanla üretilen yüzlerce Reel, Segment ve Run burada devasa bir bilgi kümesi oluşturur.
-   - **Local Graph:** Herhangi bir Agent veya Reel notu açıkken sağ menüden **Open local graph** seçeneğini açın.
-     - `FLOW_AGENT` Local Graph'ı: Flow'un ürettiği tüm segmentleri, ilgili Reel'leri ve QC mesajlarını gösterir.
-     - `IDEA_AGENT` Local Graph'ı: Seçilen konseptleri, History Agent ve Segment Planner ile bağlantılarını gösterir.
-3. **Graph Filtreleri & Grupları (Graph Settings):**
-   - **Path Filtreleri:**
-     - Sadece Agentlar için: `path:"00_AGENTS"`
-     - Sadece Run'lar için: `path:"10_AGENT_RUNS"`
-     - Sadece Mesajlar için: `path:"11_AGENT_MESSAGES"`
-     - Sadece Segmentler için: `path:"12_SEGMENTS"`
-   - **Color Groups (Renk Gruplama):**
-     - `tag:#agent` -> Mavi (8 Temel Agent)
-     - `tag:#reel` -> Yeşil (Reel Ana Notları)
-     - `tag:#segment` -> Sarı (10s İnşa Segmentleri)
-     - `tag:#run` -> Mor (Batch Çalıştırmaları)
-     - `tag:#agent-message` -> Turuncu (Önemli Mesaj Düğümleri)
-4. **Klasör Yapısı:**
-    - `00_AGENTS/`: 8 Agent tanımı ve `AGENT_ARCHITECTURE.md` mimari diyagramı.
-    - `10_AGENT_RUNS/`: Her batch çalıştırmasının zaman çizelgesi ve bağlı Reel'ler.
-    - `11_AGENT_MESSAGES/`: Kronolojik mesaj kütükleri ve önemli dönüm noktası mesaj düğümleri.
-    - `12_SEGMENTS/`: Her 30s Reel'in 3 parçalık inşa aşama düğümleri (`REEL-XXXX_SEGMENT-01`, `02`, `03`).
-5. **Graph Neden Zamanla Büyüyecek?:**
-   - Her üretilen yeni Reel; 1 Run bağlantısı, 3 Segment düğümü (birbirine zincirli), sorumlu Agent bağlantıları ve milestone mesajları ile Graph'a organik olarak eklenir. Hiçbir manuel bağlantı kurmanıza gerek kalmadan sistem kendini yaşayan bir yapay zeka fabrikası ağına dönüştürür.
+The cloud control plane is built from the `Dockerfile` and deployed on **Railway** (`railway.toml`, health check at `/health`). `docker-compose.example.yml` runs it locally. Step-by-step guides: [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) and [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). Video generation itself runs on the local Windows worker.
 
 ---
 
-## 15. YOUTUBE + TIKTOK YAYINLAMA SİSTEMİ (PUBLISHING AGENT V1)
+## Türkçe
 
-Reels AI Factory V1 Publishing Layer, `05_READY` klasöründe hazır bulunan 30 saniyelik 9:16 final videoları **YouTube Shorts** ve **TikTok Studio** platformlarına otomatik metadata ile yükler ve platformların kendi yerel zamanlayıcılarına (**Native Scheduling**) kaydeder.
+**Reels AI Factory**, dikey kısa videoları (Reels / Shorts) planlayan, üreten, kalite kontrolünden geçiren ve YouTube, TikTok ve Instagram'da planlayan uçtan uca bir otomasyondur. Üretim kaydı olarak Obsidian kasası kullanılır.
 
-Schedule işlemi bir kez başarıyla tamamlandıktan sonra, **yayın saatinde bilgisayarınızın açık olması gerekmez.**
+> **Durum:** kişisel otomasyon projesi; kendi iki kanalımın (BuildVerse ve Crafts By Man) haftalık yayın takvimi için aktif
+> olarak kullanılıyor. Windows öncelikli; bulut kontrol katmanı Docker ile çalışır.
 
----
+### Ne yapar?
 
-### 🔑 1. Kurulum ve İlk Girişler
+Her hafta kanal başına 14 Reel'lik (7 gün × 2 slot) bir seri üretir. Obsidian'daki geçmiş Reel'leri okuyarak konu tekrarını engeller, İngilizce video promptu yazar, **Google Flow** arayüzünü Playwright ile kullanarak klipleri üretir, FFmpeg ile doğrulayıp birleştirir ve platformların **kendi zamanlayıcılarına** planlar; yayın anında bilgisayarın açık olması gerekmez. Railway üzerindeki küçük bir bulut servisi Telegram onaylarını ve isteğe bağlı Instagram işçisini yönetir.
 
-#### A. YouTube Shorts Kurulumu (Resmi YouTube Data API v3):
-1. **Google Cloud Console** üzerinde bir proje oluşturun ve **YouTube Data API v3** servisini aktif edin.
-2. **OAuth 2.0 İstemci Kimliği** (Masaüstü Uygulaması) oluşturup JSON dosyasını indirin.
-3. İndirdiğiniz dosyayı projenin içine şu adla kopyalayın:
-   👉 `secrets/youtube/client_secret.json`
-4. İlk yetkilendirme için:
-   👉 **`YOUTUBE_LOGIN.bat`** dosyasını çalıştırın.
-5. Açılan tarayıcıda YouTube kanalınızın bağlı olduğu Google hesabıyla giriş yapıp yetki verin. Token güvenli bir şekilde `secrets/youtube/token.json` dosyasına kaydedilir (`.gitignore` korumalıdır).
+### Özellikler
 
-#### B. TikTok Studio Kurulumu (İzole Chrome Profili):
-- TikTok için Flow profilinden tamamen ayrı, izole bir profil kullanılır (`%LOCALAPPDATA%\ReelsAIFactory\tiktok-profile`) ve **Port 9223** üzerinden çalışır (Flow portu 9222 ile asla karışmaz).
-- İlk giriş için:
-  👉 **`BUILDVERSE_GIRIS.bat`** dosyasını çalıştırın.
-- Açılan Chrome penceresinde TikTok hesabınıza manuel olarak giriş yapın. Oturum kalıcı olarak profilde saklanır.
+- **Haftalık hat:** PLAN → ÜRET → DOĞRULA → KİLİTLE → YOUTUBE → TIKTOK → INSTAGRAM; bir aşama ancak önceki tamamlanınca başlar.
+- **Fikir ve prompt motoru:** geçmiş analizi, çeşitlilik puanı, birden çok içerik modu (sessiz adım adım inşa, ortam sesli gerçek tarih hikâyeleri vb.).
+- **Google Flow otomasyonu:** gerçek Chrome oturumuna CDP ile bağlanır; giriş veya CAPTCHA çıkarsa atlatmaya çalışmaz, `USER_ACTION_REQUIRED` ile durur.
+- **Kalite kontrol:** en-boy oranı ve süre kontrolü, siyah/donmuş kare analizi, 3 × 10 sn parçayı 30 sn Reel'e birleştirme.
+- **Yayınlama:** YouTube (API veya Studio), TikTok Studio, Instagram (web veya Meta Graph API); çok dilli metadata ve yapay zekâ içerik bildirimi.
+- **Güvenlik:** çift yükleme koruması (SHA-256), platform bazında hata izolasyonu, "hemen paylaş" asla tıklanmaz, uzak içerik asla silinmez, kanallar arası karışma engellenir.
+- **Obsidian entegrasyonu**, **Telegram onaylı bulut kontrol katmanı** ve yaklaşık **780 pytest testi**.
 
----
+### Kurulum (Windows)
 
-### ⚙️ 2. Yapılandırma (`publishing.local.json` veya `config.local.json`)
+Gerekenler: Windows 10/11, Python 3.10+, `PATH`'te FFmpeg/FFprobe, Google Flow erişimi olan bir Google hesabı ve bir Obsidian kasası.
 
-```json
-{
-  "publishing": {
-    "enabled": true,
-    "timezone": "Europe/Istanbul",
-    "platforms": ["youtube", "tiktok"],
-    "daily_slots": ["18:00", "20:00"],
-    "schedule_start_date": "2026-08-20",
-    "youtube_enabled": true,
-    "tiktok_enabled": true,
-    "ai_disclosure": true
-  }
-}
-```
+1. `INSTALL_FIRST_TIME.bat` — sanal ortamı ve bağımlılıkları kurar.
+2. `FLOW_LOGIN.bat` — Google Flow'a elle giriş yapın, pencereyi açık bırakın.
+3. `BUILDVERSE_GIRIS.bat` / `CRAFTSBYMAN_GIRIS.bat` — kanal hesaplarına bir kez giriş yapın.
+4. Kredi harcamadan deneme: `.venv\Scripts\python automation\run.py --count 1 --dry-run`
+5. Haftalık çalışma: `BUILDVERSE_HAFTALIK_14_REEL.bat` veya `CRAFTSBYMAN_HAFTALIK_14_REEL.bat`.
 
-* **`timezone`**: Saat dilimi (`Europe/Istanbul`). Tüm UTC/yerel saat dönüşümleri timezone-aware olarak hesaplanır.
-* **`daily_slots`**: Günde kaç video yayınlanacağını ve saatlerini belirler (Örn: `["18:00", "20:00"]` -> Günde 2 slot).
-* **`schedule_start_date`**: Yayınların başlayacağı ilk gün (`YYYY-MM-DD`). **NULL ise kazara hemen yayınlama yapılmasını engellemek için sistem çalışmayı güvenli şekilde reddeder.**
+Ortam değişkenlerinin adları `.env.example` ve `.env.railway.example` dosyalarındadır; gerçek değerler ve OAuth dosyaları git'e girmez. Bulut kurulumu için [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) ve [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md) dosyalarına bakın.
 
 ---
 
-### 🚀 3. Yayınlama Komutları (1-Click Desktop Automation)
-
-* **1 READY Videoyu Planlamak İçin:**
-  👉 **`1_READY_VIDEOYU_PLANLA.bat`**
-  *(En eski yayınlanmamış 1 READY videoyu seçer, YouTube ve TikTok için sonraki boş slota planlar).*
-
-* **14 Videoyu (Haftalık Seri) Planlamak İçin:**
-  👉 **`14_VIDEOYU_PLANLA.bat`**
-  *(7 gün × günde 2 slot = 14 videoluk yayın takvimini sırayla oluşturur).*
-
-* **Kredi/Upload Harcamadan Test Etmek İçin (Dry-Run):**
-  ```powershell
-  python automation/publish.py --count 1 --dry-run
-  python automation/publish.py --count 14 --dry-run
-  ```
-
----
-
-### 🛡️ 4. Güvenlik, İdempotency ve Retry Mimarisi
-
-1. **İdempotency (Çift Yükleme Koruması):**
-   - Her Reel için `reel_id + platform` anahtarı ve video `SHA256` parmak izi takip edilir.
-   - Durumu `SCHEDULED` veya `PUBLISHED` olan bir platform kaydı asla yeniden yüklenmez.
-2. **Hata İzolasyonu (Failure Isolation):**
-   - Örneğin YouTube başarılı (`SCHEDULED`) ama TikTok başarısız (`FAILED`) olduysa; yeniden çalıştırmada YouTube **atlanır (SKIP)**, sadece TikTok **tekrar denenir (RETRY)**.
-3. **Fail-Safe Scheduling:**
-   - TikTok arayüzünde Schedule/Planla seçeneği bulunamazsa veya oturum düşmüşse video **asla hemen yayınlanmaz (Post butonuna basılmaz)**; durum `SCHEDULING_UNAVAILABLE` veya `AUTH_REQUIRED` olarak işaretlenir.
-4. **AI İçerik Bildirimi (Synthetic Media Disclosure):**
-   - YouTube Data API v3 üzerinde `containsSyntheticMedia: true` bayrağı iletilir.
-   - TikTok Studio üzerinde yapay zekâ içerik etiketi otomatik açılır.
-
----
-
-### 📊 5. Obsidian Publishing Queue & Knowledge Graph
-
-- **`13_PUBLISHING/PUBLISHING_QUEUE.md`**: Tüm videoların YouTube ve TikTok planlama durumlarını canlı bir tablo halinde gösterir.
-- **`13_PUBLISHING/PUB-REEL-XXXX-PLATFORM.md`**: Her platform yüklemesi için remote video ID, link, SHA256 ve zaman bilgisini saklar.
-- **`AGENT_CONTROL_CENTER.md`**: Yayınlama başladığında `PUBLISH_AGENT`'ı `RUNNING` durumunda ve aktif platform işlemiyle birlikte gösterir.
-- **Graph View Bağlantıları:**
-  `[[PUBLISH_AGENT]]` → `[[PUB-REEL-2026-0012-YOUTUBE]]` → `[[REEL-2026-0012]]`
-  şeklinde organik bir yayınlama ağı (Publishing Cluster) oluşturur.
+Built by [Berke Coşkuner](https://github.com/CoskunerBerke)
