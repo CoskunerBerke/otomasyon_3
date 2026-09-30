@@ -51,6 +51,9 @@ tmp_dl/
 13_PUBLISHING/
 calendar_dom.html
 
+# Live UI probe output (written by automation/diagnostics/live_ui_probe.py)
+automation/diagnostics/last_probe_result.json
+
 # Logs, Locks & Screenshots
 logs/
 screenshots/
