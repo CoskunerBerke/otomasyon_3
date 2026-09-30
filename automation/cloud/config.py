@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
 
+# LOCAL_WORKER_API_KEY values that have appeared in committed templates (.env.example).
+PLACEHOLDER_WORKER_API_KEYS = frozenset({"change-me", "reels_ai_local_worker_key_dev"})
+
+
 def mask_secret(secret: Optional[str], show_first: int = 4, show_last: int = 4) -> str:
     """Masks sensitive strings like tokens and passwords for safe logging."""
     if not secret:
@@ -162,7 +166,9 @@ class CloudConfig:
 
     @property
     def is_worker_api_enabled(self) -> bool:
-        return bool(self.local_worker_api_key)
+        # A key copied unchanged from a template is public; treat it as not configured so
+        # the worker endpoints stay closed instead of accepting a value anyone can read.
+        return bool(self.local_worker_api_key) and self.local_worker_api_key not in PLACEHOLDER_WORKER_API_KEYS
 
     def to_sanitized_dict(self) -> Dict[str, Any]:
         """Returns safe configuration summary without leaking secrets."""

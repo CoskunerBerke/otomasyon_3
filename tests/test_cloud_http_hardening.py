@@ -149,3 +149,17 @@ def test_stalled_client_does_not_block_the_server(server, monkeypatch):
         assert time.monotonic() - start < 5
     finally:
         stalled.close()
+
+
+@pytest.mark.parametrize("placeholder", ["change-me", "reels_ai_local_worker_key_dev"])
+def test_template_worker_key_keeps_worker_api_closed(tmp_path, placeholder):
+    from automation.cloud.local_worker_api import handle_worker_heartbeat
+
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = placeholder
+    db = Database(f"sqlite:///{tmp_path / 'test.db'}")
+    assert cfg.is_worker_api_enabled is False
+    code, resp = handle_worker_heartbeat({"X-Worker-Api-Key": placeholder}, {}, cfg, db)
+    assert code == 401
+    assert resp["error"] == "WORKER_API_DISABLED"
+    assert db.get_latest_heartbeat() is None
