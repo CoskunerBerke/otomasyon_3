@@ -18,7 +18,9 @@ from .models import (
 )
 
 
-DEFAULT_VAULT_PATH = Path(r"C:\Users\berke\obsidian\Reels_AI_Studio")
+# <home>\obsidian\Reels_AI_Studio -- on Windows Path.home() is %USERPROFILE%, so this is
+# the same vault folder as before without hardcoding one user's profile directory.
+DEFAULT_VAULT_PATH = Path.home() / "obsidian" / "Reels_AI_Studio"
 
 
 class ObsidianControlCenter:

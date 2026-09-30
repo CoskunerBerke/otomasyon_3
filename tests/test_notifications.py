@@ -19,9 +19,9 @@ def test_pytest_environment_detected():
     assert isinstance(provider, MockNotificationProvider)
 
 def test_test_path_markers_detected():
-    temp_p1 = Path(r"C:\Users\berke\AppData\Local\Temp\pytest-of-berke\pytest-12\test0\Mock_Output\2026-08-15")
+    temp_p1 = Path(r"C:\Users\demo\AppData\Local\Temp\pytest-of-demo\pytest-12\test0\Mock_Output\2026-08-15")
     temp_p2 = Path(r"/tmp/pytest-123/mock_output")
-    real_p = Path(r"C:\Users\berke\OneDrive\Masaüstü\AI_Reels\2026-08-15")
+    real_p = Path(r"C:\Users\demo\OneDrive\Masaüstü\AI_Reels\2026-08-15")
 
     assert is_test_path(temp_p1) is True
     assert is_test_path(temp_p2) is True
@@ -29,7 +29,7 @@ def test_test_path_markers_detected():
 
 def test_mock_notification_provider_records_payload():
     mock = MockNotificationProvider()
-    out_dir = Path(r"C:\Users\berke\OneDrive\Masaüstü\AI_Reels\2026-08-15")
+    out_dir = Path(r"C:\Users\demo\OneDrive\Masaüstü\AI_Reels\2026-08-15")
     mock.notify_success(1, out_dir)
 
     assert len(mock.sent_notifications) == 1
@@ -41,7 +41,7 @@ def test_mock_notification_provider_records_payload():
 
 def test_production_count_3_with_2_ready():
     mock = MockNotificationProvider()
-    out_dir = Path(r"C:\Users\berke\OneDrive\Masaüstü\AI_Reels\2026-08-15")
+    out_dir = Path(r"C:\Users\demo\OneDrive\Masaüstü\AI_Reels\2026-08-15")
     mock.notify_success(2, out_dir)
 
     item = mock.sent_notifications[0]
@@ -50,6 +50,6 @@ def test_production_count_3_with_2_ready():
 
 def test_windows_provider_suppresses_toast_on_test_path():
     provider = WindowsNotificationProvider(enabled=True)
-    temp_p = Path(r"C:\Users\berke\AppData\Local\Temp\pytest-of-berke\pytest-12\Mock_Output")
+    temp_p = Path(r"C:\Users\demo\AppData\Local\Temp\pytest-of-demo\pytest-12\Mock_Output")
     # Should safely return without sending toast or throwing exception
     provider.notify_success(2, temp_p)

@@ -1,6 +1,6 @@
 # Devam — Reels AI Factory (17 Eylül 2026)
 
-Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
+Repo: `./` (bu deponun kök dizini)
 Branch: **`main`** — her şey push'lu.
 
 **Türkçe cevap ver. Detaylı rapor ver. Canlı çalıştırma (Flow/yayın) sadece açık talimatla.**
