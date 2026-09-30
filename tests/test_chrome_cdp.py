@@ -3,6 +3,7 @@ Unit tests for Chrome executable detection, dedicated profile isolation,
 CDP endpoint checks, and CDPBrowserManager functionality.
 """
 import os
+import sys
 import json
 import pytest
 from pathlib import Path
@@ -14,6 +15,7 @@ from automation.flow.chrome_launcher import (
 from automation.flow.browser import CDPBrowserManager
 from automation.config import load_config, AppConfig
 
+@pytest.mark.skipif(sys.platform != "win32", reason="detects the installed Windows Chrome (chrome.exe)")
 def test_detect_chrome_executable():
     chrome_path = detect_chrome_path()
     assert chrome_path is not None

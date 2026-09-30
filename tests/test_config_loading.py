@@ -9,7 +9,7 @@ import json
 import pytest
 from pathlib import Path
 
-from automation.config import load_config, AppConfig
+from automation.config import load_config, AppConfig, auto_detect_vault
 from automation.weekly_orchestrator import WeeklyOrchestrator
 
 
@@ -34,6 +34,9 @@ def test_load_config_with_custom_base_dir(tmp_path):
 
 def test_load_config_without_base_dir_preserves_default():
     """Test: load_config() without base_dir preserves default repo root lookup."""
+    repo_root = Path(__file__).resolve().parents[1]
+    if not (repo_root / "config.local.json").exists() and auto_detect_vault() is None:
+        pytest.skip("needs this machine's config.local.json or an Obsidian vault named Reels_AI_Studio")
     loaded = load_config()
     assert isinstance(loaded, AppConfig)
     assert loaded.vault_path is not None
