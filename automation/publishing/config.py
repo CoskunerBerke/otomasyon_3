@@ -12,6 +12,11 @@ def get_default_tiktok_profile_path() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         return Path(local_app_data) / "ReelsAIFactory" / "tiktok-profile"
+    # Same fallback as TikTokBrowserManager and the YouTube Studio profile below; without
+    # it this returned None and load_publishing_config() crashed on .mkdir().
+    return Path.home() / ".reels_ai_factory" / "tiktok-profile"
+
+
 def get_default_youtube_studio_profile_path() -> Path:
     """Returns %LOCALAPPDATA%\\ReelsAIFactory\\youtube-studio-profile on Windows."""
     local_app_data = os.environ.get("LOCALAPPDATA")

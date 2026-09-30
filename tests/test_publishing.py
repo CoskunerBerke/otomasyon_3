@@ -38,6 +38,16 @@ def test_publishing_config_defaults_and_paths(tmp_path: Path):
     assert cfg.tiktok_debug_port == 9223
     assert "tiktok-profile" in str(cfg.tiktok_profile_dir)
 
+def test_publishing_config_profile_defaults_without_localappdata(tmp_path: Path, monkeypatch):
+    """Regression: with no LOCALAPPDATA (Linux/CI) the TikTok default profile path was None."""
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    cfg = load_publishing_config(base_dir=tmp_path)
+    assert cfg.tiktok_profile_dir == tmp_path / "home" / ".reels_ai_factory" / "tiktok-profile"
+    assert cfg.tiktok_profile_dir.is_dir()
+    assert cfg.youtube_studio_profile_dir == tmp_path / "home" / ".reels_ai_factory" / "youtube-studio-profile"
+
 def test_schedule_planner_14_videos_distribution():
     start_date = "2026-08-20"
     slots = SchedulePlanner.generate_slots(
