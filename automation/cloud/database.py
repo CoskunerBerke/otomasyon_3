@@ -559,23 +559,37 @@ class Database:
                 ) for r in rows
             ]
 
-    def claim_due_instagram_job(self, worker_id: str, prepare_cutoff_local: str) -> Optional[InstagramScheduledJob]:
-        """Atomically claims the oldest due Instagram job ready for preparation/publishing."""
+    def claim_due_instagram_job(
+        self,
+        worker_id: str,
+        prepare_cutoff_local: str,
+        include_ready_to_publish: bool = True
+    ) -> Optional[InstagramScheduledJob]:
+        """
+        Atomically claims the oldest due Instagram job ready for preparation/publishing.
+
+        include_ready_to_publish=False leaves READY_TO_PUBLISH jobs alone. The worker passes
+        that while publishing is disabled: such a job has already been uploaded and is only
+        waiting for the publish flag, and claiming it again would re-run the whole upload.
+        """
         import datetime
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lease_expires = (datetime.datetime.now() + datetime.timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
 
+        claimable = ["MEDIA_READY", "READY_TO_PUBLISH"] if include_ready_to_publish else ["MEDIA_READY"]
+        placeholders = ", ".join("?" for _ in claimable)
+
         with self.get_connection() as conn:
             cur = conn.cursor()
             # Select job that is MEDIA_READY or READY_TO_PUBLISH and due
-            sql_select = """
+            sql_select = f"""
             SELECT job_id FROM instagram_scheduled_jobs
-            WHERE (status IN ('MEDIA_READY', 'READY_TO_PUBLISH') OR (status = 'PREPARING' AND lease_expires_at < ?))
+            WHERE (status IN ({placeholders}) OR (status = 'PREPARING' AND lease_expires_at < ?))
               AND scheduled_at_local <= ?
             ORDER BY scheduled_at_local ASC
             LIMIT 1
             """
-            self._execute(cur, sql_select, (now_str, prepare_cutoff_local))
+            self._execute(cur, sql_select, (*claimable, now_str, prepare_cutoff_local))
             row = cur.fetchone()
             if not row:
                 return None

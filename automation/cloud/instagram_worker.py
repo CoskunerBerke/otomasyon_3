@@ -81,8 +81,14 @@ class InstagramCloudWorker:
 
         processed_count = 0
         while True:
-            # Atomic claim to prevent double publishing
-            job = self.db.claim_due_instagram_job(worker_id, prepare_cutoff)
+            # Atomic claim to prevent double publishing. While publishing is disabled a job
+            # that reached READY_TO_PUBLISH stays parked there; claiming it again would
+            # re-create the container and re-upload the video in an endless loop.
+            job = self.db.claim_due_instagram_job(
+                worker_id,
+                prepare_cutoff,
+                include_ready_to_publish=self.config.instagram_allow_publish
+            )
             if not job:
                 break
 

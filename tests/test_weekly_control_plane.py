@@ -578,6 +578,62 @@ def test_instagram_worker_dry_run_gate_blocks_real_upload(tmp_path):
     assert dry_job.status == InstagramJobStatus.PUBLISHED
 
 
+def test_instagram_worker_parks_ready_job_while_publishing_disabled(tmp_path):
+    """Regression: with dry_run=False / allow_upload=True / allow_publish=False a job ended in
+    READY_TO_PUBLISH, was immediately claimable again, and process_due_jobs() re-created the
+    container and re-uploaded the same video to Meta in an endless loop (the scheduler thread
+    never returned). The job must now wait in READY_TO_PUBLISH until publishing is enabled."""
+    cfg = CloudConfig(tmp_path)
+    cfg.database_url = f"sqlite:///{tmp_path / 'cloud_test.db'}"
+    cfg.instagram_prepare_minutes_before = 30
+    cfg.instagram_dry_run = False
+    cfg.instagram_allow_upload = True
+    cfg.instagram_allow_publish = False  # api_client below is fully mocked
+
+    db = Database(cfg.database_url)
+    storage = LocalMediaStorageAdapter(tmp_path / "media_storage")
+    mock_mp4 = tmp_path / "mock_reel.mp4"
+    mock_mp4.write_bytes(b"x" * 2048)
+    media_key = storage.put_file(mock_mp4, "reels/REEL-0013.mp4")
+
+    now_dt = datetime.datetime.now()
+    db.save_instagram_job(InstagramScheduledJob(
+        job_id="JOB-IG-HOLD",
+        week_id="2026-W35",
+        reel_id="REEL-2026-0013",
+        scheduled_at_local=(now_dt + datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
+        scheduled_at_utc=(now_dt - datetime.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+        media_object_key=media_key,
+        media_sha256=compute_file_sha256(mock_mp4),
+        caption="Hold until publishing is enabled",
+        status=InstagramJobStatus.MEDIA_READY
+    ))
+
+    mock_api = MagicMock(spec=InstagramAPIClient)
+    mock_api.check_publishing_limit.return_value = (True, {"quota_usage": 0, "config": {"quota_total": 25}}, None)
+    containers = iter([(True, "CREATED", f"CONT_{i}", "https://rupload.meta.com/x") for i in range(3)])
+    # A fourth container means the loop is back; StopIteration ends it via execute_job's except.
+    mock_api.create_reels_container.side_effect = lambda _req: next(containers)
+    mock_api.upload_video_resumable.return_value = (True, "UPLOAD_SUCCESS")
+    mock_api.poll_container_status.return_value = (True, "FINISHED", {"status_code": "FINISHED"})
+    mock_api.publish_media.return_value = (True, "PUBLISHED", "IG_MEDIA_77")
+    mock_api.get_media_object.return_value = (True, {"id": "IG_MEDIA_77", "permalink": "https://instagr.am/p/77"}, None)
+
+    worker = InstagramCloudWorker(cfg, db, storage, api_client=mock_api)
+    assert worker.process_due_jobs("test_worker") == 1
+    assert worker.process_due_jobs("test_worker") == 0  # later scheduler passes leave it alone
+    assert mock_api.create_reels_container.call_count == 1
+    assert mock_api.upload_video_resumable.call_count == 1
+    mock_api.publish_media.assert_not_called()
+    assert db.get_instagram_job("JOB-IG-HOLD").status == InstagramJobStatus.READY_TO_PUBLISH
+
+    # Once publishing is switched on, the parked job is picked up and published.
+    cfg.instagram_allow_publish = True
+    assert worker.process_due_jobs("test_worker") == 1
+    assert db.get_instagram_job("JOB-IG-HOLD").status == InstagramJobStatus.REMOTE_VERIFIED
+    mock_api.publish_media.assert_called_once()
+
+
 def test_notification_duplicate_prevention(tmp_path):
     """Test 26 & 27: NotificationLog prevents sending duplicate alerts for the same failure."""
     db_file = tmp_path / "cloud_test.db"
