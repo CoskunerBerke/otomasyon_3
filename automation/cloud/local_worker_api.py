@@ -460,6 +460,13 @@ def handle_media_upload(
     """
     auth_ok, auth_err = _authenticate_worker(headers, config)
     if not auth_ok:
+        # Never keep a streamed body from an unauthenticated caller on disk.
+        streamed = payload.get("__stream_file_path__") if isinstance(payload, dict) else None
+        if streamed:
+            try:
+                Path(streamed).unlink(missing_ok=True)
+            except OSError:
+                pass
         return 401, {"ok": False, "error": auth_err}
 
     fields = {}

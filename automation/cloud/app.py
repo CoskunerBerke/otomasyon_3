@@ -10,6 +10,7 @@ import time
 import logging
 import threading
 import argparse
+from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, Tuple, Optional
 
@@ -25,6 +26,7 @@ from .scheduler import CloudScheduler
 from .health import get_health_status
 from .telegram_webhook import handle_webhook_request
 from .local_worker_api import (
+    _authenticate_worker,
     handle_worker_heartbeat,
     handle_get_next_command,
     handle_complete_command,
@@ -125,6 +127,11 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
     """Standard HTTP request handler delegating to CloudApp router."""
     app: CloudApp = None  # Injected on server startup
 
+    # The server handles one request at a time, so a client that opens a connection and
+    # then stalls would otherwise block every other request (including /health) forever.
+    # This bounds each socket read/write, not the total transfer time of an upload.
+    timeout = 60
+
     def _send_json(self, status_code: int, data: Dict[str, Any]) -> None:
         payload = json.dumps(data).encode("utf-8")
         self.send_response(status_code)
@@ -133,14 +140,32 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _dispatch(self, method: str, headers_dict: Dict[str, str], body: Dict[str, Any]) -> None:
+        """
+        Routes the request and always answers. An unexpected exception becomes a generic
+        500 (details go to the server log only) instead of a dropped connection, which
+        Telegram would keep retrying for the same update.
+        """
+        try:
+            code, resp = self.app.route_request(method, self.path, headers_dict, body)
+        except Exception:
+            logger.exception(f"[HTTP] Unhandled error while serving {method} {self.path.split('?')[0]}")
+            code, resp = 500, {"ok": False, "error": "INTERNAL_ERROR"}
+        self._send_json(code, resp)
+
     def do_GET(self):
         headers_dict = {k: v for k, v in self.headers.items()}
-        code, resp = self.app.route_request("GET", self.path, headers_dict, {})
-        self._send_json(code, resp)
+        self._dispatch("GET", headers_dict, {})
 
     def do_POST(self):
         headers_dict = {k: v for k, v in self.headers.items()}
-        content_len = int(self.headers.get("Content-Length", 0))
+        try:
+            content_len = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            content_len = -1
+        if content_len < 0:
+            self._send_json(400, {"ok": False, "error": "INVALID_CONTENT_LENGTH"})
+            return
         content_type = self.headers.get("Content-Type", "")
 
         clean_path = self.path.split("?")[0].rstrip("/")
@@ -149,6 +174,13 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
 
         # Bounded streaming multipart upload for /worker/media/upload
         if clean_path == "/worker/media/upload" and "multipart/form-data" in content_type:
+            # Authenticate before a single byte of the body is written to disk; otherwise
+            # anyone could leave up to 100 MB of temp files behind per request.
+            auth_ok, auth_err = _authenticate_worker(headers_dict, self.app.config)
+            if not auth_ok:
+                self._send_json(401, {"ok": False, "error": auth_err})
+                return
+
             fields, temp_path, filename, file_size, calculated_sha, err = stream_multipart_request(
                 self.rfile, content_len, content_type
             )
@@ -164,8 +196,16 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
                 "__file_size__": file_size,
                 "__calculated_sha256__": calculated_sha
             }
-            code, resp = self.app.route_request("POST", self.path, headers_dict, body_data)
-            self._send_json(code, resp)
+            try:
+                self._dispatch("POST", headers_dict, body_data)
+            finally:
+                # The handler deletes the file on every path it knows about; this also
+                # covers an exception inside it.
+                if temp_path and Path(temp_path).exists():
+                    try:
+                        Path(temp_path).unlink()
+                    except OSError:
+                        pass
             return
 
         if content_len > 10 * 1024 * 1024:
@@ -180,8 +220,13 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 body_data = {"__raw_body__": raw_body}
 
-        code, resp = self.app.route_request("POST", self.path, headers_dict, body_data)
-        self._send_json(code, resp)
+        # Every route expects a JSON object; a list, string or number would otherwise
+        # reach payload.get(...) and crash the handler.
+        if not isinstance(body_data, dict):
+            self._send_json(400, {"ok": False, "error": "INVALID_JSON_BODY"})
+            return
+
+        self._dispatch("POST", headers_dict, body_data)
 
     def log_message(self, format, *args):
         # Suppress noisy standard request logs

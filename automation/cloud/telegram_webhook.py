@@ -40,16 +40,18 @@ def handle_webhook_request(
             return 403, {"ok": False, "error": "FORBIDDEN_INVALID_WEBHOOK_SECRET"}
 
     # 3. Dispatch Callback Query
-    if "callback_query" in update:
+    if isinstance(update.get("callback_query"), dict):
         cq = update["callback_query"]
         result = approval_service.handle_callback_query(cq)
         return 200, {"ok": True, "result": result}
 
     # 4. Message handler (e.g. /start acknowledgment)
-    if "message" in update:
-        msg = update["message"]
-        text = msg.get("text", "")
-        if text.startswith("/start"):
+    # Photos, stickers and service messages carry no text; "text": null must not crash
+    # the handler either (a failed webhook makes Telegram redeliver the same update).
+    msg = update.get("message")
+    if isinstance(msg, dict):
+        text = msg.get("text") or ""
+        if isinstance(text, str) and text.startswith("/start"):
             logger.info(f"[TELEGRAM] /start received from user {msg.get('from', {}).get('id')}")
             return 200, {"ok": True, "action": "START_ACK"}
 
