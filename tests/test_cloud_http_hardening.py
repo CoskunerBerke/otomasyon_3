@@ -163,3 +163,16 @@ def test_template_worker_key_keeps_worker_api_closed(tmp_path, placeholder):
     assert code == 401
     assert resp["error"] == "WORKER_API_DISABLED"
     assert db.get_latest_heartbeat() is None
+
+
+def test_disabled_telegram_webhook_is_closed(server):
+    httpd, handler, _ = server
+    handler.app.config.enable_telegram_webhook = False
+    headers = {"X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET, "Content-Type": "application/json"}
+    body = json.dumps({"callback_query": {"id": "1", "from": {"id": 1}, "data": "weekly_approve:APPR-1"}}).encode()
+    code, resp = _request(httpd, "POST", "/telegram/webhook", body, headers)
+    assert code == 503
+    assert resp["error"] == "TELEGRAM_WEBHOOK_DISABLED"
+
+    code, _ = _request(httpd, "GET", "/health")
+    assert code == 200

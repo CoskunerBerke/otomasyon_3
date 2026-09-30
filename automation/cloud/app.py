@@ -69,6 +69,9 @@ class CloudApp:
             return 200, get_health_status(self.config, self.db)
 
         if method == "POST" and clean_path == "/telegram/webhook":
+            # ENABLE_TELEGRAM_WEBHOOK=false must really switch the endpoint off.
+            if not self.config.enable_telegram_webhook:
+                return 503, {"ok": False, "error": "TELEGRAM_WEBHOOK_DISABLED"}
             return handle_webhook_request(headers, body_json, self.config, self.approval_service)
 
         if method == "POST" and clean_path == "/worker/heartbeat":
