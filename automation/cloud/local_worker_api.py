@@ -31,6 +31,31 @@ from .media_storage import MediaStorageInterface, compute_file_sha256, get_media
 WEEK_REGEX = re.compile(r"^\d{4}-W(?:0[1-9]|[1-4]\d|5[0-3])$")
 REEL_REGEX = re.compile(r"^REEL-\d{4}-\d{4}$")
 JOB_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-]+$")
+STREAM_TEMP_DIR_NAME = "cloud_media_stream"
+STREAM_TEMP_NAME_REGEX = re.compile(r"^stream_[0-9a-f]{12}\.mp4$")
+
+
+def _stream_temp_dir() -> Path:
+    """Directory that stream_multipart_request writes uploaded bodies to."""
+    return Path(tempfile.gettempdir()) / STREAM_TEMP_DIR_NAME
+
+
+def _trusted_stream_path(value: Any) -> Optional[Path]:
+    """
+    Returns the streamed upload's temp file only if it is a file stream_multipart_request
+    could have created (stream_<12 hex>.mp4 directly inside the stream temp dir).
+    Anything else returns None, so a forged path can never be read into storage or deleted.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        candidate = Path(value).resolve()
+        stream_dir = _stream_temp_dir().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if candidate.parent != stream_dir or not STREAM_TEMP_NAME_REGEX.match(candidate.name):
+        return None
+    return candidate
 
 
 def _authenticate_worker(headers: Dict[str, str], config: CloudConfig) -> Tuple[bool, Optional[str]]:
@@ -68,7 +93,7 @@ def stream_multipart_request(
     boundary = match.group(1).strip().strip('"').encode("utf-8")
     delimiter = b"--" + boundary
 
-    temp_dir = Path(tempfile.gettempdir()) / "cloud_media_stream"
+    temp_dir = _stream_temp_dir()
     temp_dir.mkdir(parents=True, exist_ok=True)
     temp_path = temp_dir / f"stream_{uuid.uuid4().hex[:12]}.mp4"
 
@@ -460,13 +485,8 @@ def handle_media_upload(
     """
     auth_ok, auth_err = _authenticate_worker(headers, config)
     if not auth_ok:
-        # Never keep a streamed body from an unauthenticated caller on disk.
-        streamed = payload.get("__stream_file_path__") if isinstance(payload, dict) else None
-        if streamed:
-            try:
-                Path(streamed).unlink(missing_ok=True)
-            except OSError:
-                pass
+        # The HTTP layer authenticates before streaming a body and deletes its own temp
+        # file; nothing named in the payload is touched here.
         return 401, {"ok": False, "error": auth_err}
 
     fields = {}
@@ -477,9 +497,14 @@ def handle_media_upload(
     is_streamed = False
 
     if "__stream_file_path__" in payload:
-        # Received via bounded streaming
+        # Received via bounded streaming. Only the HTTP layer sets this key (it strips
+        # "__" keys from client JSON); still refuse any path outside the stream temp dir.
+        raw_stream_path = payload.get("__stream_file_path__")
+        if raw_stream_path:
+            temp_file = _trusted_stream_path(raw_stream_path)
+            if temp_file is None:
+                return 400, {"ok": False, "error": "INVALID_STREAM_PATH"}
         fields = payload.get("__fields__", {})
-        temp_file = Path(payload["__stream_file_path__"])
         filename = payload.get("__filename__", "video.mp4")
         file_size = payload.get("__file_size__", 0)
         server_sha256 = payload.get("__calculated_sha256__", "")

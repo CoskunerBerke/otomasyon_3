@@ -222,6 +222,11 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
                 body_data = json.loads(raw_body.decode("utf-8"))
             except Exception:
                 body_data = {"__raw_body__": raw_body}
+            else:
+                # "__"-prefixed keys are reserved for metadata the server attaches itself
+                # (such as a streamed upload's temp-file path); a client must never set them.
+                if isinstance(body_data, dict):
+                    body_data = {k: v for k, v in body_data.items() if not k.startswith("__")}
 
         # Every route expects a JSON object; a list, string or number would otherwise
         # reach payload.get(...) and crash the handler.

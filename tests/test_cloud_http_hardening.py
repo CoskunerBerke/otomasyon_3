@@ -4,6 +4,7 @@ Regression tests for the cloud control plane HTTP layer (automation/cloud/app.py
 Runs the real CloudHTTPRequestHandler on a loopback port with a SQLite database and local
 media storage. No Telegram token is configured, so nothing leaves the machine.
 """
+import hashlib
 import http.client
 import json
 import socket
@@ -118,16 +119,112 @@ def test_unauthenticated_multipart_upload_writes_nothing_to_disk(server):
     assert not stream_dir.exists() or not any(stream_dir.iterdir())
 
 
-def test_media_upload_handler_deletes_streamed_file_on_auth_failure(tmp_path):
+def _multipart_upload_body(boundary, fields, video):
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        for name, value in fields.items()
+    ]
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"reel.mp4\"\r\n"
+        f"Content-Type: video/mp4\r\n\r\n".encode() + video + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts)
+
+
+def test_authenticated_multipart_upload_still_works_and_leaves_no_temp_file(server):
+    httpd, _, tmp_path = server
+    video = b"\x00\x00\x00\x18ftypmp42 fictional demo bytes" * 100
+    sha = hashlib.sha256(video).hexdigest()
+    boundary = "TESTBOUNDARY"
+    body = _multipart_upload_body(boundary, {
+        "week_id": "2099-W01", "reel_id": "REEL-2099-0001", "media_sha256": sha,
+    }, video)
+    code, resp = _request(httpd, "POST", "/worker/media/upload", body, {
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "X-Worker-Api-Key": WORKER_KEY,
+    })
+    assert code == 200, resp
+    assert resp["status"] == "MEDIA_READY"
+    assert resp["media_sha256"] == sha
+    stream_dir = tmp_path / "cloud_media_stream"
+    assert not any(stream_dir.iterdir())
+
+
+@pytest.mark.parametrize("configured_key, sent_headers, expected_error", [
+    (WORKER_KEY, {}, "UNAUTHORIZED_WORKER_KEY"),
+    (WORKER_KEY, {"X-Worker-Api-Key": "wrong"}, "UNAUTHORIZED_WORKER_KEY"),
+    ("", {}, "WORKER_API_DISABLED"),
+])
+def test_json_body_cannot_make_the_server_delete_a_file(server, configured_key, sent_headers,
+                                                         expected_error):
+    # A client-written JSON body used to reach the "delete the streamed temp file" cleanup
+    # with any path it liked, so an anonymous request could delete files the server can write.
+    httpd, handler, tmp_path = server
+    handler.app.config.local_worker_api_key = configured_key
+    victim = tmp_path / "victim_important.db"
+    victim.write_bytes(b"precious")
+
+    code, resp = _request(httpd, "POST", "/worker/media/upload",
+                          json.dumps({"__stream_file_path__": str(victim)}).encode(),
+                          {"Content-Type": "application/json", **sent_headers})
+    assert code == 401
+    assert resp["error"] == expected_error
+    assert victim.read_bytes() == b"precious"
+
+
+def test_key_holder_cannot_upload_or_delete_an_arbitrary_local_file(server):
+    # Even with a valid key, forged stream metadata must not read a local file into
+    # media storage (and then delete it).
+    httpd, _, tmp_path = server
+    secret = tmp_path / "secret_config.txt"
+    secret.write_bytes(b"not a video")
+    sha = hashlib.sha256(secret.read_bytes()).hexdigest()
+    forged = {
+        "__stream_file_path__": str(secret),
+        "__filename__": "x.mp4",
+        "__file_size__": secret.stat().st_size,
+        "__calculated_sha256__": sha,
+        "__fields__": {"week_id": "2099-W01", "reel_id": "REEL-2099-0001", "media_sha256": sha},
+        "week_id": "2099-W01", "reel_id": "REEL-2099-0001", "media_sha256": sha,
+    }
+    code, resp = _request(httpd, "POST", "/worker/media/upload", json.dumps(forged).encode(),
+                          {"Content-Type": "application/json", "X-Worker-Api-Key": WORKER_KEY})
+    assert code == 400
+    assert resp["error"] == "MEDIA_EMPTY"
+    assert secret.read_bytes() == b"not a video"
+    storage_dir = tmp_path / "workspace" / "cloud_media_storage"
+    assert not storage_dir.exists() or not any(p.is_file() for p in storage_dir.rglob("*"))
+
+
+def test_media_upload_handler_never_touches_a_payload_path_on_auth_failure(tmp_path):
     cfg = CloudConfig(tmp_path)
     cfg.local_worker_api_key = WORKER_KEY
     db = Database(f"sqlite:///{tmp_path / 'test.db'}")
-    streamed = tmp_path / "stream_abc.mp4"
-    streamed.write_bytes(b"x" * 1000)
+    victim = tmp_path / "victim.db"
+    victim.write_bytes(b"x" * 1000)
 
-    code, _ = handle_media_upload({"X-Worker-Api-Key": "wrong"}, {"__stream_file_path__": str(streamed)}, cfg, db)
+    code, _ = handle_media_upload({"X-Worker-Api-Key": "wrong"}, {"__stream_file_path__": str(victim)}, cfg, db)
     assert code == 401
-    assert not streamed.exists()
+    assert victim.exists()
+
+
+def test_media_upload_handler_rejects_stream_path_outside_stream_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
+    (tmp_path / "tmp").mkdir()
+    cfg = CloudConfig(tmp_path)
+    cfg.local_worker_api_key = WORKER_KEY
+    db = Database(f"sqlite:///{tmp_path / 'test.db'}")
+    outside = tmp_path / "stream_0123456789ab.mp4"
+    outside.write_bytes(b"x" * 1000)
+    traversal = tmp_path / "tmp" / "cloud_media_stream" / ".." / ".." / outside.name
+
+    for candidate in (outside, traversal):
+        payload = {"__stream_file_path__": str(candidate), "__fields__": {}, "__file_size__": 1000}
+        code, resp = handle_media_upload({"X-Worker-Api-Key": WORKER_KEY}, payload, cfg, db)
+        assert code == 400
+        assert resp["error"] == "INVALID_STREAM_PATH"
+        assert outside.exists()
 
 
 def test_stalled_client_does_not_block_the_server(server, monkeypatch):
