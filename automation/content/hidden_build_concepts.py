@@ -625,7 +625,7 @@ HIDDEN_BUILD_CONCEPTS: List[HiddenBuildConcept] = [
         },
     ),
     # ---------------------------------------------------------------- 2026-10-01
-    # Built from the channel's own YouTube numbers for 17-30 September. Seven Reels cleared
+    # Built from the channel's own YouTube numbers for 17-30 September. Eight Reels cleared
     # 1,000 views and every one of them was a heavy machine with a strong silhouette going
     # into the ground, opening on a working room full of heat, light or sound -- the steam
     # roller forge led on engaged views and watch time (688, 89% average viewed), the
