@@ -13,6 +13,7 @@ from automation.cloud.config import CloudConfig
 from automation.cloud.database import Database
 from automation.cloud.models import TelegramApproval, TelegramApprovalStatus
 from automation.cloud.railway_production_preflight import run_railway_preflight
+from automation.cloud.security import verify_telegram_chat, verify_telegram_user
 from automation.cloud.telegram_bot import TelegramBotClient
 from automation.publishing.instagram_api import InstagramAPIClient
 from automation.publishing.instagram_live_test import EXIT_ACCOUNT_MISMATCH, InstagramLiveTestRunner
@@ -90,6 +91,54 @@ def test_approval_is_not_sent_and_callbacks_are_refused_without_telegram_ids(tmp
         "data": "weekly_approve:APPR-DEMO",
     })
     assert res["status"] == "UNAUTHORIZED"
+    assert db.get_approval("APPR-DEMO").status == TelegramApprovalStatus.PENDING
+    assert db.get_next_pending_command() is None
+
+
+def test_telegram_allow_lists_fail_closed_when_unconfigured(caplog):
+    # An unset TELEGRAM_CHAT_ID used to mean "accept every chat".
+    with caplog.at_level("WARNING", logger="ReelsAIFactory.Security"):
+        assert verify_telegram_chat(DEMO_TELEGRAM_ID, None) is False
+        assert verify_telegram_chat(None, None) is False
+        assert verify_telegram_user(DEMO_TELEGRAM_ID, None) is False
+    assert "TELEGRAM_CHAT_ID is not set" in caplog.text
+    assert "TELEGRAM_ALLOWED_USER_ID is not set" in caplog.text
+
+
+def test_configured_telegram_allow_lists_behave_as_before():
+    assert verify_telegram_user(DEMO_TELEGRAM_ID, DEMO_TELEGRAM_ID) is True
+    assert verify_telegram_user(DEMO_TELEGRAM_ID + 1, DEMO_TELEGRAM_ID) is False
+    assert verify_telegram_user(None, DEMO_TELEGRAM_ID) is False
+    assert verify_telegram_chat(-100424242, -100424242) is True
+    assert verify_telegram_chat(-100424243, -100424242) is False
+    # An update without a chat (inline message) is still left to the user check.
+    assert verify_telegram_chat(None, -100424242) is True
+
+
+def test_allowed_user_cannot_approve_while_telegram_chat_id_is_unset(tmp_path, no_identity_env):
+    no_identity_env.setenv("TELEGRAM_ALLOWED_USER_ID", str(DEMO_TELEGRAM_ID))
+    cfg = CloudConfig(tmp_path)
+    cfg.database_url = f"sqlite:///{tmp_path / 'cloud.db'}"
+    assert cfg.telegram_chat_id is None
+    db = Database(cfg.database_url)
+    bot = MagicMock(spec=TelegramBotClient)
+    approval_svc = ApprovalService(cfg, db, bot)
+
+    db.save_approval(TelegramApproval(
+        approval_id="APPR-DEMO",
+        week_id="2099-W01",
+        next_week_id="2099-W02",
+        status=TelegramApprovalStatus.PENDING,
+        telegram_message_id=1,
+        telegram_chat_id=DEMO_TELEGRAM_ID,
+    ))
+    res = approval_svc.handle_callback_query({
+        "id": "cb_demo",
+        "from": {"id": DEMO_TELEGRAM_ID},
+        "message": {"chat": {"id": 777000}, "message_id": 1},
+        "data": "weekly_approve:APPR-DEMO",
+    })
+    assert res == {"status": "UNAUTHORIZED", "message": "Unauthorized chat ID"}
     assert db.get_approval("APPR-DEMO").status == TelegramApprovalStatus.PENDING
     assert db.get_next_pending_command() is None
 
