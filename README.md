@@ -241,7 +241,7 @@ Local generation and publishing read `config.local.json` / `publishing.local.jso
 | `APP_TIMEZONE` | Scheduling timezone (default `Europe/Istanbul`) |
 | `DATABASE_URL` | PostgreSQL URL in production; `sqlite:///...` for local development |
 | `TELEGRAM_BOT_TOKEN` | Bot that sends the approval message |
-| `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID` | Only this user in this chat can approve or reject a week |
+| `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID` | Only this user in this chat can approve or reject a week. No default: while unset, no approval message is sent and every button press is refused |
 | `TELEGRAM_WEBHOOK_SECRET` | Expected `X-Telegram-Bot-Api-Secret-Token` header (`python -m automation.cloud.generate_webhook_secret`) |
 | `ENABLE_TELEGRAM_WEBHOOK` | `false` closes `/telegram/webhook` (503) |
 | `PUBLIC_BASE_URL` | HTTPS URL of the cloud service (used by the local worker and the webhook setup) |
@@ -251,7 +251,7 @@ Local generation and publishing read `config.local.json` / `publishing.local.jso
 | `MEDIA_STORAGE_BACKEND` | `local` or `s3` |
 | `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | S3-compatible private bucket (Railway Storage) |
 | `META_GRAPH_VERSION`, `META_APP_ID`, `META_APP_SECRET`, `META_ACCESS_TOKEN` | Meta Graph API access for the Instagram worker |
-| `INSTAGRAM_ACCOUNT_ID`, `INSTAGRAM_EXPECTED_USERNAME` | Target account; the Instagram preflight fails if the token belongs to another username |
+| `INSTAGRAM_ACCOUNT_ID`, `INSTAGRAM_EXPECTED_USERNAME` | Target account, no default. The Railway preflight fails while either is unset or a template value; the Instagram preflight needs the username (it can discover the ID from linked Pages) and fails if the account belongs to another username |
 | `INSTAGRAM_DRY_RUN`, `INSTAGRAM_ALLOW_UPLOAD`, `INSTAGRAM_ALLOW_PUBLISH` | Safety flags; the defaults are dry run, no upload, no publish |
 | `INSTAGRAM_PREPARE_MINUTES_BEFORE` | How early the Instagram worker prepares a due post |
 
@@ -263,7 +263,7 @@ Read but not applied yet: `WEEKLY_APPROVAL_DAY` (the approval day is fixed to da
 python -m pytest -q tests/
 ```
 
-The suite has more than 1,000 collected cases in 63 test files and runs fully offline: browsers, Google Flow, YouTube, TikTok, Instagram, Meta and Telegram are replaced by mocks or fakes, and the cloud tests use SQLite and a loopback HTTP server. The FFmpeg-based QC tests need `ffmpeg`/`ffprobe` on `PATH`. Three checks describe the production PC rather than the code (an installed `chrome.exe`, a configured Obsidian vault, the git-ignored YouTube OAuth client secret) and skip themselves when those are missing. [CI](.github/workflows/ci.yml) installs FFmpeg and runs the whole suite on Python 3.11 for every push and pull request.
+The suite has more than 1,000 collected cases in 64 test files and runs fully offline: browsers, Google Flow, YouTube, TikTok, Instagram, Meta and Telegram are replaced by mocks or fakes, and the cloud tests use SQLite and a loopback HTTP server. The FFmpeg-based QC tests need `ffmpeg`/`ffprobe` on `PATH`. Three checks describe the production PC rather than the code (an installed `chrome.exe`, a configured Obsidian vault, the git-ignored YouTube OAuth client secret) and skip themselves when those are missing. [CI](.github/workflows/ci.yml) installs FFmpeg and runs the whole suite on Python 3.11 for every push and pull request.
 
 ## Deployment
 
@@ -271,7 +271,7 @@ The cloud control plane is built from the `Dockerfile` and deployed on **Railway
 
 ## Security
 
-- Worker endpoints require `X-Worker-Api-Key`; the Telegram webhook requires the secret header (mandatory in production). Both are compared in constant time, and approvals are accepted only from the configured user and chat.
+- Worker endpoints require `X-Worker-Api-Key`; the Telegram webhook requires the secret header (mandatory in production). Both are compared in constant time, and approvals are accepted only from the configured user and chat. The code has no built-in Telegram or Instagram account IDs, so a missing value fails closed.
 - Uploads are authenticated before the body is read, capped at 100 MB, streamed to disk with an incremental SHA-256 and checked against the client's hash.
 - Malformed requests get a 4xx and unexpected errors a generic 500; stack traces stay in the server log. `/health` exposes only sanitized flags.
 - Production refuses SQLite; Instagram publishing needs three explicit flags.
@@ -356,11 +356,11 @@ Google Flow arayüzü değişirse hata ekran görüntüleri ve HTML `screenshots
 
 ### Yapılandırma
 
-Yerel üretim ve yayın `config.local.json` / `publishing.local.json` dosyalarını okur (git'e girmez). Bulut katmanı ortam değişkenlerini okur; adları ve görevleri İngilizce bölümdeki [tabloda](#configuration), şablonları `.env.example` ve `.env.railway.example` dosyalarındadır. Gerçek değerler ve OAuth dosyaları (`secrets/`) asla commit edilmez. `LOCAL_WORKER_API_KEY` boşsa veya şablon değeri (`change-me`) ise işçi uç noktaları kapalı kalır. `WEEKLY_APPROVAL_DAY`, `LOCAL_WORKER_POLL_SECONDS`, `MEDIA_RETENTION_DAYS` ve `ENABLE_MEDIA_CLEANUP` okunuyor ama henüz uygulanmıyor (onay günü 6. güne sabit).
+Yerel üretim ve yayın `config.local.json` / `publishing.local.json` dosyalarını okur (git'e girmez). Bulut katmanı ortam değişkenlerini okur; adları ve görevleri İngilizce bölümdeki [tabloda](#configuration), şablonları `.env.example` ve `.env.railway.example` dosyalarındadır. Gerçek değerler ve OAuth dosyaları (`secrets/`) asla commit edilmez. `LOCAL_WORKER_API_KEY` boşsa veya şablon değeri (`change-me`) ise işçi uç noktaları kapalı kalır. `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID`, `INSTAGRAM_ACCOUNT_ID` ve `INSTAGRAM_EXPECTED_USERNAME` için varsayılan değer yoktur: tanımlı değillerse onay mesajı gönderilmez, butonlar reddedilir ve Railway ön kontrolü başarısız olur. `WEEKLY_APPROVAL_DAY`, `LOCAL_WORKER_POLL_SECONDS`, `MEDIA_RETENTION_DAYS` ve `ENABLE_MEDIA_CLEANUP` okunuyor ama henüz uygulanmıyor (onay günü 6. güne sabit).
 
 ### Testler
 
-`python -m pytest -q tests/` komutu 63 test dosyasındaki 1.000'den fazla vakayı tamamen çevrimdışı çalıştırır (tarayıcılar, Flow, platformlar ve Telegram sahte nesnelerle değiştirilir; bulut testleri SQLite ve yerel bir HTTP sunucusu kullanır). FFmpeg tabanlı QC testleri `ffmpeg`/`ffprobe` ister. Üretim bilgisayarını kontrol eden üç test (kurulu `chrome.exe`, yapılandırılmış Obsidian kasası, git'e girmeyen YouTube OAuth dosyası) bunlar yoksa kendini atlar. [CI](.github/workflows/ci.yml) her push ve pull request'te FFmpeg kurup paketin tamamını Python 3.11 ile çalıştırır.
+`python -m pytest -q tests/` komutu 64 test dosyasındaki 1.000'den fazla vakayı tamamen çevrimdışı çalıştırır (tarayıcılar, Flow, platformlar ve Telegram sahte nesnelerle değiştirilir; bulut testleri SQLite ve yerel bir HTTP sunucusu kullanır). FFmpeg tabanlı QC testleri `ffmpeg`/`ffprobe` ister. Üretim bilgisayarını kontrol eden üç test (kurulu `chrome.exe`, yapılandırılmış Obsidian kasası, git'e girmeyen YouTube OAuth dosyası) bunlar yoksa kendini atlar. [CI](.github/workflows/ci.yml) her push ve pull request'te FFmpeg kurup paketin tamamını Python 3.11 ile çalıştırır.
 
 ### Dağıtım
 
@@ -368,7 +368,7 @@ Bulut kontrol katmanı `Dockerfile` ile derlenir ve **Railway** üzerinde çalı
 
 ### Güvenlik
 
-- İşçi uç noktaları `X-Worker-Api-Key`, Telegram webhook'u gizli başlık ister (canlıda zorunlu); ikisi de sabit zamanlı karşılaştırılır, onaylar yalnızca tanımlı kullanıcı ve sohbetten kabul edilir.
+- İşçi uç noktaları `X-Worker-Api-Key`, Telegram webhook'u gizli başlık ister (canlıda zorunlu); ikisi de sabit zamanlı karşılaştırılır, onaylar yalnızca tanımlı kullanıcı ve sohbetten kabul edilir. Kodda gömülü Telegram veya Instagram hesap kimliği yoktur; eksik bir değer işlemi durdurur.
 - Yüklemeler gövde okunmadan önce doğrulanır, 100 MB ile sınırlıdır, diske akarken SHA-256'sı hesaplanır ve istemcinin hash'iyle karşılaştırılır.
 - Hatalı istekler 4xx, beklenmeyen hatalar genel bir 500 alır; yığın izi yalnızca sunucu günlüğünde kalır. `/health` yalnızca temizlenmiş bayrakları gösterir.
 - Canlı ortam SQLite'ı reddeder; Instagram yayını üç ayrı açık bayrak ister.
