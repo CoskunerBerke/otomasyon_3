@@ -144,7 +144,7 @@ The same run writes the Reel note (`03_SCRIPTS/REEL-2026-0001.md`, with YAML fro
 
 | Area | Tools |
 |---|---|
-| Language | Python 3.10+ (Docker image and CI: 3.11) |
+| Language | Python 3.10+ (CI tests 3.10 and 3.11; Docker image: 3.11) |
 | Browser automation | Playwright (real Chrome over CDP) |
 | Media | FFmpeg / FFprobe, OpenCV, Pillow, NumPy |
 | Platforms | YouTube Data API v3 (google-api-python-client, OAuth), TikTok Studio, Instagram web + Meta Graph API |
@@ -170,7 +170,7 @@ automation/
 └── cloud/                      # Railway control plane: HTTP app, Telegram, scheduler, workers, storage
 tests/                          # pytest suite (offline, mocks only)
 docs/                           # RAILWAY_DEPLOYMENT.md, TELEGRAM_SETUP.md (Turkish)
-.github/workflows/ci.yml        # CI: FFmpeg + pytest on Python 3.11
+.github/workflows/ci.yml        # CI: FFmpeg + pytest on Python 3.10 and 3.11
 *.bat                           # one-click Windows launchers
 ```
 
@@ -263,11 +263,11 @@ Read but not applied yet: `WEEKLY_APPROVAL_DAY` (the approval day is fixed to da
 python -m pytest -q tests/
 ```
 
-The suite has more than 1,000 collected cases in 64 test files and runs fully offline: browsers, Google Flow, YouTube, TikTok, Instagram, Meta and Telegram are replaced by mocks or fakes, and the cloud tests use SQLite and a loopback HTTP server. The FFmpeg-based QC tests need `ffmpeg`/`ffprobe` on `PATH`. Three checks describe the production PC rather than the code (an installed `chrome.exe`, a configured Obsidian vault, the git-ignored YouTube OAuth client secret) and skip themselves when those are missing. [CI](.github/workflows/ci.yml) installs FFmpeg and runs the whole suite on Python 3.11 for every push and pull request.
+The suite has more than 1,000 collected cases in 64 test files and runs fully offline: browsers, Google Flow, YouTube, TikTok, Instagram, Meta and Telegram are replaced by mocks or fakes, and the cloud tests use SQLite and a loopback HTTP server. The FFmpeg-based QC tests need `ffmpeg`/`ffprobe` on `PATH`. Three checks describe the production PC rather than the code (an installed `chrome.exe`, a configured Obsidian vault, the git-ignored YouTube OAuth client secret) and skip themselves when those are missing. [CI](.github/workflows/ci.yml) installs FFmpeg and runs the whole suite on Python 3.10 and 3.11 for every push and pull request.
 
 ## Deployment
 
-The cloud control plane is built from the `Dockerfile` and deployed on **Railway** (`railway.toml`, health check at `/health`, one replica). `docker-compose.example.yml` runs it locally. Step-by-step guides (Turkish): [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) and [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` checks a production configuration without writing anything. Video generation itself runs on the local Windows worker.
+The cloud control plane is built from the `Dockerfile` and deployed on **Railway** (`railway.toml`, health check at `/health`, one replica). To try it locally without Docker, run `python -m automation.cloud.app --port 8000` (development mode with SQLite) and open `http://127.0.0.1:8000/health`. `docker-compose.example.yml` is an outdated template and does not start as shipped: the image runs in production mode, which rejects SQLite. Step-by-step guides (Turkish): [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) and [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` checks a production configuration without writing anything. Video generation itself runs on the local Windows worker.
 
 ## Security
 
@@ -320,7 +320,7 @@ Projenin web arayüzü yok (arayüzleri Obsidian kasası, Telegram butonları ve
 
 ### Teknolojiler ve proje yapısı
 
-İngilizce bölümdeki [tablo](#tech-stack) ve [dizin ağacı](#project-structure) geçerlidir: Python 3.10+ (Docker ve CI: 3.11), Playwright, FFmpeg/OpenCV, YouTube Data API, Meta Graph API, PostgreSQL/SQLite, boto3, Telegram Bot API, Docker, Railway ve GitHub Actions.
+İngilizce bölümdeki [tablo](#tech-stack) ve [dizin ağacı](#project-structure) geçerlidir: Python 3.10+ (CI 3.10 ve 3.11 ile test eder; Docker imajı: 3.11), Playwright, FFmpeg/OpenCV, YouTube Data API, Meta Graph API, PostgreSQL/SQLite, boto3, Telegram Bot API, Docker, Railway ve GitHub Actions.
 
 ### Hızlı başlangıç
 
@@ -360,11 +360,11 @@ Yerel üretim ve yayın `config.local.json` / `publishing.local.json` dosyaları
 
 ### Testler
 
-`python -m pytest -q tests/` komutu 64 test dosyasındaki 1.000'den fazla vakayı tamamen çevrimdışı çalıştırır (tarayıcılar, Flow, platformlar ve Telegram sahte nesnelerle değiştirilir; bulut testleri SQLite ve yerel bir HTTP sunucusu kullanır). FFmpeg tabanlı QC testleri `ffmpeg`/`ffprobe` ister. Üretim bilgisayarını kontrol eden üç test (kurulu `chrome.exe`, yapılandırılmış Obsidian kasası, git'e girmeyen YouTube OAuth dosyası) bunlar yoksa kendini atlar. [CI](.github/workflows/ci.yml) her push ve pull request'te FFmpeg kurup paketin tamamını Python 3.11 ile çalıştırır.
+`python -m pytest -q tests/` komutu 64 test dosyasındaki 1.000'den fazla vakayı tamamen çevrimdışı çalıştırır (tarayıcılar, Flow, platformlar ve Telegram sahte nesnelerle değiştirilir; bulut testleri SQLite ve yerel bir HTTP sunucusu kullanır). FFmpeg tabanlı QC testleri `ffmpeg`/`ffprobe` ister. Üretim bilgisayarını kontrol eden üç test (kurulu `chrome.exe`, yapılandırılmış Obsidian kasası, git'e girmeyen YouTube OAuth dosyası) bunlar yoksa kendini atlar. [CI](.github/workflows/ci.yml) her push ve pull request'te FFmpeg kurup paketin tamamını Python 3.10 ve 3.11 ile çalıştırır.
 
 ### Dağıtım
 
-Bulut kontrol katmanı `Dockerfile` ile derlenir ve **Railway** üzerinde çalışır (`railway.toml`, `/health` sağlık kontrolü, tek kopya). `docker-compose.example.yml` yerelde çalıştırır. Adım adım rehberler: [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) ve [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` canlı yapılandırmayı hiçbir şey yazmadan kontrol eder. Video üretimi yerel Windows işçisinde yapılır.
+Bulut kontrol katmanı `Dockerfile` ile derlenir ve **Railway** üzerinde çalışır (`railway.toml`, `/health` sağlık kontrolü, tek kopya). Docker olmadan yerelde denemek için `python -m automation.cloud.app --port 8000` komutunu çalıştırıp (SQLite ile geliştirme modu) `http://127.0.0.1:8000/health` adresini açın. `docker-compose.example.yml` eski bir şablondur ve bu hâliyle başlamaz: imaj üretim modunda çalışır ve üretim modu SQLite'ı kabul etmez. Adım adım rehberler: [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) ve [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` canlı yapılandırmayı hiçbir şey yazmadan kontrol eder. Video üretimi yerel Windows işçisinde yapılır.
 
 ### Güvenlik
 
