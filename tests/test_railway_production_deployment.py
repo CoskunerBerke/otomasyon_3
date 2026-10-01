@@ -296,6 +296,13 @@ def test_cloud_import_isolation_and_publishing_package():
             ):
                 del sys.modules[mod]
         sys.modules.update(removed_modules)
+        # The fresh import above rebound submodule attributes on the parent packages
+        # (e.g. automation.publishing); point them back at the restored modules, or
+        # dotted lookups such as mock.patch resolve to the throwaway objects (Python 3.10).
+        for mod, module in removed_modules.items():
+            parent, _, child = mod.rpartition(".")
+            if parent in sys.modules:
+                setattr(sys.modules[parent], child, module)
 
 
 def test_instagram_models_and_api_independent_imports():
