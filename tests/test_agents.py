@@ -224,7 +224,13 @@ def test_reel_note_contains_agent_graph_links(tmp_path: Path):
     assert "[[REEL-2026-0012_SEGMENT-02]]" in content
     assert "[[REEL-2026-0012_SEGMENT-03]]" in content
 
-def test_observability_write_failure_does_not_crash():
-    writer = ObsidianGraphWriter(Path("Z:/NonExistentPath/Drive"))
+def test_observability_write_failure_does_not_crash(tmp_path):
+    # A vault path below a regular file cannot be created on any OS (a "Z:/" path is
+    # writable on Linux and would only litter the working directory).
+    blocker = tmp_path / "not_a_directory"
+    blocker.write_text("x", encoding="utf-8")
+    vault = blocker / "Drive"
+    writer = ObsidianGraphWriter(vault)
     # Should safely catch and log warning without raising exception
-    writer._safe_write(Path("Z:/NonExistentPath/Drive/test.md"), "content")
+    writer._safe_write(vault / "test.md", "content")
+    assert not (vault / "test.md").exists()
