@@ -113,10 +113,22 @@ class InstagramPreflightRunner:
         print(f"Access Token Status    : {self.config.masked_token}")
         print("=" * 60)
 
-        # 1. Config Loaded (the target account has no built-in default)
-        if not self.config.normalized_username:
-            diag["errors"].append("MISSING_INSTAGRAM_EXPECTED_USERNAME: INSTAGRAM_EXPECTED_USERNAME is not set.")
-            print("[FAIL 1/9] INSTAGRAM_EXPECTED_USERNAME is not set.")
+        # 1. Config Loaded (the target account has no built-in default). Template values
+        # are rejected like in the Railway preflight, before any Graph API call.
+        if not self.config.normalized_username or self.config.normalized_username.startswith("your-"):
+            diag["errors"].append(
+                "MISSING_INSTAGRAM_EXPECTED_USERNAME: INSTAGRAM_EXPECTED_USERNAME is not set or still a template value."
+            )
+            print("[FAIL 1/9] INSTAGRAM_EXPECTED_USERNAME is not set or still a template value.")
+            return False, "NEEDS_USER_META_SETUP", diag
+
+        configured_account_id = str(self.config.account_id or "").strip()
+        if configured_account_id and not configured_account_id.isdigit():
+            diag["errors"].append(
+                "INVALID_INSTAGRAM_ACCOUNT_ID: INSTAGRAM_ACCOUNT_ID must be the numeric Instagram business "
+                f"account ID (got: {configured_account_id}). Leave it empty to discover it from linked Pages."
+            )
+            print(f"[FAIL 1/9] INSTAGRAM_ACCOUNT_ID is not a numeric account ID: {configured_account_id}")
             return False, "NEEDS_USER_META_SETUP", diag
 
         diag["1_config_loaded"] = True

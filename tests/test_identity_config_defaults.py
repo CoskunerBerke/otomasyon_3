@@ -233,6 +233,27 @@ def test_instagram_preflight_requires_expected_username():
     client.get_me.assert_not_called()
 
 
+@pytest.mark.parametrize("account_id, username, expected_error", [
+    (DEMO_IG_ACCOUNT_ID, "your-instagram-username", "MISSING_INSTAGRAM_EXPECTED_USERNAME"),
+    (DEMO_IG_ACCOUNT_ID, "@your-instagram-username", "MISSING_INSTAGRAM_EXPECTED_USERNAME"),
+    ("your-instagram-business-account-id", DEMO_IG_USERNAME, "INVALID_INSTAGRAM_ACCOUNT_ID"),
+])
+def test_instagram_preflight_rejects_template_values_before_any_api_call(account_id, username,
+                                                                         expected_error):
+    # The template values used to pass the config step, so the preflight queried the
+    # Graph API for an account called "your-instagram-business-account-id".
+    cfg = InstagramConfig(access_token="EAABvalidtoken123", account_id=account_id, expected_username=username)
+    client = MagicMock(spec=InstagramAPIClient)
+    client.config = cfg
+
+    success, status, diag = InstagramPreflightRunner(cfg, client=client).run_preflight()
+    assert (success, status) == (False, "NEEDS_USER_META_SETUP")
+    assert len(diag["errors"]) == 1
+    assert diag["errors"][0].startswith(expected_error)
+    client.get_me.assert_not_called()
+    client.get_account_info.assert_not_called()
+
+
 def test_instagram_live_runner_refuses_to_start_without_a_configured_account(tmp_path):
     runner = InstagramLiveTestRunner(tmp_path, state_file=tmp_path / "state.json")
     runner.config.access_token = "EAABvalidtoken123"
