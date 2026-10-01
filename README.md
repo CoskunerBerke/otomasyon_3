@@ -1,12 +1,11 @@
 # Reels AI Factory (otomasyon_3)
 
-A Python automation that plans, generates, quality-checks and schedules a week of short vertical videos (Reels / Shorts) on YouTube, TikTok and Instagram, with an Obsidian vault as the production log and a small cloud service for Telegram approvals.
+A Python automation that plans, generates, quality-checks and schedules a week of short vertical videos (Reels / Shorts) on YouTube, TikTok and Instagram, with an Obsidian vault as the production log and an optional small cloud service for Telegram approvals.
 
 [![CI](https://github.com/CoskunerBerke/otomasyon_3/actions/workflows/ci.yml/badge.svg)](https://github.com/CoskunerBerke/otomasyon_3/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?logo=playwright&logoColor=white)
 ![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?logo=ffmpeg&logoColor=white)
-![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=white)
 ![YouTube Data API](https://img.shields.io/badge/YouTube_Data_API-v3-FF0000?logo=youtube&logoColor=white)
 ![Meta Graph API](https://img.shields.io/badge/Meta_Graph_API-Instagram-0467DF?logo=meta&logoColor=white)
 ![Obsidian](https://img.shields.io/badge/Obsidian-7C3AED?logo=obsidian&logoColor=white)
@@ -24,9 +23,17 @@ A Python automation that plans, generates, quality-checks and schedules a week o
 
 ## Overview
 
-Every week the factory produces a 14-Reel series (7 days × 2 time slots) per channel. It reads past Reels from an Obsidian vault to avoid repeating topics, writes English video prompts, drives the **Google Flow** web app with Playwright to generate the clips, validates and assembles the final MP4 with FFmpeg, and then uses each platform's **native scheduler**, so nothing has to be online at publish time. A small cloud service on Railway handles Telegram approvals, a command queue for the local worker and an optional Instagram worker.
+Every week the factory produces a 14-Reel series (7 days × 2 time slots) per channel. It picks concepts from curated libraries using the channel's own publishing history, so a concept rests before it comes back, builds English video prompts from templates, drives the **Google Flow** web app with Playwright to generate the clips, validates and assembles the final MP4 with FFmpeg, and then uses each platform's **native scheduler**, so nothing has to be online at publish time. An Obsidian vault mirrors the production log (the older `run.py` generator also reads past Reels from it to avoid repeating topics). An optional cloud service, packaged with Docker and ready for Railway (`railway.toml`) but not currently deployed, adds Telegram approvals, a command queue for the local worker and an Instagram worker.
 
 ## How it works
+
+In short (the full walkthrough with diagrams, formulas, thresholds and code links is in **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**):
+
+- **Plan:** 14 slots (19:30 and 22:00 Europe/Istanbul) starting the day after the channel's last scheduled video. Concepts are ordered by how long they have rested; the required rest scales with the size of the concept pool (up to 21 days), and a week that would repeat a concept within 7 days is refused.
+- **Generate:** one Flow project per Reel and three 10 s segments that share one continuity description. A polling state machine downloads only a video that was not on screen before Generate was clicked, and never picks the paid upscaled downloads.
+- **Validate and lock:** ffprobe stream and 9:16 checks, frame sampling for black, empty or frozen video, and a per-mode audio policy; two identical failures in a row stop generation. The plan is locked only when all 14 Reels are QC-passed Flow output.
+- **Schedule:** a pre-publish gate before every upload (provenance, Reel ID invariant, placeholder metadata, slot, SHA-256), each YouTube and TikTok attempt recorded before the upload, then each platform's own scheduler. A submit whose confirmation could not be read is recorded as unverified, not as a success; Instagram's is never retried, and YouTube Studio re-checks before it resumes.
+- **Resume:** every step is written under `workspace/`, so running the same launcher again continues where it stopped.
 
 ```mermaid
 flowchart TB
@@ -40,7 +47,7 @@ flowchart TB
     subgraph PRODUCE["2. Produce on the local Windows worker"]
         direction LR
         PLAN["PLAN<br/>14 slots, concepts, prompts"] --> GEN["GENERATE<br/>Google Flow via<br/>Playwright + CDP"]
-        GEN --> QC["VALIDATE<br/>FFprobe + OpenCV QC,<br/>3 x 10 s concat"]
+        GEN --> QC["VALIDATE<br/>FFprobe + frame QC,<br/>3 x 10 s concat"]
         QC --> LOCKED["LOCK<br/>plan becomes immutable"]
     end
 
@@ -51,23 +58,23 @@ flowchart TB
         TT --> IG["Instagram<br/>web scheduler or<br/>cloud handoff"]
     end
 
-    VAULT[("Obsidian vault<br/>history and notes")]
-    CLOUDIG["Railway: S3 storage +<br/>Instagram worker (Meta Graph API)"]
+    VAULT[("Obsidian vault<br/>mirror notes")]
+    CLOUDIG["Optional cloud service (Docker, Railway-ready):<br/>S3 storage + Instagram worker (Meta Graph API)"]
 
     START --> PRODUCE
     PRODUCE --> PUBLISH
-    PRODUCE <-.-> VAULT
+    PRODUCE -.-> VAULT
     PUBLISH -.->|"cloud mode: MP4 + SHA-256"| CLOUDIG
 ```
 
-A phase starts only when the previous one is complete for all 14 Reels (`automation/simple_weekly_pipeline.py`). The optional cloud path for starting a week:
+Generation must finish for all 14 Reels before the plan is locked, and nothing is uploaded before the lock (`automation/simple_weekly_pipeline.py`). The platforms then run one after another; a platform that cannot reach 14/14 is held for up to 30 minutes for a manual fix before the next one starts. The optional cloud path for starting a week (the local worker polls only when started with `python -m automation.local_worker --run-once`):
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant SCH as Cloud scheduler
     participant TG as Telegram
-    participant API as Cloud API (Railway)
+    participant API as Cloud API
     participant W as Local Windows worker
     SCH->>TG: Day-6 message for next week (EVET / HAYIR)
     TG->>API: Owner taps EVET, POST /telegram/webhook (secret header)
@@ -83,12 +90,12 @@ sequenceDiagram
 - **Weekly pipeline**: `PLAN → GENERATE → VALIDATE → LOCK → YOUTUBE → TIKTOK → INSTAGRAM → DONE`; the content plan is immutable once locked, and platform progress is tracked separately so it can never rewrite the plan.
 - **Idea and prompt engine**: topic history and diversity scoring, four content modes (`silent_global_step_by_step`, `narrative_ambient_story`, `hidden_build_story`, `cutaway_reveal_story`).
 - **Google Flow automation**: connects to a real Chrome session over CDP, sets 9:16, submits prompts, resumes and downloads segments, and never picks the paid upscale entries in the download menu. It stops with `USER_ACTION_REQUIRED` instead of bypassing logins or CAPTCHAs.
-- **Quality control**: FFprobe checks for aspect ratio and duration, frame sampling for black or frozen frames, audio handling per content mode, faststart, and 3 × 10 s segment concatenation into a 30 s Reel.
-- **Publishing**: YouTube (Studio or Data API v3), TikTok Studio and Instagram (web scheduler or Meta Graph API), with localized YouTube metadata (English plus `tr`, `hi`, `id`, `ja`) and AI-content disclosure.
-- **Safety by design**: idempotent uploads (`reel_id + platform` + SHA-256), a pre-publish gate that blocks test media, mismatched Reel IDs and placeholder metadata, per-platform failure isolation, never clicks "post now", never deletes remote content, brand isolation, a single-run lock and a hard cap per run.
+- **Quality control**: FFprobe checks (a video stream and a 9:16 aspect ratio), frame sampling for black, empty or frozen video, audio handling per content mode, faststart, and 3 × 10 s segment concatenation into a 30 s Reel.
+- **Publishing**: YouTube (Studio or Data API v3), TikTok Studio and Instagram (web scheduler or Meta Graph API), with AI-content disclosure on every route and, in YouTube Data API mode, localized titles and descriptions (`tr`, `hi`, `id`, `ja`) for story and cutaway Reels.
+- **Safety by design**: idempotent uploads (per-Reel, per-platform progress, YouTube and TikTok attempts recorded before the upload, SHA-256 checks), a pre-publish gate that blocks test media, mismatched Reel IDs and placeholder metadata, per-platform failure isolation, never clicks "post now", never deletes remote content, brand isolation, and a process lock with a 14-video cap in the generation CLI (`run.py`).
 - **Multi-brand**: each channel has its own accounts, Chrome profiles, ports, ID prefix (`CBM-` for Crafts By Man) and inventory.
-- **Obsidian integration**: Reel notes move through `03_SCRIPTS → 04_PRODUCTION → 05_READY / 07_REJECTED`, plus a publishing queue, an agent control center and graph-view links.
-- **Cloud control plane**: standard-library HTTP service with Telegram webhook approvals, a weekly scheduler, a local-worker command queue, S3-compatible media storage and a `/health` endpoint.
+- **Obsidian integration**: the weekly pipeline mirrors each Reel into the vault; the older CLIs (`run.py`, `publish.py`) move Reel notes through `03_SCRIPTS → 04_PRODUCTION → 05_READY / 07_REJECTED` and write a publishing queue, an agent control center and graph-view links.
+- **Cloud control plane** (optional; Docker image, ready for Railway): standard-library HTTP service with Telegram webhook approvals, a weekly scheduler, a local-worker command queue, S3-compatible media storage and a `/health` endpoint.
 - **Test suite**: 1,000+ offline pytest cases, including regression tests for past production incidents; CI runs them on every push.
 
 ## Sample output
@@ -146,11 +153,11 @@ The same run writes the Reel note (`03_SCRIPTS/REEL-2026-0001.md`, with YAML fro
 |---|---|
 | Language | Python 3.10+ (CI tests 3.10 and 3.11; Docker image: 3.11) |
 | Browser automation | Playwright (real Chrome over CDP) |
-| Media | FFmpeg / FFprobe, OpenCV, Pillow, NumPy |
+| Media | FFmpeg / FFprobe, Pillow, NumPy |
 | Platforms | YouTube Data API v3 (google-api-python-client, OAuth), TikTok Studio, Instagram web + Meta Graph API |
 | Cloud | Python `http.server`, PostgreSQL (psycopg) or SQLite, boto3 (S3-compatible storage), Telegram Bot API |
 | Knowledge base | Obsidian (Markdown notes, graph view) |
-| Ops | Docker, Railway (`railway.toml`), GitHub Actions, Windows `.bat` launchers, pytest |
+| Ops | Docker image with a Railway config (`railway.toml`), GitHub Actions, Windows `.bat` launchers, pytest |
 
 ## Project structure
 
@@ -167,9 +174,9 @@ automation/
 ├── publishing/                 # YouTube, TikTok, Instagram publishers + eligibility / pre-publish gates
 ├── orchestration/              # weekly manifests, slots, state, reconciliation
 ├── obsidian/                   # vault reader / writer
-└── cloud/                      # Railway control plane: HTTP app, Telegram, scheduler, workers, storage
+└── cloud/                      # optional control plane (Docker, Railway-ready): HTTP app, Telegram, scheduler, workers, storage
 tests/                          # pytest suite (offline, mocks only)
-docs/                           # RAILWAY_DEPLOYMENT.md, TELEGRAM_SETUP.md (Turkish)
+docs/                           # HOW_IT_WORKS.md (engineering deep dive); RAILWAY_DEPLOYMENT.md, TELEGRAM_SETUP.md (Turkish)
 .github/workflows/ci.yml        # CI: FFmpeg + pytest on Python 3.10 and 3.11
 *.bat                           # one-click Windows launchers
 ```
@@ -226,7 +233,7 @@ Requirements: Windows 10/11, Python 3.10+, FFmpeg and FFprobe on `PATH`, a Googl
 .venv\Scripts\python -m pytest -q tests\
 ```
 
-5. Weekly run: `BUILDVERSE_HAFTALIK_14_REEL.bat` or `CRAFTSBYMAN_HAFTALIK_14_REEL.bat`; the `*_SADECE_*` launchers finish a single platform for a half-done week.
+5. Weekly run: `BUILDVERSE_HAFTALIK_14_REEL.bat` or `CRAFTSBYMAN_HAFTALIK_14_REEL.bat`; the `*_SADECE_*` launchers finish a single platform for a half-done week (the Crafts By Man ones are pinned to week `CBM-2026-W34`).
 
 If Google Flow's UI changes, error screenshots and HTML are saved under `screenshots/errors/`, and selectors live in `automation/flow/selectors.py`.
 
@@ -237,7 +244,7 @@ Local generation and publishing read `config.local.json` / `publishing.local.jso
 | Variable | Purpose |
 |---|---|
 | `APP_ENV` | `production` turns on hard gates: PostgreSQL and the webhook secret become mandatory |
-| `PORT` | HTTP port (Railway injects it; default 8000) |
+| `PORT` | HTTP port (set by the host, for example Railway; default 8000) |
 | `APP_TIMEZONE` | Scheduling timezone (default `Europe/Istanbul`) |
 | `DATABASE_URL` | PostgreSQL URL in production; `sqlite:///...` for local development |
 | `TELEGRAM_BOT_TOKEN` | Bot that sends the approval message |
@@ -249,7 +256,7 @@ Local generation and publishing read `config.local.json` / `publishing.local.jso
 | `ENABLE_WEEKLY_SCHEDULER`, `ENABLE_INSTAGRAM_WORKER` | Background subsystems, off by default |
 | `LOCAL_WORKER_API_KEY` | Shared key for the `/worker/*` endpoints; empty or a template value (`change-me`) keeps them closed |
 | `MEDIA_STORAGE_BACKEND` | `local` or `s3` |
-| `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | S3-compatible private bucket (Railway Storage) |
+| `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | S3-compatible private bucket (for example a Railway Storage bucket) |
 | `META_GRAPH_VERSION`, `META_ACCESS_TOKEN` | Meta Graph API access for the cloud Instagram worker and the local Instagram preflight |
 | `META_APP_ID`, `META_APP_SECRET` | Read only by the local Instagram tools (`automation.publishing.instagram_preflight`, `instagram_live_test`); no API call uses them and the cloud service does not read them |
 | `INSTAGRAM_ACCOUNT_ID`, `INSTAGRAM_EXPECTED_USERNAME` | Target account, no default. The Railway and Instagram preflights fail on template values. The Railway preflight also fails while either is unset; the Instagram preflight needs the username (it can discover an unset ID from linked Pages) and fails if the account belongs to another username |
@@ -268,7 +275,7 @@ The suite has more than 1,000 collected cases in 64 test files and runs fully of
 
 ## Deployment
 
-The cloud control plane is built from the `Dockerfile` and deployed on **Railway** (`railway.toml`, health check at `/health`, one replica). To try it locally without Docker, run `python -m automation.cloud.app --port 8000` (development mode with SQLite) and open `http://127.0.0.1:8000/health`. `docker-compose.example.yml` is an outdated template and does not start as shipped: the image runs in production mode, which rejects SQLite. Step-by-step guides (Turkish): [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) and [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` checks a production configuration without writing anything. Video generation itself runs on the local Windows worker.
+The cloud control plane is packaged as a Docker image (`Dockerfile`) and is ready for **Railway** (`railway.toml`: Dockerfile build, health check at `/health`, one replica, restart on failure). It is optional and not currently deployed. To try it locally without Docker, run `python -m automation.cloud.app --port 8000` (development mode with SQLite) and open `http://127.0.0.1:8000/health`. `docker-compose.example.yml` is an outdated template and does not start as shipped: the image runs in production mode, which rejects SQLite. Step-by-step guides (Turkish): [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) and [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` checks a production configuration without writing anything. Video generation itself runs on the local Windows worker.
 
 ## Security
 
@@ -285,13 +292,13 @@ In use for my own two channels; not a hosted product and not set up for other ac
 
 - Done: weekly pipeline for YouTube, TikTok and Instagram (web scheduler), multi-brand support, Telegram approval bot, cloud command queue.
 - Optional and off by default: the cloud Instagram worker (Meta Graph API) and the weekly approval scheduler.
-- Known gaps: the cloud HTTP server is single-threaded (enough for one worker and one bot); failed worker commands are not retried automatically; the variables listed as "read but not applied yet" above; browser automation depends on the platforms' current UI and needs selector updates when it changes.
+- Known gaps: the cloud HTTP server is single-threaded (enough for one worker and one bot); failed worker commands are not retried automatically; the variables listed as "read but not applied yet" above; browser automation depends on the platforms' current UI and needs selector updates when it changes. A fuller list is in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#8-limitations-known-gaps-and-next-steps).
 
 ---
 
 ## Türkçe
 
-**Reels AI Factory**, bir haftalık dikey kısa video (Reels / Shorts) serisini planlayan, üreten, kalite kontrolünden geçiren ve YouTube, TikTok ve Instagram'da zamanlayan bir Python otomasyonudur. Üretim kaydı olarak Obsidian kasası, Telegram onayları için küçük bir bulut servisi kullanır.
+**Reels AI Factory**, bir haftalık dikey kısa video (Reels / Shorts) serisini planlayan, üreten, kalite kontrolünden geçiren ve YouTube, TikTok ve Instagram'da zamanlayan bir Python otomasyonudur. Üretim kaydı olarak Obsidian kasası, Telegram onayları için isteğe bağlı küçük bir bulut servisi kullanır.
 
 > **Durum:** kişisel otomasyon projesi; kendi iki kanalımın (BuildVerse ve Crafts By Man) haftalık yayın takvimi için
 > kullanılıyor. Canlı hat Windows önceliklidir (gerçek Chrome oturumları, `.bat` başlatıcılar); test paketi, çevrimdışı
@@ -299,21 +306,29 @@ In use for my own two channels; not a hosted product and not set up for other ac
 
 ### Genel bakış
 
-Her hafta kanal başına 14 Reel'lik (7 gün × 2 slot) bir seri üretir. Obsidian'daki geçmiş Reel'leri okuyarak konu tekrarını engeller, İngilizce video promptları yazar, **Google Flow** arayüzünü Playwright ile kullanarak klipleri üretir, FFmpeg ile doğrulayıp son MP4'ü birleştirir ve platformların **kendi zamanlayıcılarına** planlar; yayın anında bilgisayarın açık olması gerekmez. Railway üzerindeki küçük bir bulut servisi Telegram onaylarını, yerel işçi için komut kuyruğunu ve isteğe bağlı Instagram işçisini yönetir.
+Her hafta kanal başına 14 Reel'lik (7 gün × 2 slot) bir seri üretir. Konseptleri hazır kütüphanelerden, kanalın kendi yayın geçmişine bakarak seçer; böylece bir konsept geri dönmeden önce dinlenir. Şablonlardan İngilizce video promptları kurar, **Google Flow** arayüzünü Playwright ile kullanarak klipleri üretir, FFmpeg ile doğrulayıp son MP4'ü birleştirir ve platformların **kendi zamanlayıcılarına** planlar; yayın anında bilgisayarın açık olması gerekmez. Obsidian kasası üretim kaydının aynasıdır (eski `run.py` üreticisi konu tekrarını önlemek için geçmiş Reel'leri ayrıca kasadan okur). Docker ile paketlenmiş ve Railway'e hazır (`railway.toml`), ancak şu an canlıda çalıştırılmayan isteğe bağlı bir bulut servisi Telegram onaylarını, yerel işçi için komut kuyruğunu ve Instagram işçisini ekler.
 
 ### Nasıl çalışır
 
-[Yukarıdaki iki diyagram](#how-it-works) geçerlidir: hafta `.bat` başlatıcıyla ya da 6. gün gelen Telegram onayıyla başlar; yerel Windows işçisi PLAN → ÜRET → DOĞRULA → KİLİTLE adımlarını çalıştırır; ardından yayın öncesi kapıdan (kaynak, Reel ID ve metadata kontrolü) geçen videolar sırasıyla YouTube, TikTok ve Instagram zamanlayıcılarına verilir. Bir aşama ancak önceki aşama 14 Reel'in tamamı için bittiğinde başlar.
+[Yukarıdaki iki diyagram](#how-it-works) geçerlidir: hafta `.bat` başlatıcıyla ya da 6. gün gelen Telegram onayıyla başlar; yerel Windows işçisi PLAN → ÜRET → DOĞRULA → KİLİTLE adımlarını çalıştırır; ardından yayın öncesi kapıdan (kaynak, Reel ID ve metadata kontrolü) geçen videolar sırasıyla YouTube, TikTok ve Instagram zamanlayıcılarına verilir. Plan, 14 Reel'in tamamı üretilip QC'den geçmeden kilitlenmez ve kilitten önce hiçbir şey yüklenmez; 14/14'e ulaşamayan platform, sonrakine geçilmeden önce elle düzeltme için en fazla 30 dakika bekletilir.
+
+Kısaca (diyagramlar, formüller, eşikler ve kod bağlantılarıyla tam anlatım: **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**, sonunda Türkçe özet var):
+
+- **Planlama:** 19:30 ve 22:00 (Europe/Istanbul) slotları, kanalın son planlı videosunun ertesi günü başlar. Konseptler ne kadar süredir dinlendiklerine göre sıralanır; gereken dinlenme süresi havuz büyüklüğüne göre en fazla 21 gündür ve bir konsepti 7 günden kısa sürede tekrarlayacak hafta reddedilir.
+- **Üretim:** Reel başına bir Flow projesi, aynı süreklilik tarifini paylaşan 3 × 10 sn parça. Bir durum makinesi yalnızca Generate'e basılmadan önce ekranda olmayan videoyu indirir; kredi harcayan yükseltilmiş indirmeleri asla seçmez.
+- **Doğrulama ve kilit:** FFprobe ile video akışı ve 9:16 kontrolü, siyah, boş veya donmuş kare taraması, içerik moduna göre ses kuralı; aynı hata üst üste iki kez olursa üretim durur.
+- **Zamanlama:** her yüklemeden önce yayın öncesi kapı (kaynak, Reel ID eşitliği, şablon metadata, slot, SHA-256), YouTube ve TikTok'ta yükleme denemesi yüklemeden önce kaydedilir, sonra platformun kendi zamanlayıcısı kullanılır. Onayı okunamayan gönderim başarılı değil, doğrulanmamış olarak kaydedilir; Instagram'da asla tekrar denenmez, YouTube Studio devam etmeden önce yeniden kontrol eder.
+- **Devam:** her adım `workspace/` altına yazılır; aynı başlatıcıyı tekrar çalıştırmak kaldığı yerden devam eder.
 
 ### Özellikler
 
 - **Haftalık hat:** `PLAN → GENERATE → VALIDATE → LOCK → YOUTUBE → TIKTOK → INSTAGRAM → DONE`; içerik planı kilitlendikten sonra değişmez, platform ilerlemesi ayrı tutulur.
 - **Fikir ve prompt motoru:** geçmiş analizi, çeşitlilik puanı, dört içerik modu (sessiz adım adım inşa, ortam sesli gerçek tarih hikâyesi, gizli inşa ve kesit hikâyeleri).
 - **Google Flow otomasyonu:** gerçek Chrome oturumuna CDP ile bağlanır, indirme menüsünde kredi harcayan seçenekleri asla seçmez; giriş veya CAPTCHA çıkarsa atlatmaya çalışmaz, `USER_ACTION_REQUIRED` ile durur.
-- **Kalite kontrol:** FFprobe ile en-boy oranı ve süre, siyah/donmuş kare analizi, içerik moduna göre ses, 3 × 10 sn parçayı 30 sn Reel'e birleştirme.
-- **Yayınlama:** YouTube (Studio veya Data API v3), TikTok Studio, Instagram (web zamanlayıcı veya Meta Graph API); YouTube için İngilizce + `tr`, `hi`, `id`, `ja` metadata ve yapay zekâ içerik bildirimi.
+- **Kalite kontrol:** FFprobe ile video akışı ve 9:16 en-boy oranı, siyah/boş/donmuş kare analizi, içerik moduna göre ses, 3 × 10 sn parçayı 30 sn Reel'e birleştirme.
+- **Yayınlama:** YouTube (Studio veya Data API v3), TikTok Studio, Instagram (web zamanlayıcı veya Meta Graph API); her yolda yapay zekâ içerik bildirimi, YouTube Data API modunda hikâye ve kesit Reel'leri için `tr`, `hi`, `id`, `ja` başlık ve açıklamaları.
 - **Güvenlik tasarımı:** çift yükleme koruması (SHA-256), test medyasını ve uyuşmayan Reel ID'lerini durduran yayın öncesi kapı, platform bazında hata izolasyonu, "hemen paylaş" asla tıklanmaz, uzak içerik asla silinmez, kanallar arası karışma engellenir.
-- **Çoklu marka**, **Obsidian entegrasyonu**, **Telegram onaylı bulut kontrol katmanı** ve her push'ta CI'da çalışan **1.000'den fazla çevrimdışı pytest vakası**.
+- **Çoklu marka**, **Obsidian entegrasyonu**, isteğe bağlı **Telegram onaylı bulut kontrol katmanı** ve her push'ta CI'da çalışan **1.000'den fazla çevrimdışı pytest vakası**.
 
 ### Örnek çıktı
 
@@ -321,7 +336,7 @@ Projenin web arayüzü yok (arayüzleri Obsidian kasası, Telegram butonları ve
 
 ### Teknolojiler ve proje yapısı
 
-İngilizce bölümdeki [tablo](#tech-stack) ve [dizin ağacı](#project-structure) geçerlidir: Python 3.10+ (CI 3.10 ve 3.11 ile test eder; Docker imajı: 3.11), Playwright, FFmpeg/OpenCV, YouTube Data API, Meta Graph API, PostgreSQL/SQLite, boto3, Telegram Bot API, Docker, Railway ve GitHub Actions.
+İngilizce bölümdeki [tablo](#tech-stack) ve [dizin ağacı](#project-structure) geçerlidir: Python 3.10+ (CI 3.10 ve 3.11 ile test eder; Docker imajı: 3.11), Playwright, FFmpeg, Pillow/NumPy, YouTube Data API, Meta Graph API, PostgreSQL/SQLite, boto3, Telegram Bot API, Docker (Railway yapılandırmasıyla) ve GitHub Actions.
 
 ### Hızlı başlangıç
 
@@ -351,7 +366,7 @@ curl -s http://127.0.0.1:8000/health
 2. `FLOW_LOGIN.bat` ile Google Flow'a elle giriş yapın, pencereyi açık bırakın.
 3. `BUILDVERSE_GIRIS.bat` / `CRAFTSBYMAN_GIRIS.bat` ile kanal hesaplarına bir kez giriş yapın.
 4. Kredi harcamadan deneme: `.venv\Scripts\python automation\run.py --count 1 --dry-run` ve `.venv\Scripts\python automation\publish.py --count 14 --dry-run`.
-5. Haftalık çalışma: `BUILDVERSE_HAFTALIK_14_REEL.bat` veya `CRAFTSBYMAN_HAFTALIK_14_REEL.bat`; `*_SADECE_*` başlatıcılar yarım kalan haftada tek bir platformu tamamlar.
+5. Haftalık çalışma: `BUILDVERSE_HAFTALIK_14_REEL.bat` veya `CRAFTSBYMAN_HAFTALIK_14_REEL.bat`; `*_SADECE_*` başlatıcılar yarım kalan haftada tek bir platformu tamamlar (Crafts By Man olanlar `CBM-2026-W34` haftasına sabitlenmiştir).
 
 Google Flow arayüzü değişirse hata ekran görüntüleri ve HTML `screenshots/errors/` altına kaydedilir; seçiciler `automation/flow/selectors.py` içindedir.
 
@@ -365,7 +380,7 @@ Yerel üretim ve yayın `config.local.json` / `publishing.local.json` dosyaları
 
 ### Dağıtım
 
-Bulut kontrol katmanı `Dockerfile` ile derlenir ve **Railway** üzerinde çalışır (`railway.toml`, `/health` sağlık kontrolü, tek kopya). Docker olmadan yerelde denemek için `python -m automation.cloud.app --port 8000` komutunu çalıştırıp (SQLite ile geliştirme modu) `http://127.0.0.1:8000/health` adresini açın. `docker-compose.example.yml` eski bir şablondur ve bu hâliyle başlamaz: imaj üretim modunda çalışır ve üretim modu SQLite'ı kabul etmez. Adım adım rehberler: [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) ve [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` canlı yapılandırmayı hiçbir şey yazmadan kontrol eder. Video üretimi yerel Windows işçisinde yapılır.
+Bulut kontrol katmanı `Dockerfile` ile Docker imajı olarak paketlenmiştir ve **Railway**'e hazırdır (`railway.toml`: Dockerfile ile derleme, `/health` sağlık kontrolü, tek kopya, hata olursa yeniden başlatma). İsteğe bağlıdır ve şu an canlıda çalıştırılmıyor. Docker olmadan yerelde denemek için `python -m automation.cloud.app --port 8000` komutunu çalıştırıp (SQLite ile geliştirme modu) `http://127.0.0.1:8000/health` adresini açın. `docker-compose.example.yml` eski bir şablondur ve bu hâliyle başlamaz: imaj üretim modunda çalışır ve üretim modu SQLite'ı kabul etmez. Adım adım rehberler: [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) ve [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md). `python -m automation.cloud.railway_production_preflight` canlı yapılandırmayı hiçbir şey yazmadan kontrol eder. Video üretimi yerel Windows işçisinde yapılır.
 
 ### Güvenlik
 
@@ -382,7 +397,7 @@ Kendi iki kanalım için kullanılıyor; barındırılan bir ürün değildir ve
 
 - Tamamlanan: YouTube, TikTok ve Instagram (web zamanlayıcı) için haftalık hat, çoklu marka, Telegram onay botu, bulut komut kuyruğu.
 - İsteğe bağlı ve varsayılan olarak kapalı: Meta Graph API ile bulut Instagram işçisi ve haftalık onay zamanlayıcısı.
-- Bilinen eksikler: bulut HTTP sunucusu tek iş parçacıklıdır (tek işçi ve tek bot için yeterli); başarısız işçi komutları otomatik yeniden denenmez; yukarıda "henüz uygulanmıyor" olarak listelenen değişkenler; tarayıcı otomasyonu platformların güncel arayüzüne bağlıdır ve arayüz değişince seçici güncellemesi gerekir.
+- Bilinen eksikler: bulut HTTP sunucusu tek iş parçacıklıdır (tek işçi ve tek bot için yeterli); başarısız işçi komutları otomatik yeniden denenmez; yukarıda "henüz uygulanmıyor" olarak listelenen değişkenler; tarayıcı otomasyonu platformların güncel arayüzüne bağlıdır ve arayüz değişince seçici güncellemesi gerekir. Daha ayrıntılı liste: [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#8-limitations-known-gaps-and-next-steps).
 
 ---
 
