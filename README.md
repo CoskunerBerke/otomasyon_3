@@ -241,7 +241,7 @@ Local generation and publishing read `config.local.json` / `publishing.local.jso
 | `APP_TIMEZONE` | Scheduling timezone (default `Europe/Istanbul`) |
 | `DATABASE_URL` | PostgreSQL URL in production; `sqlite:///...` for local development |
 | `TELEGRAM_BOT_TOKEN` | Bot that sends the approval message |
-| `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID` | Only this user in this chat can approve or reject a week. No default: while unset, no approval message is sent and every button press is refused |
+| `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID` | Only this user in this chat can approve or reject a week. No default: while either is unset, every button press is refused (and without `TELEGRAM_CHAT_ID` no approval message is sent) |
 | `TELEGRAM_WEBHOOK_SECRET` | Expected `X-Telegram-Bot-Api-Secret-Token` header (`python -m automation.cloud.generate_webhook_secret`) |
 | `ENABLE_TELEGRAM_WEBHOOK` | `false` closes `/telegram/webhook` (503) |
 | `PUBLIC_BASE_URL` | HTTPS URL of the cloud service (used by the local worker and the webhook setup) |
@@ -250,8 +250,9 @@ Local generation and publishing read `config.local.json` / `publishing.local.jso
 | `LOCAL_WORKER_API_KEY` | Shared key for the `/worker/*` endpoints; empty or a template value (`change-me`) keeps them closed |
 | `MEDIA_STORAGE_BACKEND` | `local` or `s3` |
 | `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | S3-compatible private bucket (Railway Storage) |
-| `META_GRAPH_VERSION`, `META_APP_ID`, `META_APP_SECRET`, `META_ACCESS_TOKEN` | Meta Graph API access for the Instagram worker |
-| `INSTAGRAM_ACCOUNT_ID`, `INSTAGRAM_EXPECTED_USERNAME` | Target account, no default. The Railway preflight fails while either is unset or a template value; the Instagram preflight needs the username (it can discover the ID from linked Pages) and fails if the account belongs to another username |
+| `META_GRAPH_VERSION`, `META_ACCESS_TOKEN` | Meta Graph API access for the cloud Instagram worker and the local Instagram preflight |
+| `META_APP_ID`, `META_APP_SECRET` | Read only by the local Instagram tools (`automation.publishing.instagram_preflight`, `instagram_live_test`); no API call uses them and the cloud service does not read them |
+| `INSTAGRAM_ACCOUNT_ID`, `INSTAGRAM_EXPECTED_USERNAME` | Target account, no default. The Railway and Instagram preflights fail on template values. The Railway preflight also fails while either is unset; the Instagram preflight needs the username (it can discover an unset ID from linked Pages) and fails if the account belongs to another username |
 | `INSTAGRAM_DRY_RUN`, `INSTAGRAM_ALLOW_UPLOAD`, `INSTAGRAM_ALLOW_PUBLISH` | Safety flags; the defaults are dry run, no upload, no publish |
 | `INSTAGRAM_PREPARE_MINUTES_BEFORE` | How early the Instagram worker prepares a due post |
 
@@ -271,8 +272,8 @@ The cloud control plane is built from the `Dockerfile` and deployed on **Railway
 
 ## Security
 
-- Worker endpoints require `X-Worker-Api-Key`; the Telegram webhook requires the secret header (mandatory in production). Both are compared in constant time, and approvals are accepted only from the configured user and chat. The code has no built-in Telegram or Instagram account IDs, so a missing value fails closed.
-- Uploads are authenticated before the body is read, capped at 100 MB, streamed to disk with an incremental SHA-256 and checked against the client's hash.
+- Worker endpoints require `X-Worker-Api-Key`; the Telegram webhook requires the secret header (mandatory in production). Both are compared in constant time, and approvals are accepted only from the configured user in the configured chat. The code has no built-in Telegram or Instagram account IDs, so a missing value fails closed: while either Telegram ID is unset, every approval is refused and logged.
+- Every POST is checked from its headers before the body is read: `/worker/*` needs the worker key, the webhook needs the secret header (when one is set) and unknown paths get a 404. JSON bodies are capped at 10 MB. Uploads are capped at 100 MB, streamed to disk with an incremental SHA-256 and checked against the client's hash.
 - Malformed requests get a 4xx and unexpected errors a generic 500; stack traces stay in the server log. `/health` exposes only sanitized flags.
 - Production refuses SQLite; Instagram publishing needs three explicit flags.
 - Secrets live in environment variables or git-ignored files; `python -m automation.cloud.secret_scan` scans the working tree for leaked tokens.
@@ -356,7 +357,7 @@ Google Flow arayüzü değişirse hata ekran görüntüleri ve HTML `screenshots
 
 ### Yapılandırma
 
-Yerel üretim ve yayın `config.local.json` / `publishing.local.json` dosyalarını okur (git'e girmez). Bulut katmanı ortam değişkenlerini okur; adları ve görevleri İngilizce bölümdeki [tabloda](#configuration), şablonları `.env.example` ve `.env.railway.example` dosyalarındadır. Gerçek değerler ve OAuth dosyaları (`secrets/`) asla commit edilmez. `LOCAL_WORKER_API_KEY` boşsa veya şablon değeri (`change-me`) ise işçi uç noktaları kapalı kalır. `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID`, `INSTAGRAM_ACCOUNT_ID` ve `INSTAGRAM_EXPECTED_USERNAME` için varsayılan değer yoktur: tanımlı değillerse onay mesajı gönderilmez, butonlar reddedilir ve Railway ön kontrolü başarısız olur. `WEEKLY_APPROVAL_DAY`, `LOCAL_WORKER_POLL_SECONDS`, `MEDIA_RETENTION_DAYS` ve `ENABLE_MEDIA_CLEANUP` okunuyor ama henüz uygulanmıyor (onay günü 6. güne sabit).
+Yerel üretim ve yayın `config.local.json` / `publishing.local.json` dosyalarını okur (git'e girmez). Bulut katmanı ortam değişkenlerini okur; adları ve görevleri İngilizce bölümdeki [tabloda](#configuration), şablonları `.env.example` ve `.env.railway.example` dosyalarındadır. Gerçek değerler ve OAuth dosyaları (`secrets/`) asla commit edilmez. `LOCAL_WORKER_API_KEY` boşsa veya şablon değeri (`change-me`) ise işçi uç noktaları kapalı kalır. `TELEGRAM_ALLOWED_USER_ID`, `TELEGRAM_CHAT_ID`, `INSTAGRAM_ACCOUNT_ID` ve `INSTAGRAM_EXPECTED_USERNAME` için varsayılan değer yoktur: Telegram kimliklerinden biri tanımlı değilse butonlar reddedilir (`TELEGRAM_CHAT_ID` yoksa onay mesajı da gönderilmez), Instagram değerleri eksikse Railway ön kontrolü başarısız olur; Railway ve Instagram ön kontrolleri şablon değerleri de reddeder. `META_APP_ID` ve `META_APP_SECRET` yalnızca yerel Instagram araçlarınca (`automation.publishing.instagram_preflight`, `instagram_live_test`) okunur; hiçbir API çağrısında kullanılmaz ve bulut servisi bunları okumaz. `WEEKLY_APPROVAL_DAY`, `LOCAL_WORKER_POLL_SECONDS`, `MEDIA_RETENTION_DAYS` ve `ENABLE_MEDIA_CLEANUP` okunuyor ama henüz uygulanmıyor (onay günü 6. güne sabit).
 
 ### Testler
 
@@ -368,8 +369,8 @@ Bulut kontrol katmanı `Dockerfile` ile derlenir ve **Railway** üzerinde çalı
 
 ### Güvenlik
 
-- İşçi uç noktaları `X-Worker-Api-Key`, Telegram webhook'u gizli başlık ister (canlıda zorunlu); ikisi de sabit zamanlı karşılaştırılır, onaylar yalnızca tanımlı kullanıcı ve sohbetten kabul edilir. Kodda gömülü Telegram veya Instagram hesap kimliği yoktur; eksik bir değer işlemi durdurur.
-- Yüklemeler gövde okunmadan önce doğrulanır, 100 MB ile sınırlıdır, diske akarken SHA-256'sı hesaplanır ve istemcinin hash'iyle karşılaştırılır.
+- İşçi uç noktaları `X-Worker-Api-Key`, Telegram webhook'u gizli başlık ister (canlıda zorunlu); ikisi de sabit zamanlı karşılaştırılır, onaylar yalnızca tanımlı kullanıcıdan ve tanımlı sohbetten kabul edilir. Kodda gömülü Telegram veya Instagram hesap kimliği yoktur; eksik bir değer işlemi durdurur: Telegram kimliklerinden biri tanımlı değilse her onay reddedilir ve günlüğe yazılır.
+- Her POST isteği, gövdesi okunmadan önce başlıklarından denetlenir: `/worker/*` işçi anahtarını, webhook (tanımlıysa) gizli başlığı ister, bilinmeyen yollar 404 alır. JSON gövdeleri 10 MB ile sınırlıdır. Yüklemeler 100 MB ile sınırlıdır, diske akarken SHA-256'sı hesaplanır ve istemcinin hash'iyle karşılaştırılır.
 - Hatalı istekler 4xx, beklenmeyen hatalar genel bir 500 alır; yığın izi yalnızca sunucu günlüğünde kalır. `/health` yalnızca temizlenmiş bayrakları gösterir.
 - Canlı ortam SQLite'ı reddeder; Instagram yayını üç ayrı açık bayrak ister.
 - Gizli bilgiler ortam değişkenlerinde veya git'e girmeyen dosyalarda durur; `python -m automation.cloud.secret_scan` çalışma ağacında sızmış token arar.
