@@ -93,6 +93,8 @@ def test_health_endpoint_exposes_no_secrets_and_shows_safety_flags(tmp_path):
     cfg = CloudConfig(tmp_path)
     cfg.database_url = f"sqlite:///{db_file}"
     cfg.telegram_bot_token = "123456789:SUPER_SECRET_BOT_TOKEN_XYZ"
+    cfg.telegram_allowed_user_id = 424242  # fictional; there is no built-in default
+    cfg.telegram_chat_id = 424242
     cfg.meta_access_token = "EAAB_SUPER_SECRET_META_TOKEN_123"
     cfg.s3_secret_access_key = "SECRET_S3_KEY_ABC"
     cfg.instagram_dry_run = True
@@ -379,7 +381,7 @@ def test_telegram_smoke_test_send_with_none_config(tmp_path):
     import automation.cloud.telegram_live_smoke_test as smoke_mod
     mock_cfg = CloudConfig(tmp_path)
     mock_cfg.telegram_bot_token = "mock_bot_token_123"
-    mock_cfg.telegram_chat_id = 1835798213
+    mock_cfg.telegram_chat_id = 424242
 
     with patch.object(smoke_mod, "CloudConfig", return_value=mock_cfg):
         with patch.object(smoke_mod.TelegramBotClient, "send_message", return_value=(True, 999, None)) as mock_send:
@@ -388,7 +390,7 @@ def test_telegram_smoke_test_send_with_none_config(tmp_path):
 
             mock_send.assert_called_once()
             called_kwargs = mock_send.call_args[1]
-            assert called_kwargs["chat_id"] == 1835798213
+            assert called_kwargs["chat_id"] == 424242
 
 
 def test_telegram_smoke_test_send_with_explicit_config(tmp_path):
@@ -533,7 +535,7 @@ def test_cloud_obsidian_sync_from_payload(tmp_path):
                 "next_week_id": "2026-W35",
                 "status": "PENDING",
                 "telegram_message_id": 555,
-                "telegram_chat_id": 1835798213,
+                "telegram_chat_id": 424242,
                 "created_at": "2026-08-16 18:00:00"
             }
         ],

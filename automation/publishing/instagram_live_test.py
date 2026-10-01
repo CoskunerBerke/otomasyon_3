@@ -1,5 +1,7 @@
 """
-Dedicated Single-Reel Live Publish Test Runner for Instagram Reels (@builddverse).
+Dedicated Single-Reel Live Publish Test Runner for Instagram Reels.
+The target account comes from INSTAGRAM_ACCOUNT_ID / INSTAGRAM_EXPECTED_USERNAME (.env);
+there is no built-in default, so the runner refuses to start when they are unset.
 Executes official Meta Graph API Reels publishing workflow for REEL-2026-0010.
 Enforces strict remote verification, live flag safety gates, and robust idempotency.
 """
@@ -25,8 +27,6 @@ from automation.publishing.instagram_validator import validate_instagram_reel_me
 from automation.publishing.instagram_preflight import load_instagram_config
 
 
-EXPECTED_USERNAME = "builddverse"
-EXPECTED_ACCOUNT_ID = "17841411536006797"
 TARGET_REEL_ID = "REEL-2026-0010"
 DEFAULT_STATE_FILE = Path("workspace/instagram_publishing_state.json")
 
@@ -170,8 +170,8 @@ class InstagramLiveTestRunner:
                 app_secret=base_cfg.app_secret,
                 access_token=base_cfg.access_token,
                 graph_version=base_cfg.graph_version or "v26.0",
-                account_id=EXPECTED_ACCOUNT_ID,
-                expected_username=EXPECTED_USERNAME,
+                account_id=base_cfg.account_id,
+                expected_username=base_cfg.expected_username,
                 dry_run=False,
                 allow_upload=True,
                 allow_publish=True,
@@ -181,6 +181,14 @@ class InstagramLiveTestRunner:
                 max_poll_wait_seconds=300
             )
         self.client = InstagramAPIClient(self.config)
+
+    @property
+    def expected_account_id(self) -> str:
+        return str(self.config.account_id or "").strip()
+
+    @property
+    def expected_username(self) -> str:
+        return self.config.normalized_username
 
     def run(self) -> Tuple[bool, InstagramPublishResult, int]:
         """
@@ -197,11 +205,11 @@ class InstagramLiveTestRunner:
         print("REELS AI FACTORY - INSTAGRAM SINGLE REEL LIVE TEST")
         print("=" * 60)
         print(f"Platform : Instagram")
-        print(f"Account  : @{EXPECTED_USERNAME}")
+        print(f"Account  : @{self.expected_username or '<NOT_SET>'} ({self.expected_account_id or '<NOT_SET>'})")
         print(f"Reel     : {TARGET_REEL_ID}")
         print(f"Mode     : LIVE UPLOAD + LIVE PUBLISH")
         print("=" * 60)
-        print("WARNING: This will publish one real Reel to @builddverse.\n")
+        print(f"WARNING: This will publish one real Reel to @{self.expected_username or '<NOT_SET>'}.\n")
 
         # 1. LIVE FLAGS HARD GATE
         print("[LIVE FLAGS]")
@@ -232,8 +240,17 @@ class InstagramLiveTestRunner:
             return False, result, EXIT_PREFLIGHT_FAILED
 
         # 3. ACCOUNT HARD GATE
+        if not self.expected_account_id.isdigit() or not self.expected_username:
+            result.status = InstagramPublishState.FAILED_FATAL
+            result.error_code = "ACCOUNT_NOT_CONFIGURED"
+            result.error_message = (
+                "INSTAGRAM_ACCOUNT_ID (numeric) and INSTAGRAM_EXPECTED_USERNAME must both be set."
+            )
+            logger.error(f"[LIVE TEST] {result.error_message}")
+            return False, result, EXIT_ACCOUNT_MISMATCH
+
         logger.info(f"[LIVE TEST] Verifying account with Meta Graph API ({self.config.graph_version})...")
-        ok_acc, acc_data, acc_err = self.client.get_account_info(EXPECTED_ACCOUNT_ID)
+        ok_acc, acc_data, acc_err = self.client.get_account_info(self.expected_account_id)
         if not ok_acc:
             result.status = InstagramPublishState.FAILED_FATAL
             result.error_code = "ACCOUNT_RESOLUTION_FAILED"
@@ -244,11 +261,11 @@ class InstagramLiveTestRunner:
         remote_user = str(acc_data.get("username", "")).strip().lower()
         remote_id = str(acc_data.get("id", "")).strip()
 
-        if remote_user != EXPECTED_USERNAME or remote_id != EXPECTED_ACCOUNT_ID:
+        if remote_user != self.expected_username or remote_id != self.expected_account_id:
             result.status = InstagramPublishState.FAILED_FATAL
             result.error_code = "ACCOUNT_MISMATCH"
             result.error_message = (
-                f"ACCOUNT_MISMATCH: Expected @{EXPECTED_USERNAME} (ID: {EXPECTED_ACCOUNT_ID}), "
+                f"ACCOUNT_MISMATCH: Expected @{self.expected_username} (ID: {self.expected_account_id}), "
                 f"got @{remote_user} (ID: {remote_id})"
             )
             logger.error(f"[LIVE TEST] {result.error_message}")
@@ -299,7 +316,7 @@ class InstagramLiveTestRunner:
 
         # 7. CONTENT PUBLISHING LIMIT CHECK
         logger.info("[LIVE TEST] Checking publishing quota limit...")
-        ok_limit, limit_data, limit_err = self.client.check_publishing_limit(EXPECTED_ACCOUNT_ID)
+        ok_limit, limit_data, limit_err = self.client.check_publishing_limit(self.expected_account_id)
         if ok_limit:
             usage = limit_data.get("quota_usage", 0)
             total = limit_data.get("config", {}).get("quota_total", 25)
@@ -407,9 +424,9 @@ class InstagramLiveTestRunner:
         if not ok_ver or ver_data.get("id") != media_id:
             logger.warning(f"[REMOTE VERIFY] Media ID {media_id} get failed: {ver_err}")
             # Do NOT mark as failed if publish was confirmed, but flag details
-            result.permalink = f"https://www.instagram.com/{EXPECTED_USERNAME}/"
+            result.permalink = f"https://www.instagram.com/{self.expected_username}/"
         else:
-            result.permalink = ver_data.get("permalink") or f"https://www.instagram.com/{EXPECTED_USERNAME}/"
+            result.permalink = ver_data.get("permalink") or f"https://www.instagram.com/{self.expected_username}/"
             print(f"[REMOTE VERIFY] PASS (Object Type: {ver_data.get('media_type')}/{ver_data.get('media_product_type')})")
             print(f"[REMOTE VERIFY] permalink={result.permalink}")
             print("[REMOTE VERIFY] INSTAGRAM_REMOTE_VERIFIED\n")
@@ -422,7 +439,7 @@ class InstagramLiveTestRunner:
         print("=" * 60)
         print("INSTAGRAM SINGLE REEL LIVE TEST SUCCESS")
         print("=" * 60)
-        print(f"Account         : @{EXPECTED_USERNAME}")
+        print(f"Account         : @{self.expected_username}")
         print(f"Reel            : {TARGET_REEL_ID}")
         print(f"Upload          : PASS")
         print(f"Processing      : PASS")

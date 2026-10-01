@@ -50,10 +50,12 @@ class CloudConfig:
         # Telegram Settings
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
         
-        allowed_user = os.getenv("TELEGRAM_ALLOWED_USER_ID", "1835798213").strip()
+        # No built-in Telegram IDs: when these are unset, approvals are refused (fail closed)
+        # instead of going to whichever account the code was written for.
+        allowed_user = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
         self.telegram_allowed_user_id: Optional[int] = int(allowed_user) if allowed_user.isdigit() else None
 
-        chat_id = os.getenv("TELEGRAM_CHAT_ID", "1835798213").strip()
+        chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
         self.telegram_chat_id: Optional[int] = int(chat_id) if chat_id.lstrip("-").isdigit() else None
 
         self.telegram_webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
@@ -81,8 +83,9 @@ class CloudConfig:
         # Instagram Cloud Worker & Publishing Safety Flags
         self.instagram_prepare_minutes_before = int(os.getenv("INSTAGRAM_PREPARE_MINUTES_BEFORE", "15"))
         self.meta_access_token = os.getenv("META_ACCESS_TOKEN", "").strip()
-        self.instagram_account_id = os.getenv("INSTAGRAM_ACCOUNT_ID", "17841411536006797").strip()
-        self.instagram_expected_username = os.getenv("INSTAGRAM_EXPECTED_USERNAME", "builddverse").strip()
+        # The target account must come from the environment; there is no built-in default.
+        self.instagram_account_id = os.getenv("INSTAGRAM_ACCOUNT_ID", "").strip()
+        self.instagram_expected_username = os.getenv("INSTAGRAM_EXPECTED_USERNAME", "").strip()
         self.meta_graph_version = os.getenv("META_GRAPH_VERSION", "v26.0").strip()
 
         self.instagram_dry_run = os.getenv("INSTAGRAM_DRY_RUN", "true").strip().lower() in ("true", "1", "yes")

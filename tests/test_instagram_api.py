@@ -46,7 +46,7 @@ def test_instagram_secret_masking_in_logs_and_errors():
 
 def test_instagram_preflight_missing_credentials_returns_needs_user_setup():
     """Test 1: Missing credentials must return NEEDS_USER_META_SETUP."""
-    cfg = InstagramConfig(access_token="", account_id="", expected_username="builddverse")
+    cfg = InstagramConfig(access_token="", account_id="", expected_username="demo_reels_studio")
     runner = InstagramPreflightRunner(cfg)
     success, status, diag = runner.run_preflight()
 
@@ -60,15 +60,15 @@ def test_instagram_preflight_valid_account_passes():
     cfg = InstagramConfig(
         access_token="EAABvalidtoken123",
         account_id="17841400000000000",
-        expected_username="builddverse",
+        expected_username="demo_reels_studio",
         graph_version="v22.0"
     )
     mock_client = MagicMock(spec=InstagramAPIClient)
     mock_client.config = cfg
-    mock_client.get_me.return_value = (True, {"id": "123456", "name": "BuilddVerse App"}, None)
+    mock_client.get_me.return_value = (True, {"id": "123456", "name": "Demo Reels App"}, None)
     mock_client.get_account_info.return_value = (
         True,
-        {"id": "17841400000000000", "username": "builddverse", "name": "BuilddVerse"},
+        {"id": "17841400000000000", "username": "demo_reels_studio", "name": "Demo Reels"},
         None
     )
     mock_client.check_publishing_limit.return_value = (
@@ -83,7 +83,7 @@ def test_instagram_preflight_valid_account_passes():
     assert success is True
     assert status == "INSTAGRAM_PREFLIGHT_PASS"
     assert diag["5_username_verified"] is True
-    assert diag["remote_username"] == "builddverse"
+    assert diag["remote_username"] == "demo_reels_studio"
     assert diag["quota_usage"] == 2
 
 
@@ -92,7 +92,7 @@ def test_instagram_preflight_username_mismatch_blocks():
     cfg = InstagramConfig(
         access_token="EAABvalidtoken123",
         account_id="17841400000000000",
-        expected_username="builddverse"
+        expected_username="demo_reels_studio"
     )
     mock_client = MagicMock(spec=InstagramAPIClient)
     mock_client.config = cfg
@@ -117,7 +117,7 @@ def test_instagram_preflight_account_discovery_from_pages():
     cfg = InstagramConfig(
         access_token="EAABvalidtoken123",
         account_id="",  # Empty, must be discovered
-        expected_username="builddverse"
+        expected_username="demo_reels_studio"
     )
     mock_client = MagicMock(spec=InstagramAPIClient)
     mock_client.config = cfg
@@ -125,15 +125,15 @@ def test_instagram_preflight_account_discovery_from_pages():
     mock_client.discover_linked_accounts.return_value = [
         {
             "page_id": "999888",
-            "page_name": "BuilddVerse Page",
+            "page_name": "Demo Reels Page",
             "instagram_id": "17841400112233445",
-            "instagram_username": "builddverse",
-            "instagram_name": "BuilddVerse Official",
+            "instagram_username": "demo_reels_studio",
+            "instagram_name": "Demo Reels Official",
         }
     ]
     mock_client.get_account_info.return_value = (
         True,
-        {"id": "17841400112233445", "username": "builddverse", "name": "BuilddVerse Official"},
+        {"id": "17841400112233445", "username": "demo_reels_studio", "name": "Demo Reels Official"},
         None
     )
     mock_client.check_publishing_limit.return_value = (True, {"quota_usage": 0}, None)
@@ -172,7 +172,7 @@ def test_instagram_api_429_rate_limited_retryable():
     client = InstagramAPIClient(cfg)
 
     mock_resp_429 = MagicMock(status_code=429, text="Rate limit exceeded")
-    mock_resp_200 = MagicMock(status_code=200, json=lambda: {"id": "123", "username": "builddverse"})
+    mock_resp_200 = MagicMock(status_code=200, json=lambda: {"id": "123", "username": "demo_reels_studio"})
 
     with patch.object(client.session, "request", side_effect=[mock_resp_429, mock_resp_200]) as mock_req:
         with patch("time.sleep"):  # Speed up test
@@ -389,8 +389,6 @@ from automation.publishing.instagram_live_test import (
     locate_reel_0010_video,
     check_existing_published_state,
     persist_published_state,
-    EXPECTED_USERNAME,
-    EXPECTED_ACCOUNT_ID,
     TARGET_REEL_ID,
     EXIT_SUCCESS,
     EXIT_PREFLIGHT_FAILED,
@@ -405,6 +403,16 @@ from automation.publishing.instagram_live_test import (
     EXIT_DRY_RUN_ONLY,
 )
 
+# Fictional target account; the live runner reads it from the environment.
+EXPECTED_USERNAME = "demo_reels_studio"
+EXPECTED_ACCOUNT_ID = "17841400000000099"
+
+
+@pytest.fixture
+def live_account_env(monkeypatch):
+    monkeypatch.setenv("INSTAGRAM_ACCOUNT_ID", EXPECTED_ACCOUNT_ID)
+    monkeypatch.setenv("INSTAGRAM_EXPECTED_USERNAME", EXPECTED_USERNAME)
+
 
 def test_instagram_live_runner_locate_exact_reel_0010(tmp_path):
     """Test 4: Locates clean_REEL-2026-0010_Japanese_Zen_Temple.mp4 accurately."""
@@ -418,7 +426,7 @@ def test_instagram_live_runner_locate_exact_reel_0010(tmp_path):
     assert found.name == "clean_REEL-2026-0010_Japanese_Zen_Temple.mp4"
 
 
-def test_instagram_live_runner_wrong_username_blocks(tmp_path):
+def test_instagram_live_runner_wrong_username_blocks(tmp_path, live_account_env):
     """Test 2: Wrong remote username triggers ACCOUNT_MISMATCH and blocks write."""
     state_file = tmp_path / "isolated_state.json"
     runner = InstagramLiveTestRunner(tmp_path, state_file=state_file)
@@ -440,7 +448,7 @@ def test_instagram_live_runner_wrong_username_blocks(tmp_path):
     assert result.status == InstagramPublishState.FAILED_FATAL
 
 
-def test_instagram_live_runner_wrong_account_id_blocks(tmp_path):
+def test_instagram_live_runner_wrong_account_id_blocks(tmp_path, live_account_env):
     """Test 3: Wrong remote account ID triggers ACCOUNT_MISMATCH and blocks write."""
     state_file = tmp_path / "isolated_state.json"
     runner = InstagramLiveTestRunner(tmp_path, state_file=state_file)
@@ -547,7 +555,7 @@ def test_instagram_live_runner_verified_existing_remote_skips(tmp_path):
     assert data["remote_media_id"] == "18099887766554433"
 
 
-def test_instagram_live_runner_full_publish_success(tmp_path):
+def test_instagram_live_runner_full_publish_success(tmp_path, live_account_env):
     """Test 7, 8, 9, 11, 12, 13: Successful container creation, upload, FINISHED polling, publish, remote verification, and state save."""
     dl_dir = tmp_path / "workspace" / "downloads"
     dl_dir.mkdir(parents=True)
@@ -612,7 +620,7 @@ def test_instagram_live_runner_full_publish_success(tmp_path):
         assert state_file.exists()
 
 
-def test_instagram_live_runner_missing_publish_media_id_fails(tmp_path):
+def test_instagram_live_runner_missing_publish_media_id_fails(tmp_path, live_account_env):
     """Test 11: media_publish returning empty ID fails with EXIT_PUBLISH_RESPONSE_MISSING_MEDIA_ID (19)."""
     dl_dir = tmp_path / "workspace" / "downloads"
     dl_dir.mkdir(parents=True)

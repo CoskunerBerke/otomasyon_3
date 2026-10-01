@@ -37,7 +37,7 @@ class InstagramConfig:
     access_token: str = ""
     graph_version: str = "v22.0"
     account_id: str = ""
-    expected_username: str = "builddverse"
+    expected_username: str = ""
     dry_run: bool = True
     allow_upload: bool = False
     allow_publish: bool = False

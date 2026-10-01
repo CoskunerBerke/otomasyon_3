@@ -64,7 +64,7 @@ def load_instagram_config(base_dir: Optional[Path] = None) -> InstagramConfig:
         access_token=os.environ.get("META_ACCESS_TOKEN", local_cfg.get("access_token", "")),
         graph_version=os.environ.get("META_GRAPH_VERSION", local_cfg.get("graph_version", "v22.0")),
         account_id=os.environ.get("INSTAGRAM_ACCOUNT_ID", local_cfg.get("account_id", "")),
-        expected_username=os.environ.get("INSTAGRAM_EXPECTED_USERNAME", local_cfg.get("expected_username", "builddverse")),
+        expected_username=os.environ.get("INSTAGRAM_EXPECTED_USERNAME", local_cfg.get("expected_username", "")),
         dry_run=os.environ.get("INSTAGRAM_DRY_RUN", str(local_cfg.get("dry_run", True))).lower() in ("true", "1", "yes"),
         allow_upload=os.environ.get("INSTAGRAM_ALLOW_UPLOAD", str(local_cfg.get("allow_upload", False))).lower() in ("true", "1", "yes"),
         allow_publish=os.environ.get("INSTAGRAM_ALLOW_PUBLISH", str(local_cfg.get("allow_publish", False))).lower() in ("true", "1", "yes"),
@@ -113,7 +113,12 @@ class InstagramPreflightRunner:
         print(f"Access Token Status    : {self.config.masked_token}")
         print("=" * 60)
 
-        # 1. Config Loaded
+        # 1. Config Loaded (the target account has no built-in default)
+        if not self.config.normalized_username:
+            diag["errors"].append("MISSING_INSTAGRAM_EXPECTED_USERNAME: INSTAGRAM_EXPECTED_USERNAME is not set.")
+            print("[FAIL 1/9] INSTAGRAM_EXPECTED_USERNAME is not set.")
+            return False, "NEEDS_USER_META_SETUP", diag
+
         diag["1_config_loaded"] = True
         logger.info("[PREFLIGHT 1/9] Config loaded: OK")
 
@@ -239,13 +244,13 @@ asagidaki resmi adimlari takip edin:
 
 ADIM 1: Instagram Hesabini Profesyonel / Business Yapin
 --------------------------------------------------------------------------------
-1. Instagram mobil uygulamasinda veya webde '@builddverse' hesabina girin.
+1. Instagram mobil uygulamasinda veya webde yayin yapilacak hesaba girin.
 2. Ayarlar -> Hesap Turu -> "Profesyonel / Icerik Uretici veya Isletme Hesabina Gec" secin.
 
 ADIM 2: Facebook Sayfasi ile Baglayin (Meta Graph API Modeli)
 --------------------------------------------------------------------------------
-1. Facebook'ta '@builddverse' icin bir Facebook Sayfasi olusturun veya mevcut olani secin.
-2. Sayfa Ayarlari -> Bagli Hesaplar -> Instagram -> '@builddverse' hesabini baglayin.
+1. Facebook'ta bu Instagram hesabi icin bir Facebook Sayfasi olusturun veya mevcut olani secin.
+2. Sayfa Ayarlari -> Bagli Hesaplar -> Instagram -> bu hesabi baglayin.
 
 ADIM 3: Meta Developer App Olusturun
 --------------------------------------------------------------------------------
@@ -271,7 +276,7 @@ ADIM 5: Access Token Uretin ve .env Dosyasina Ekleyin
 
    META_GRAPH_VERSION=v22.0
    META_ACCESS_TOKEN=EAAB...
-   INSTAGRAM_EXPECTED_USERNAME=builddverse
+   INSTAGRAM_EXPECTED_USERNAME=<instagram_kullanici_adi>
    INSTAGRAM_ACCOUNT_ID=<Instagram_Account_Numeric_ID>
 
 5. Ardindan 'INSTAGRAM_PREFLIGHT.bat' calistirarak dogrulamayi tamamlayin.

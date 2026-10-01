@@ -30,7 +30,7 @@ def run_railway_preflight(base_dir: Optional[Path] = None) -> Tuple[bool, str, L
     print(f"Public Base URL  : {config.public_base_url or '<NOT_SET>'}")
     print(f"Media Backend    : {config.media_storage_backend}")
     print(f"Telegram Bot     : {config.masked_bot_token}")
-    print(f"Meta Account     : @{config.instagram_expected_username} ({config.instagram_account_id})")
+    print(f"Meta Account     : @{config.instagram_expected_username or '<NOT_SET>'} ({config.instagram_account_id or '<NOT_SET>'})")
     print("=" * 60 + "\n")
 
     # 1. Environment Check
@@ -82,11 +82,17 @@ def run_railway_preflight(base_dir: Optional[Path] = None) -> Tuple[bool, str, L
     else:
         print(f"[PASS 7/17] META_ACCESS_TOKEN set: {config.masked_meta_token}")
 
-    # 8. Instagram Account Verification
-    if config.instagram_account_id != "17841411536006797" or config.instagram_expected_username != "builddverse":
-        errors.append(f"[FAIL 8/17] Unexpected Instagram account: @{config.instagram_expected_username} ({config.instagram_account_id})")
+    # 8. Instagram Account Configuration (the target comes only from the environment)
+    ig_username = config.instagram_expected_username.lstrip("@")
+    if not config.instagram_account_id.isdigit():
+        errors.append(
+            "[FAIL 8/17] INSTAGRAM_ACCOUNT_ID must be set to the numeric Instagram business account ID "
+            f"(got: {config.instagram_account_id or '<NOT_SET>'})."
+        )
+    elif not ig_username or ig_username.startswith("your-"):
+        errors.append("[FAIL 8/17] INSTAGRAM_EXPECTED_USERNAME must be set to the target Instagram username.")
     else:
-        print(f"[PASS 8/17] Instagram target verified: @{config.instagram_expected_username} ({config.instagram_account_id})")
+        print(f"[PASS 8/17] Instagram target configured: @{ig_username} ({config.instagram_account_id})")
 
     # 9. Media Storage Backend
     if config.is_production and config.media_storage_backend != "s3":
