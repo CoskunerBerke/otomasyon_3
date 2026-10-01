@@ -1,6 +1,6 @@
 ---
 name: obsidian-state-reconciler
-description: Yerel/cloud state ile C:\Users\berke\obsidian\Reels_AI_Studio vault'undaki notlar arasında tutarlılığı sağlar; eksik/bozuk/güncel-olmayan Obsidian notunu gerçek state'e göre düzeltir. Obsidian notu eksik, yanlış, state ile uyuşmuyor, veya "Obsidian'da görünmüyor/yanlış görünüyor" şikayetlerinde mutlaka bu skill'i kullan. Obsidian'ı ASLA gerçek veri kaynağı (source of truth) olarak kullanma veya öyle davranma.
+description: Yerel/cloud state ile Obsidian vault'undaki (varsayılan ~/obsidian/Reels_AI_Studio) notlar arasında tutarlılığı sağlar; eksik/bozuk/güncel-olmayan Obsidian notunu gerçek state'e göre düzeltir. Obsidian notu eksik, yanlış, state ile uyuşmuyor, veya "Obsidian'da görünmüyor/yanlış görünüyor" şikayetlerinde mutlaka bu skill'i kullan. Obsidian'ı ASLA gerçek veri kaynağı (source of truth) olarak kullanma veya öyle davranma.
 ---
 
 # Obsidian State Reconciler
@@ -37,7 +37,7 @@ Not: `automation/obsidian/` paketi daha önce `.gitignore`'daki hatalı bir `obs
 ## Güvenlik sınırları
 
 - Obsidian asla `StateRepository`'nin (yerel JSON) veya Railway/PostgreSQL'in (cloud) yerine geçmez; o sadece insan-okunur bir ayna. Mimariyi tersine çevirip Obsidian'dan state OKUYAN yeni bir mantık ekleme (V1/V2'nin `ObsidianReader`'ı bu kuralın istisnasıdır, o zaten var olan, bilinçli bir tasarım — yeni V3 kodunda tekrarlama).
-- Vault yolunu (`C:\Users\berke\obsidian\Reels_AI_Studio`) hardcode etmek yerine mevcut `DEFAULT_VAULT_PATH`/`vault_path` parametrelerini kullan.
+- Vault yolunu (makineye göre değişir; varsayılan `~/obsidian/Reels_AI_Studio`) hardcode etmek yerine mevcut `DEFAULT_VAULT_PATH`/`vault_path` parametrelerini kullan.
 
 ## İlgili repository dosyaları
 
