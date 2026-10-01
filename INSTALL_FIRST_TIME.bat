@@ -74,7 +74,7 @@ echo Simdi sirasiyla:
 echo 1. FLOW_LOGIN.bat ile Google Flow hesabiniza giris yapin.
 echo 2. YOUTUBE_LOGIN.bat ile YouTube hesabinizi yetkilendirin.
 echo 3. BUILDVERSE_GIRIS.bat ile TikTok Studio hesabiniza giris yapin.
-echo 4. 1_YENI_REEL_URET.bat veya 3_YENI_REEL_URET.bat ile uretim yapin.
+echo 4. BUILDVERSE_HAFTALIK_14_REEL.bat veya CRAFTSBYMAN_HAFTALIK_14_REEL.bat ile uretim yapin.
 echo ========================================================
 echo.
 pause
