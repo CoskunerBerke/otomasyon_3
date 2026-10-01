@@ -625,13 +625,16 @@ HIDDEN_BUILD_CONCEPTS: List[HiddenBuildConcept] = [
         },
     ),
     # ---------------------------------------------------------------- 2026-10-01
-    # Built from the channel's own YouTube numbers for 17-30 September. Eight Reels cleared
-    # 1,000 views and every one of them was a heavy machine with a strong silhouette going
-    # into the ground, opening on a working room full of heat, light or sound -- the steam
-    # roller forge led on engaged views and watch time (688, 89% average viewed), the
-    # submarine gym on views and thumbnail click-through (1,650, 6.3%). The hook never names
-    # the payoff: "It Is Burning Inside", "and Trains Inside It". These fourteen repeat that
-    # shape with new machines and new crafts. Never aired, so they take the next week first.
+    # Built from the channel's own YouTube numbers on 2 October (96 uploads, 40,786 views,
+    # 293 likes). The ice cream van that turned out to be a flower room leads on both views
+    # and likes by a wide margin (4,128 and 36 on one upload), then the mixer drum pottery,
+    # the windmill music room and the caravan bakery. The shape that wins: a recognisable,
+    # slightly charming vehicle goes into the ground and opens on a beautiful, quiet room
+    # someone made by hand -- flowers, clay, music, stars -- under a hook that hints at the
+    # payoff without naming the craft. The helicopter observatory and the subway studio
+    # draw the most likes per view. Every concept also decays when it airs again (ice cream
+    # van 4,128 then 1,017; post bus 1,891 then 61; third airings near zero), so these are
+    # new machines and new rooms, and as never aired they take the next week first.
     _c(
         id_slug="excavator-glassworks",
         name="Excavator Glassworks",
@@ -653,23 +656,23 @@ HIDDEN_BUILD_CONCEPTS: List[HiddenBuildConcept] = [
         },
     ),
     _c(
-        id_slug="bulldozer-foundry",
-        name="Bulldozer Foundry",
-        category_group="Industrial",
-        buried_object="a rust-orange bulldozer",
-        surprise_reveal="a bronze foundry",
-        observer="a man in a plain leather apron",
-        environments=["a flat red-earth yard beside a brick workshop"],
-        architectures=["a rust-orange bulldozer with its blade and tracks intact"],
-        transformations=["driven blade-first into a sloped trench until the exhaust stack is level with the earth, then buried"],
-        materials=["rust-orange steel, sand moulds, a glowing crucible, bronze castings"],
-        reveals=["a small foundry built along the bulldozer frame, a crucible of glowing bronze tipping into sand moulds, finished bronze bells hanging from the old blade arms"],
-        default_title="He Buried a Bulldozer. Now He Pours Metal Inside It",
-        topic_description="A bulldozer buried in a red-earth yard turns out to be an underground bronze foundry",
+        id_slug="milkfloat-butterflies",
+        name="Milk Float Butterfly House",
+        category_group="Vehicles",
+        buried_object="a pale blue vintage milk float",
+        surprise_reveal="a butterfly house",
+        observer="a woman in a plain cream cardigan",
+        environments=["a small back garden of bare earth behind a brick terrace"],
+        architectures=["a pale blue vintage milk float with its open crate deck"],
+        transformations=["lowered into a pit until its roof is level with the earth, then covered and turfed"],
+        materials=["pale blue painted panels, glass roof lights, flowering lantana, hundreds of bright butterflies"],
+        reveals=["a warm butterfly house inside the milk float, flowering plants along both sides, hundreds of orange and blue butterflies drifting under the glass roof lights"],
+        default_title="They Buried a Milk Float. It Is Full of Butterflies",
+        topic_description="A vintage milk float buried in a back garden turns out to be an underground butterfly house",
         ambient_sounds={
-            "before": "dry wind over open earth, a gate creaking, distant birds",
-            "turn": "diesel engine idling down, tracks clanking, earth thudding onto steel",
-            "after": "molten metal hissing into sand, a crucible scraping, a bell humming faintly",
+            "before": "garden birdsong, a gate latch, wind in a hedge",
+            "turn": "crane motor, a light van body creaking, earth falling over the roof",
+            "after": "soft wing flutters, a fine mister hissing, water dripping onto leaves",
         },
     ),
     _c(
@@ -713,43 +716,43 @@ HIDDEN_BUILD_CONCEPTS: List[HiddenBuildConcept] = [
         },
     ),
     _c(
-        id_slug="railcrane-knifeworks",
-        name="Railway Crane Knife Works",
+        id_slug="radardome-planetarium",
+        name="Radar Dome Planetarium",
         category_group="Industrial",
-        buried_object="a black steam railway crane",
-        surprise_reveal="a knife-making workshop",
-        observer="a man in a plain canvas work jacket",
-        environments=["a disused railway siding of cinders and weeds"],
-        architectures=["a black steam railway crane with its jib lowered"],
-        transformations=["rolled onto a sunken track bed and buried until only the jib tip shows, then covered over"],
-        materials=["black iron, grinding wheels, hammered steel blades, oak handles"],
-        reveals=["a knife workshop inside the crane body, a grinding wheel throwing sparks under the old boiler, finished blades on a rack along the jib"],
-        default_title="He Buried a Railway Crane. Sparks Are Flying Inside",
-        topic_description="A steam railway crane buried in a siding turns out to be an underground knife-making workshop",
+        buried_object="a white weather radar dome",
+        surprise_reveal="a planetarium",
+        observer="a father and his young son in plain dark jumpers",
+        environments=["a bare hilltop field with a low dry-stone wall"],
+        architectures=["a white weather radar dome taken off its tower"],
+        transformations=["lowered into a round pit until the top of the dome is level with the grass, then turfed over"],
+        materials=["white panelled dome, a brass star projector, deep blue reclining seats"],
+        reveals=["a small planetarium under the dome, a brass projector throwing thousands of stars across the curved ceiling while two figures lie back watching"],
+        default_title="He Buried a Radar Dome. The Stars Are Inside",
+        topic_description="A weather radar dome buried on a hilltop turns out to be an underground planetarium",
         ambient_sounds={
-            "before": "wind through weeds on a siding, cinders crunching, a distant train",
-            "turn": "steel wheels on rail, iron groaning, cinders pouring over the frame",
-            "after": "a grinding wheel screaming on steel, sparks crackling, a blade tapped on an anvil",
+            "before": "wind over a hilltop, grass rustling, a skylark",
+            "turn": "crane motor, dome panels creaking, turf laid over the curve",
+            "after": "a projector humming softly, a seat creaking, a long quiet breath",
         },
     ),
     _c(
-        id_slug="miningtruck-gym",
-        name="Mining Truck Gym",
+        id_slug="foodtruck-fern-grotto",
+        name="Food Truck Fern Grotto",
         category_group="Vehicles",
-        buried_object="a giant yellow mining dump truck",
-        surprise_reveal="a boxing gym",
-        observer="a young man in plain grey sportswear",
-        environments=["a wide dusty quarry floor, terraced rock walls behind"],
-        architectures=["a giant yellow mining dump truck with its tipping body raised"],
-        transformations=["reversed into a vast pit until the raised body is level with the quarry floor, then buried"],
-        materials=["yellow steel plate, heavy leather bags, canvas ring ropes, hanging work lamps"],
-        reveals=["a boxing gym inside the dump body, a canvas ring on the steel floor, heavy bags hanging from the tipping arms under warm work lamps"],
-        default_title="He Buried a Mining Truck and Trains Inside It",
-        topic_description="A giant mining dump truck buried in a quarry turns out to be an underground boxing gym",
+        buried_object="a mint-green vintage food truck",
+        surprise_reveal="a fern grotto with a waterfall",
+        observer="a young woman in a plain olive jacket",
+        environments=["a dry gravel lot beside a timber fence, a few bare shrubs"],
+        architectures=["a mint-green vintage food truck with its serving hatch closed"],
+        transformations=["lowered into a pit until the roof is level with the gravel, then buried"],
+        materials=["mint-green painted steel, wet stone, moss, tree ferns, soft green light"],
+        reveals=["a green fern grotto inside the food truck, moss over every surface, tree ferns arching from the walls and a small waterfall spilling out of the old serving hatch into a stone pool"],
+        default_title="They Buried a Food Truck. There Is a Waterfall Inside",
+        topic_description="A vintage food truck buried in a gravel lot turns out to be an underground fern grotto with a waterfall",
         ambient_sounds={
-            "before": "wind across a quarry floor, dust settling, a distant rock fall",
-            "turn": "huge diesel engine, steel body groaning, rock and dust pouring in",
-            "after": "gloves thudding into a heavy bag, chains swinging, breathing in a hard steel echo",
+            "before": "wind on gravel, a fence board knocking, sparrows",
+            "turn": "crane motor, a truck body creaking, gravel pouring over the roof",
+            "after": "water falling into a stone pool, drips from fern fronds, a soft enclosed hush",
         },
     ),
     _c(
