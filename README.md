@@ -30,9 +30,9 @@ Every week the factory produces a 14-Reel series (7 days × 2 time slots) per ch
 In short (the full walkthrough with diagrams, formulas, thresholds and code links is in **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**):
 
 - **Plan:** 14 slots (19:30 and 22:00 Europe/Istanbul) starting the day after the channel's last scheduled video. Concepts are ordered by how long they have rested; the required rest scales with the size of the concept pool (up to 21 days), and a week that would repeat a concept within 7 days is refused.
-- **Generate:** one Flow project per Reel and three 10 s segments that share one continuity description. A polling state machine downloads only a video that was not on screen before Generate was clicked, and never picks the paid upscaled downloads.
+- **Generate:** one Flow project per Reel and three 10 s segments whose prompts repeat the same description of the place, materials and light. A polling state machine downloads only a video that was not on screen before Generate was clicked, and never picks the paid upscaled downloads.
 - **Validate and lock:** ffprobe stream and 9:16 checks, frame sampling for black, empty or frozen video, and a per-mode audio policy; two identical failures in a row stop generation. The plan is locked only when all 14 Reels are QC-passed Flow output.
-- **Schedule:** a pre-publish gate before every upload (provenance, Reel ID invariant, placeholder metadata, slot, SHA-256), each YouTube and TikTok attempt recorded before the upload, then each platform's own scheduler. A submit whose confirmation could not be read is recorded as unverified, not as a success; Instagram's is never retried, and YouTube Studio re-checks before it resumes.
+- **Schedule:** a full pre-publish gate before each YouTube and TikTok upload (provenance, Reel ID invariant, placeholder metadata, slot, SHA-256) and a narrower one on both Instagram routes (provenance and Reel ID; metadata is checked at lock). Each YouTube and TikTok attempt is recorded before the upload, then each platform's own scheduler is used. A submit whose confirmation could not be read is recorded as unverified, not as a success; Instagram's is never retried, and YouTube Studio re-checks before it resumes.
 - **Resume:** every step is written under `workspace/`, so running the same launcher again continues where it stopped.
 
 ```mermaid
@@ -53,7 +53,7 @@ flowchart TB
 
     subgraph PUBLISH["3. Schedule with each platform's native scheduler"]
         direction LR
-        GATE["Pre-publish gate<br/>provenance, Reel ID,<br/>metadata"] --> YT["YouTube<br/>Studio or Data API v3"]
+        GATE["Pre-publish checks<br/>provenance, Reel ID<br/>(full gate for YouTube, TikTok)"] --> YT["YouTube<br/>Studio or Data API v3"]
         YT --> TT["TikTok<br/>TikTok Studio"]
         TT --> IG["Instagram<br/>web scheduler or<br/>cloud handoff"]
     end
@@ -92,7 +92,7 @@ sequenceDiagram
 - **Google Flow automation**: connects to a real Chrome session over CDP, sets 9:16, submits prompts, resumes and downloads segments, and never picks the paid upscale entries in the download menu. It stops with `USER_ACTION_REQUIRED` instead of bypassing logins or CAPTCHAs.
 - **Quality control**: FFprobe checks (a video stream and a 9:16 aspect ratio), frame sampling for black, empty or frozen video, audio handling per content mode, faststart, and 3 × 10 s segment concatenation into a 30 s Reel.
 - **Publishing**: YouTube (Studio or Data API v3), TikTok Studio and Instagram (web scheduler or Meta Graph API), with AI-content disclosure on every route and, in YouTube Data API mode, localized titles and descriptions (`tr`, `hi`, `id`, `ja`) for story and cutaway Reels.
-- **Safety by design**: idempotent uploads (per-Reel, per-platform progress, YouTube and TikTok attempts recorded before the upload, SHA-256 checks), a pre-publish gate that blocks test media, mismatched Reel IDs and placeholder metadata, per-platform failure isolation, never clicks "post now", never deletes remote content, brand isolation, and a process lock with a 14-video cap in the generation CLI (`run.py`).
+- **Safety by design**: idempotent uploads (per-Reel, per-platform progress, YouTube and TikTok attempts recorded before the upload, SHA-256 checks), pre-publish checks that block test media and mismatched Reel IDs on every route (placeholder metadata is refused at lock and again before each YouTube and TikTok upload), per-platform failure isolation, never clicks "post now", never deletes remote content, brand isolation, and a process lock with a 14-video cap in the generation CLI (`run.py`).
 - **Multi-brand**: each channel has its own accounts, Chrome profiles, ports, ID prefix (`CBM-` for Crafts By Man) and inventory.
 - **Obsidian integration**: the weekly pipeline mirrors each Reel into the vault; the older CLIs (`run.py`, `publish.py`) move Reel notes through `03_SCRIPTS → 04_PRODUCTION → 05_READY / 07_REJECTED` and write a publishing queue, an agent control center and graph-view links.
 - **Cloud control plane** (optional; Docker image, ready for Railway): standard-library HTTP service with Telegram webhook approvals, a weekly scheduler, a local-worker command queue, S3-compatible media storage and a `/health` endpoint.
@@ -292,7 +292,7 @@ In use for my own two channels; not a hosted product and not set up for other ac
 
 - Done: weekly pipeline for YouTube, TikTok and Instagram (web scheduler), multi-brand support, Telegram approval bot, cloud command queue.
 - Optional and off by default: the cloud Instagram worker (Meta Graph API) and the weekly approval scheduler.
-- Known gaps: the cloud HTTP server is single-threaded (enough for one worker and one bot); failed worker commands are not retried automatically; the variables listed as "read but not applied yet" above; browser automation depends on the platforms' current UI and needs selector updates when it changes. A fuller list is in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#8-limitations-known-gaps-and-next-steps).
+- Known gaps: the weekly launchers' `--dry-run` option is not accepted by the pipeline (it exits before doing anything), and a rehearsal run of a live week can make that week count as done; the cloud HTTP server is single-threaded (enough for one worker and one bot); failed worker commands are not retried automatically; the variables listed as "read but not applied yet" above; browser automation depends on the platforms' current UI and needs selector updates when it changes. A fuller list is in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#9-limitations-known-gaps-and-next-steps), and what to do about blocked states is in its [operator runbook](docs/HOW_IT_WORKS.md#8-operator-runbook-blocked-and-terminal-states).
 
 ---
 
@@ -310,14 +310,14 @@ Her hafta kanal başına 14 Reel'lik (7 gün × 2 slot) bir seri üretir. Konsep
 
 ### Nasıl çalışır
 
-[Yukarıdaki iki diyagram](#how-it-works) geçerlidir: hafta `.bat` başlatıcıyla ya da 6. gün gelen Telegram onayıyla başlar; yerel Windows işçisi PLAN → ÜRET → DOĞRULA → KİLİTLE adımlarını çalıştırır; ardından yayın öncesi kapıdan (kaynak, Reel ID ve metadata kontrolü) geçen videolar sırasıyla YouTube, TikTok ve Instagram zamanlayıcılarına verilir. Plan, 14 Reel'in tamamı üretilip QC'den geçmeden kilitlenmez ve kilitten önce hiçbir şey yüklenmez; 14/14'e ulaşamayan platform, sonrakine geçilmeden önce elle düzeltme için en fazla 30 dakika bekletilir.
+[Yukarıdaki iki diyagram](#how-it-works) geçerlidir: hafta `.bat` başlatıcıyla ya da 6. gün gelen Telegram onayıyla başlar; yerel Windows işçisi PLAN → ÜRET → DOĞRULA → KİLİTLE adımlarını çalıştırır; ardından yayın öncesi kontrollerden geçen videolar sırasıyla YouTube, TikTok ve Instagram zamanlayıcılarına verilir (YouTube ve TikTok'ta tam kapı: kaynak, Reel ID, metadata, slot, SHA-256; Instagram'da yalnızca kaynak ve Reel ID). Plan, 14 Reel'in tamamı üretilip QC'den geçmeden kilitlenmez ve kilitten önce hiçbir şey yüklenmez; 14/14'e ulaşamayan platform, sonrakine geçilmeden önce elle düzeltme için en fazla 30 dakika bekletilir.
 
 Kısaca (diyagramlar, formüller, eşikler ve kod bağlantılarıyla tam anlatım: **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**, sonunda Türkçe özet var):
 
 - **Planlama:** 19:30 ve 22:00 (Europe/Istanbul) slotları, kanalın son planlı videosunun ertesi günü başlar. Konseptler ne kadar süredir dinlendiklerine göre sıralanır; gereken dinlenme süresi havuz büyüklüğüne göre en fazla 21 gündür ve bir konsepti 7 günden kısa sürede tekrarlayacak hafta reddedilir.
-- **Üretim:** Reel başına bir Flow projesi, aynı süreklilik tarifini paylaşan 3 × 10 sn parça. Bir durum makinesi yalnızca Generate'e basılmadan önce ekranda olmayan videoyu indirir; kredi harcayan yükseltilmiş indirmeleri asla seçmez.
+- **Üretim:** Reel başına bir Flow projesi, promptlarında aynı mekân, malzeme ve ışık tarifini tekrarlayan 3 × 10 sn parça. Bir durum makinesi yalnızca Generate'e basılmadan önce ekranda olmayan videoyu indirir; kredi harcayan yükseltilmiş indirmeleri asla seçmez.
 - **Doğrulama ve kilit:** FFprobe ile video akışı ve 9:16 kontrolü, siyah, boş veya donmuş kare taraması, içerik moduna göre ses kuralı; aynı hata üst üste iki kez olursa üretim durur.
-- **Zamanlama:** her yüklemeden önce yayın öncesi kapı (kaynak, Reel ID eşitliği, şablon metadata, slot, SHA-256), YouTube ve TikTok'ta yükleme denemesi yüklemeden önce kaydedilir, sonra platformun kendi zamanlayıcısı kullanılır. Onayı okunamayan gönderim başarılı değil, doğrulanmamış olarak kaydedilir; Instagram'da asla tekrar denenmez, YouTube Studio devam etmeden önce yeniden kontrol eder.
+- **Zamanlama:** YouTube ve TikTok'ta her yüklemeden önce tam yayın öncesi kapı (kaynak, Reel ID eşitliği, şablon metadata, slot, SHA-256), Instagram'ın iki yolunda daha dar bir kontrol (kaynak ve Reel ID; metadata kilitlemede denetlenir). YouTube ve TikTok'ta yükleme denemesi yüklemeden önce kaydedilir, sonra platformun kendi zamanlayıcısı kullanılır. Onayı okunamayan gönderim başarılı değil, doğrulanmamış olarak kaydedilir; Instagram'da asla tekrar denenmez, YouTube Studio devam etmeden önce yeniden kontrol eder.
 - **Devam:** her adım `workspace/` altına yazılır; aynı başlatıcıyı tekrar çalıştırmak kaldığı yerden devam eder.
 
 ### Özellikler
@@ -397,7 +397,7 @@ Kendi iki kanalım için kullanılıyor; barındırılan bir ürün değildir ve
 
 - Tamamlanan: YouTube, TikTok ve Instagram (web zamanlayıcı) için haftalık hat, çoklu marka, Telegram onay botu, bulut komut kuyruğu.
 - İsteğe bağlı ve varsayılan olarak kapalı: Meta Graph API ile bulut Instagram işçisi ve haftalık onay zamanlayıcısı.
-- Bilinen eksikler: bulut HTTP sunucusu tek iş parçacıklıdır (tek işçi ve tek bot için yeterli); başarısız işçi komutları otomatik yeniden denenmez; yukarıda "henüz uygulanmıyor" olarak listelenen değişkenler; tarayıcı otomasyonu platformların güncel arayüzüne bağlıdır ve arayüz değişince seçici güncellemesi gerekir. Daha ayrıntılı liste: [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#8-limitations-known-gaps-and-next-steps).
+- Bilinen eksikler: haftalık başlatıcıların `--dry-run` seçeneğini hat kabul etmez (hiçbir şey yapmadan çıkar) ve canlı bir haftanın provası o haftayı bitmiş gösterebilir; bulut HTTP sunucusu tek iş parçacıklıdır (tek işçi ve tek bot için yeterli); başarısız işçi komutları otomatik yeniden denenmez; yukarıda "henüz uygulanmıyor" olarak listelenen değişkenler; tarayıcı otomasyonu platformların güncel arayüzüne bağlıdır ve arayüz değişince seçici güncellemesi gerekir. Daha ayrıntılı liste: [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md#9-limitations-known-gaps-and-next-steps); takılan durumlarda ne yapılacağı aynı belgenin [işletim rehberinde](docs/HOW_IT_WORKS.md#8-operator-runbook-blocked-and-terminal-states).
 
 ---
 
