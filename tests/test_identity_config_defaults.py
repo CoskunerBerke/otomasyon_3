@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from automation.cloud.approval_service import ApprovalService
+from automation.cloud.cloud_preflight import run_cloud_preflight
 from automation.cloud.config import CloudConfig
 from automation.cloud.database import Database
 from automation.cloud.models import TelegramApproval, TelegramApprovalStatus
@@ -181,6 +182,43 @@ def test_railway_preflight_accepts_any_configured_instagram_target(tmp_path, no_
         INSTAGRAM_EXPECTED_USERNAME=DEMO_IG_USERNAME,
     )
     assert errors == []
+
+
+def _cloud_preflight(tmp_path, monkeypatch, capsys, **env):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'cloud.db'}")
+    monkeypatch.setenv("MEDIA_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("META_ACCESS_TOKEN", "EAABvalidtoken123")
+    monkeypatch.setenv("INSTAGRAM_ACCOUNT_ID", DEMO_IG_ACCOUNT_ID)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    ok, errors = run_cloud_preflight(tmp_path)
+    return ok, errors, capsys.readouterr().out
+
+
+@pytest.mark.parametrize("worker_key", ["", "change-me", "reels_ai_local_worker_key_dev"])
+def test_cloud_preflight_fails_when_the_server_would_disable_the_worker_api(
+        tmp_path, no_identity_env, capsys, worker_key):
+    ok, errors, out = _cloud_preflight(tmp_path, no_identity_env, capsys,
+                                       LOCAL_WORKER_API_KEY=worker_key,
+                                       INSTAGRAM_EXPECTED_USERNAME=DEMO_IG_USERNAME)
+    assert ok is False
+    assert [e for e in errors if "5/5" in e] == [
+        "[FAIL 5/5] LOCAL_WORKER_API_KEY is empty or still a template value (change-me)."]
+    assert "[PASS 5/5]" not in out
+
+
+def test_cloud_preflight_names_the_target_or_says_it_is_not_set(tmp_path, no_identity_env, capsys):
+    ok, errors, out = _cloud_preflight(tmp_path, no_identity_env, capsys,
+                                       LOCAL_WORKER_API_KEY="demo-worker-key-0123456789")
+    assert (ok, errors) == (True, [])
+    assert "[PASS 4/5] Meta credentials configured (INSTAGRAM_EXPECTED_USERNAME not set)." in out
+    assert "for @." not in out
+
+    no_identity_env.setenv("INSTAGRAM_EXPECTED_USERNAME", f"@{DEMO_IG_USERNAME}")
+    ok, _, out = _cloud_preflight(tmp_path, no_identity_env, capsys,
+                                  LOCAL_WORKER_API_KEY="demo-worker-key-0123456789")
+    assert ok is True
+    assert f"[PASS 4/5] Meta credentials configured (@{DEMO_IG_USERNAME})." in out
 
 
 def test_instagram_preflight_requires_expected_username():

@@ -4,7 +4,8 @@ Verifies readiness of all cloud subsystem components before deployment.
 """
 import sys
 import logging
-from typing import Dict, Any, Tuple, List
+from pathlib import Path
+from typing import Dict, Any, Tuple, List, Optional
 
 logger = logging.getLogger("ReelsAIFactory.CloudPreflight")
 
@@ -13,9 +14,9 @@ from .database import Database
 from .media_storage import get_media_storage
 
 
-def run_cloud_preflight() -> Tuple[bool, List[str]]:
+def run_cloud_preflight(base_dir: Optional[Path] = None) -> Tuple[bool, List[str]]:
     """Runs diagnostics across database, Telegram, Meta, and storage."""
-    config = CloudConfig()
+    config = CloudConfig(base_dir)
     errors = []
 
     print("=" * 60)
@@ -44,19 +45,21 @@ def run_cloud_preflight() -> Tuple[bool, List[str]]:
     if config.is_telegram_configured:
         print("[PASS 3/5] Telegram credentials configured.")
     else:
-        print("[WARN 3/5] Telegram credentials incomplete (run TELEGRAM_PREFLIGHT.bat).")
+        print("[WARN 3/5] Telegram credentials incomplete (run python -m automation.cloud.telegram_preflight).")
 
     # 4. Meta Instagram Config Check
     if config.meta_access_token and config.instagram_account_id:
-        print(f"[PASS 4/5] Meta credentials configured for @{config.instagram_expected_username}.")
+        username = config.instagram_expected_username.lstrip("@")
+        target = f"@{username}" if username else "INSTAGRAM_EXPECTED_USERNAME not set"
+        print(f"[PASS 4/5] Meta credentials configured ({target}).")
     else:
         errors.append("[FAIL 4/5] Meta Graph API credentials missing.")
 
-    # 5. Worker Key Check
-    if config.local_worker_api_key:
+    # 5. Worker Key Check (same rule the server applies: a template value keeps it disabled)
+    if config.is_worker_api_enabled:
         print("[PASS 5/5] Local worker API key configured.")
     else:
-        errors.append("[FAIL 5/5] LOCAL_WORKER_API_KEY is empty.")
+        errors.append("[FAIL 5/5] LOCAL_WORKER_API_KEY is empty or still a template value (change-me).")
 
     if errors:
         print("\n[CLOUD PREFLIGHT FAILED]")
