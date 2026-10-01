@@ -273,3 +273,62 @@ def test_disabled_telegram_webhook_is_closed(server):
 
     code, _ = _request(httpd, "GET", "/health")
     assert code == 200
+
+
+def _post_without_sending_the_body(httpd, path, headers, declared_length=5 * 1024 * 1024):
+    """Declares a large body, sends only a few bytes of it and waits for the answer.
+    A server that reads the body before checking the headers never answers in time."""
+    sock = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=5)
+    resp = http.client.HTTPResponse(sock)
+    try:
+        lines = [f"POST {path} HTTP/1.1", "Host: 127.0.0.1", "Content-Type: application/json",
+                 f"Content-Length: {declared_length}"]
+        lines += [f"{name}: {value}" for name, value in headers.items()]
+        sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode() + b'{"worker_id": ')
+        resp.begin()
+        return resp.status, json.loads(resp.read() or b"{}")
+    finally:
+        resp.close()  # the response holds its own reference to the socket
+        sock.close()
+
+
+@pytest.mark.parametrize("path, headers, config_changes, expected", [
+    ("/worker/heartbeat", {}, {}, (401, "UNAUTHORIZED_WORKER_KEY")),
+    ("/worker/heartbeat", {"X-Worker-Api-Key": "wrong"}, {}, (401, "UNAUTHORIZED_WORKER_KEY")),
+    ("/worker/commands/CMD-1/complete", {}, {}, (401, "UNAUTHORIZED_WORKER_KEY")),
+    ("/worker/media/diagnostic-cleanup", {}, {}, (401, "UNAUTHORIZED_WORKER_KEY")),
+    ("/worker/media/upload", {}, {}, (401, "UNAUTHORIZED_WORKER_KEY")),
+    ("/worker/heartbeat", {"X-Worker-Api-Key": "change-me"},
+     {"local_worker_api_key": "change-me"}, (401, "WORKER_API_DISABLED")),
+    ("/telegram/webhook", {}, {}, (403, "FORBIDDEN_INVALID_WEBHOOK_SECRET")),
+    ("/telegram/webhook", {"X-Telegram-Bot-Api-Secret-Token": "wrong"}, {},
+     (403, "FORBIDDEN_INVALID_WEBHOOK_SECRET")),
+    ("/telegram/webhook", {}, {"app_env": "production", "telegram_webhook_secret": ""},
+     (403, "TELEGRAM_WEBHOOK_SECRET_MISSING")),
+    ("/telegram/webhook", {"X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET},
+     {"enable_telegram_webhook": False}, (503, "TELEGRAM_WEBHOOK_DISABLED")),
+    ("/not-a-route", {}, {}, (404, "NOT_FOUND")),
+])
+def test_rejected_post_is_answered_before_its_body_is_read(server, path, headers, config_changes,
+                                                           expected):
+    # Before, the server read up to 10 MB of body before any route checked a credential.
+    httpd, handler, _ = server
+    for name, value in config_changes.items():
+        setattr(handler.app.config, name, value)
+
+    code, resp = _post_without_sending_the_body(httpd, path, headers)
+    assert (code, resp["error"]) == expected
+
+    code, _ = _request(httpd, "GET", "/health")
+    assert code == 200
+
+
+def test_authenticated_json_post_still_reads_the_body(server):
+    httpd, handler, _ = server
+    body = json.dumps({"worker_id": "demo_worker", "version": "9.9.9"}).encode()
+    code, resp = _request(httpd, "POST", "/worker/heartbeat", body, _worker_headers())
+    assert code == 200
+    assert resp["status"] == "HEARTBEAT_ACKNOWLEDGED"
+    heartbeat = handler.app.db.get_latest_heartbeat()
+    assert heartbeat.worker_id == "demo_worker"
+    assert heartbeat.version == "9.9.9"

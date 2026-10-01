@@ -24,7 +24,7 @@ from .media_storage import get_media_storage
 from .instagram_worker import InstagramCloudWorker
 from .scheduler import CloudScheduler
 from .health import get_health_status
-from .telegram_webhook import handle_webhook_request
+from .telegram_webhook import check_webhook_headers, handle_webhook_request
 from .local_worker_api import (
     _authenticate_worker,
     handle_worker_heartbeat,
@@ -101,6 +101,30 @@ class CloudApp:
 
         return 404, {"ok": False, "error": "NOT_FOUND"}
 
+    def check_post_headers(self, path: str, headers: Dict[str, str]) -> Optional[Tuple[int, Dict[str, Any]]]:
+        """
+        Header-only checks for a POST, run before its body is read. Returns None when the
+        body may be read, otherwise the (status, response) to send. Without this an
+        anonymous client could make the server read up to 10 MB per request just to be
+        rejected afterwards. The route handlers still run their own checks.
+        """
+        clean_path = path.split("?")[0].rstrip("/")
+
+        if clean_path.startswith("/worker/"):
+            auth_ok, auth_err = _authenticate_worker(headers, self.config)
+            if not auth_ok:
+                return 401, {"ok": False, "error": auth_err}
+            return None
+
+        if clean_path == "/telegram/webhook":
+            if not self.config.enable_telegram_webhook:
+                return 503, {"ok": False, "error": "TELEGRAM_WEBHOOK_DISABLED"}
+            return check_webhook_headers(headers, self.config)
+
+        # Every POST route lives under /worker/ or is the webhook (see route_request);
+        # anything else would be a 404 after reading the body, so answer it now.
+        return 404, {"ok": False, "error": "NOT_FOUND"}
+
     def _scheduler_loop(self) -> None:
         """Background loop executing scheduler iterations."""
         logger.info("[SCHEDULER] Cloud background scheduler started.")
@@ -175,15 +199,20 @@ class CloudHTTPRequestHandler(BaseHTTPRequestHandler):
         if not clean_path:
             clean_path = "/"
 
+        # Authenticate from the headers before a single byte of the body is read: otherwise
+        # anyone could make the server buffer 10 MB of JSON, or leave up to 100 MB of temp
+        # files behind, per request.
+        try:
+            rejection = self.app.check_post_headers(self.path, headers_dict)
+        except Exception:
+            logger.exception(f"[HTTP] Unhandled error while checking POST {clean_path}")
+            rejection = 500, {"ok": False, "error": "INTERNAL_ERROR"}
+        if rejection is not None:
+            self._send_json(*rejection)
+            return
+
         # Bounded streaming multipart upload for /worker/media/upload
         if clean_path == "/worker/media/upload" and "multipart/form-data" in content_type:
-            # Authenticate before a single byte of the body is written to disk; otherwise
-            # anyone could leave up to 100 MB of temp files behind per request.
-            auth_ok, auth_err = _authenticate_worker(headers_dict, self.app.config)
-            if not auth_ok:
-                self._send_json(401, {"ok": False, "error": auth_err})
-                return
-
             fields, temp_path, filename, file_size, calculated_sha, err = stream_multipart_request(
                 self.rfile, content_len, content_type
             )
