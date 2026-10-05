@@ -46,8 +46,8 @@ class HiddenBuildPlanner:
         "black t-shirt, grey work trousers and work boots, working alone and unhurried"
     )
 
-    # No speech, for the same reason as the other story mode: a voiceover would need a
-    # script, a language and a voice, none of which this pipeline has. Text of any kind is
+    # No speech in the prompt, for the same reason as the other story mode: narration is
+    # mixed in afterwards in one fixed voice (automation/audio/voiceover.py). Text of any kind is
     # banned twice over here -- once as a caption and once as a label -- because a prompt
     # that names its characters can otherwise end up drawing their names on screen.
     NEGATIVE_EXCLUSIONS = [

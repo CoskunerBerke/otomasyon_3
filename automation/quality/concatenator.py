@@ -7,11 +7,40 @@ Audio is stripped by default (the silent V3 pipeline) and kept only when the cal
 passes preserve_audio=True -- narrative_ambient_story Reels carry Flow's own diegetic
 ambience, so re-encoding it away here would silently defeat the whole mode. Callers
 should decide via automation.content.content_modes rather than hardcoding a boolean.
+
+The output is 1080x1920. Flow's free download is 720p (its 1080p and 4K entries spend
+credits), and YouTube gives a 720p Short a visibly softer encode than a 1080p one -- the
+uploads looked a notch worse than the preview. Scaling up here costs nothing, and the
+encode keeps enough bitrate (CRF 17) that the platforms' own re-encode starts from a
+clean picture.
 """
 import subprocess
 import shutil
 from pathlib import Path
 from typing import List, Optional
+
+OUTPUT_WIDTH = 1080
+OUTPUT_HEIGHT = 1920
+
+# Fits any input inside 1080x1920 without distortion; a true 9:16 input fills it exactly.
+SCALE_FILTER = (
+    f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos:force_original_aspect_ratio=decrease,"
+    f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+)
+
+VIDEO_ENCODE_ARGS = [
+    "-c:v", "libx264",
+    "-preset", "medium",
+    "-crf", "17",
+    "-profile:v", "high",
+    "-pix_fmt", "yuv420p",
+    "-r", "30",
+    "-movflags", "+faststart",
+]
+
+# A 1080p encode takes several times longer than the old 720p default did.
+ENCODE_TIMEOUT_SECONDS = 600
+
 
 class VideoConcatenator:
     """Concatenates multiple video segments into a single unified 30s MP4."""
@@ -58,14 +87,13 @@ class VideoConcatenator:
             "-safe", "0",
             "-i", str(concat_txt),
             *audio_args,
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-r", "30",
+            "-vf", SCALE_FILTER,
+            *VIDEO_ENCODE_ARGS,
             str(output_path)
         ]
 
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=ENCODE_TIMEOUT_SECONDS)
             if not output_path.exists() or output_path.stat().st_size < 10000:
                 # Method 2: Filter complex fallback
                 inputs = []
@@ -75,10 +103,10 @@ class VideoConcatenator:
                     filter_ins += f"[{idx}:v][{idx}:a]" if preserve_audio else f"[{idx}:v]"
 
                 if preserve_audio:
-                    filter_complex = f"{filter_ins}concat=n={len(segment_paths)}:v=1:a=1[outv][outa]"
+                    filter_complex = f"{filter_ins}concat=n={len(segment_paths)}:v=1:a=1[catv][outa];[catv]{SCALE_FILTER}[outv]"
                     map_args = ["-map", "[outv]", "-map", "[outa]"]
                 else:
-                    filter_complex = f"{filter_ins}concat=n={len(segment_paths)}:v=1:a=0[outv]"
+                    filter_complex = f"{filter_ins}concat=n={len(segment_paths)}:v=1:a=0[catv];[catv]{SCALE_FILTER}[outv]"
                     map_args = ["-map", "[outv]"]
 
                 fallback_cmd = [
@@ -88,12 +116,10 @@ class VideoConcatenator:
                     "-filter_complex", filter_complex,
                     *map_args,
                     *audio_args,
-                    "-c:v", "libx264",
-                    "-pix_fmt", "yuv420p",
-                    "-r", "30",
+                    *VIDEO_ENCODE_ARGS,
                     str(output_path)
                 ]
-                subprocess.run(fallback_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+                subprocess.run(fallback_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=ENCODE_TIMEOUT_SECONDS)
         except Exception as e:
             # If in mock environment without real ffmpeg binary, combine mock bytes
             pass

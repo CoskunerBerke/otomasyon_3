@@ -32,9 +32,9 @@ CUTAWAY_BEATS = ("PLAIN_SURFACE", "THE_CUT", "THE_WORKING_INTERIOR")
 class StoryPlanner:
     """Builds three continuity-locked story beats with per-beat diegetic sound design."""
 
-    # Speech stays banned. The ambience these Reels want is environmental, not narrated:
-    # a voiceover would also make every Reel need a script, a language and a voice, none
-    # of which the pipeline has or wants.
+    # Speech stays banned in the prompt. Narration is mixed in after generation in one
+    # fixed voice (automation/audio/voiceover.py); a voice Flow invented would change
+    # from segment to segment and talk over the narrator.
     NEGATIVE_EXCLUSIONS = [
         "narration",
         "voiceover",

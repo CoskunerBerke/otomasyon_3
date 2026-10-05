@@ -92,6 +92,11 @@ class Brand:
     # right: the next run picks up only the missing platform and leaves the rest alone.
     platforms: Tuple[str, ...] = ("youtube", "tiktok", "instagram")
 
+    # The one voice that narrates every Reel on this channel (an edge-tts voice name),
+    # mixed in after generation -- see automation/audio/voiceover.py. Empty keeps the
+    # channel ambient-only. Changing it changes how the channel sounds from the next Reel.
+    narration_voice: str = ""
+
     @property
     def login_bat(self) -> str:
         """
@@ -234,6 +239,8 @@ BUILDVERSE = Brand(
     profile_suffix="",
     alternate_content_mode=CUTAWAY_REVEAL_STORY,
     instagram_delivery="web",
+    # Plain documentary narrator, added 2026-10-06.
+    narration_voice="en-US-ChristopherNeural",
 )
 
 # The second channel: buried-object transformation stories with a recurring craftsman.
@@ -257,6 +264,8 @@ CRAFTSBYMAN = Brand(
     # (2026-08-21). Generation is unaffected: the 14 finished videos sit in the workspace,
     # and putting "instagram" back in this tuple is the whole of what re-enabling takes.
     platforms=("youtube", "tiktok"),
+    # The craftsman telling what he is doing, in first person.
+    narration_voice="en-GB-RyanNeural",
 )
 
 BRANDS: Dict[str, Brand] = {b.brand_id: b for b in (BUILDVERSE, CRAFTSBYMAN)}

@@ -55,6 +55,8 @@ from automation.publishing.preflight_gate import run_pre_publish_hard_gate, veri
 from automation.publishing.repository import PublishingRepository
 from automation.publishing.metadata_builder import PublishingMetadataBuilder
 from automation.flow.generator import GoogleFlowWebProvider, MockVideoProvider, VideoProvider
+from automation.audio.voiceover import VoiceoverMixer
+from automation.content.narration_lines import narration_for
 from automation.content.concepts import CATEGORIES
 from automation.content.content_modes import (
     CUTAWAY_REVEAL_STORY,
@@ -742,6 +744,25 @@ class SimpleWeeklyPipeline:
             interleaved.append(evening)
         return interleaved
 
+    def _narrate(self, plan: ReelConceptPlan, video: Path) -> Path:
+        """
+        The Reel with its narration mixed in, or the Reel unchanged when its concept has
+        no script or the brand no voice. Only a real Flow render is narrated: mock and
+        test providers hand back placeholder bytes, and a rehearsal must not reach the
+        network for speech.
+
+        The narrated copy goes to a sibling folder under the same file name, so QC's
+        output name -- and every Reel-ID check that reads it -- is exactly what it was.
+        A failure raises and fails this Reel; its segments stay on disk, so the rerun
+        spends no Flow credits.
+        """
+        lines = narration_for(plan.concept_def.id_slug)
+        if not lines or not self.brand.narration_voice or not isinstance(self.flow_provider, GoogleFlowWebProvider):
+            return video
+        narrated = video.parent / "narrated" / video.name
+        logger.info(f"[GENERATE] {video.name} -- seslendirme ekleniyor ({self.brand.narration_voice})")
+        return VoiceoverMixer(self.brand.narration_voice).apply(video, lines, narrated)
+
     def _rebuild_concept_plan(self, reel: BatchReel) -> ReelConceptPlan:
         """Deterministically rebuilds the exact ReelConceptPlan (same prompt, same
         segments) used when this manifest entry was created -- see BatchReel's raw
@@ -831,6 +852,8 @@ class SimpleWeeklyPipeline:
                     downloaded_file = self.flow_provider.generate_single_video(plan=plan, reel_id=reel.reel_id, target_filename=target_filename)
                 else:
                     downloaded_file = self.flow_provider.generate_single_video(plan=plan, reel_id=reel.reel_id, target_filename=target_filename)
+
+                downloaded_file = self._narrate(plan, Path(downloaded_file))
 
                 qc_res = validator.process_and_validate(input_video=downloaded_file, output_dir=self.app_config.workspace_downloads_dir)
                 if not qc_res.is_passed:
