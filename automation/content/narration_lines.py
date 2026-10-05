@@ -277,6 +277,77 @@ NARRATION_LINES: Dict[str, Dict[str, str]] = {
         "But in Setenil de las Bodegas, the houses are built under a rock overhang.",
         "The rock itself is their roof, and the rooms run back into the cliff.",
     ),
+    # ------------------------------------------------------------ BuildVerse: 2026-10-06
+    "kaymakli": _n(
+        "Beneath the village of Kaymakli, in Cappadocia, people carved a city into the rock.",
+        "Stables, storerooms and wine presses ran down level after level, a refuge for centuries.",
+        "Opened to visitors in 1964, four of its levels can still be entered.",
+    ),
+    "anak-krakatau": _n(
+        "In 1883, Krakatoa erupted, and most of the island was destroyed.",
+        "In 1927, a new island began rising out of the drowned crater.",
+        "They named it Anak Krakatau, the child of Krakatoa.",
+    ),
+    "coober-pedy": _n(
+        "In 1915, opal was found in the middle of the Australian outback.",
+        "Summer there often passes forty degrees, so people dug their homes into the hills.",
+        "In Coober Pedy, homes, shops and even churches are underground.",
+    ),
+    "matera": _n(
+        "In southern Italy, people lived in caves cut into the ravine at Matera for millennia.",
+        "In the 1950s, the government moved everyone out over the living conditions.",
+        "Restored since, the Sassi became a World Heritage Site in 1993.",
+    ),
+    "kailasa-ellora": _n(
+        "In eighth century India, carvers at Ellora chose a single basalt cliff.",
+        "They did not build. They cut downward from the top, removing the rock around it.",
+        "The Kailasa temple is one piece of stone, carved out of the mountain.",
+    ),
+    "akrotiri": _n(
+        "On the Greek island of Santorini, Akrotiri was a busy Bronze Age harbour town.",
+        "The great eruption of Thera buried it under volcanic ash.",
+        "Dug out from 1967, its houses still stand two and three storeys high.",
+    ),
+    "villa-epecuen": _n(
+        "Villa Epecuen was a spa town on a salt lake in Argentina.",
+        "On 10 November 1985, an embankment gave way and the lake poured in.",
+        "Decades later the water pulled back, and the town came out bleached white.",
+    ),
+    "champagne-chalk-cellars": _n(
+        "It looks like an ordinary vineyard hillside in Champagne.",
+        "But under it are chalk pits first dug in Roman times.",
+        "Today kilometres of those tunnels are cellars, full of ageing bottles.",
+    ),
+    "gotthard-base-tunnel": _n(
+        "It looks like a quiet valley in the Swiss Alps.",
+        "But straight through the mountains runs the Gotthard Base Tunnel.",
+        "At 57 kilometres, it is the longest railway tunnel in the world.",
+    ),
+    "tokyo-flood-tank": _n(
+        "It looks like an ordinary football field outside Tokyo.",
+        "But underneath is a flood tank 177 metres long and 25 metres high.",
+        "Fifty-nine giant pillars hold it up, waiting for the next flood.",
+    ),
+    "electric-mountain": _n(
+        "It looks like a bare mountain in Snowdonia, in Wales.",
+        "But hidden inside it is the Dinorwig power station, built over ten years.",
+        "Water falls through the mountain, and it reaches full power in about sixteen seconds.",
+    ),
+    "edinburgh-buried-close": _n(
+        "It looks like a busy street on Edinburgh's Royal Mile.",
+        "But in the 1750s, a building was raised right over an old lane.",
+        "Mary King's Close is still down there, its seventeenth century houses intact.",
+    ),
+    "seattle-underground": _n(
+        "It looks like an ordinary sidewalk in downtown Seattle.",
+        "After the great fire of 1889, the city raised its streets by up to two storeys.",
+        "The old shopfronts and sidewalks are still down there, under your feet.",
+    ),
+    "svalbard-seed-vault": _n(
+        "It looks like a snowy mountainside in the Arctic.",
+        "But deep inside, in the permafrost, is the Svalbard Global Seed Vault.",
+        "It holds backup copies of more than a million seed samples from around the world.",
+    ),
     # ------------------------------------------------------------ Crafts By Man
     # Only the concepts added on 2026-10-01; the older ones stay ambient-only for now.
     "excavator-glassworks": _n(
