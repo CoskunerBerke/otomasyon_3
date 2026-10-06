@@ -253,7 +253,7 @@ def test_the_submit_still_fails_when_nothing_confirms_it():
 
 
 # --------------------------------------------------------------------------
-# A restored draft of the same Reel is resumed, not reported as a missing upload area
+# A restored draft of the same Reel is resumed; nothing is clicked to find out
 # --------------------------------------------------------------------------
 
 class _FakeBrowserMgr:
@@ -269,12 +269,12 @@ class _FakeBrowserMgr:
         return _cm()
 
 
-def _publish_with(monkeypatch, tmp_path, editor_answers):
+def _publish_with(monkeypatch, tmp_path, page_state):
     """Drive upload_and_schedule up to the caption step with a scripted observer."""
     from automation.publishing import tiktok_publisher as mod
     from automation.publishing.models import Platform, PublishRecord
 
-    answers = list(editor_answers)
+    calls = {"upload_file": 0}
 
     class FakeObserver:
         def __init__(self, page):
@@ -289,11 +289,12 @@ def _publish_with(monkeypatch, tmp_path, editor_answers):
         def dismiss_unsaved_draft_banner_if_present(self, *a, **k):
             return True, "NO_BANNER"
 
-        def is_editor_open_for_reel(self, reel_id, filename):
-            return answers.pop(0)
+        def wait_for_editor_or_upload_area(self, reel_id, filename, timeout_seconds=20.0):
+            return page_state
 
         def upload_file(self, path):
-            return False
+            calls["upload_file"] += 1
+            return page_state == "UPLOAD_AREA"
 
         def wait_for_upload_completion(self, timeout_seconds=120):
             return True
@@ -316,20 +317,50 @@ def _publish_with(monkeypatch, tmp_path, editor_answers):
         video_file=video, video_sha256="0" * 64, title="t", description="d", hashtags=[],
         scheduled_at_local="2026-10-10 19:30", scheduled_at_utc="2026-10-10T16:30:00Z",
     )
-    return publisher.upload_and_schedule(rec)
+    return publisher.upload_and_schedule(rec), calls
 
 
-def test_a_restored_draft_of_this_reel_is_resumed(monkeypatch, tmp_path):
+def test_a_restored_draft_of_this_reel_is_resumed_without_uploading(monkeypatch, tmp_path):
     """
-    2026-W41: TikTok restored REEL-2026-0115's 48 MB upload as a draft. The quick editor
-    check ran before the draft had rendered, the upload area never mounted, and the Reel
-    failed "file input not found" with its own video sitting in the editor.
+    2026-W41: TikTok restored REEL-2026-0115's 48 MB upload as a draft. Sent down the
+    upload path, the fallback pressed the sidebar's "Yukle" button, and TikTok's "exit
+    without saving?" dialog covered the caption field.
     """
-    rec = _publish_with(monkeypatch, tmp_path, editor_answers=[False, True])
-    assert "file input not found" not in (rec.last_error or "")
+    rec, calls = _publish_with(monkeypatch, tmp_path, page_state="EDITOR")
+    assert calls["upload_file"] == 0
     assert "STOP_AFTER_UPLOAD_STEP" in (rec.last_error or "")
 
 
-def test_an_editor_holding_another_reel_still_fails(monkeypatch, tmp_path):
-    rec = _publish_with(monkeypatch, tmp_path, editor_answers=[False, False])
-    assert rec.last_error == "TikTok file input not found on page."
+def test_an_empty_upload_area_is_uploaded_to(monkeypatch, tmp_path):
+    rec, calls = _publish_with(monkeypatch, tmp_path, page_state="UPLOAD_AREA")
+    assert calls["upload_file"] == 1
+    assert "STOP_AFTER_UPLOAD_STEP" in (rec.last_error or "")
+
+
+def test_the_wait_sees_a_draft_that_renders_late_and_clicks_nothing(monkeypatch):
+    """The editor shows up on the fifth look; no file input ever mounts; nothing is clicked."""
+    from automation.publishing import tiktok_ui_observer as mod
+
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+    looks = {"n": 0}
+    clicked = []
+
+    class _NoInput:
+        first = property(lambda self: self)
+
+        def count(self):
+            return 0
+
+        def click(self, *a, **k):
+            clicked.append(True)
+
+    page = type("Page", (), {"locator": lambda self, sel: _NoInput()})()
+    obs = _tiktok_observer(page)
+
+    def editor_open(reel_id, filename):
+        looks["n"] += 1
+        return looks["n"] >= 5
+
+    obs.is_editor_open_for_reel = editor_open
+    assert obs.wait_for_editor_or_upload_area("REEL-2026-0115", "x.mp4", timeout_seconds=60) == "EDITOR"
+    assert clicked == []

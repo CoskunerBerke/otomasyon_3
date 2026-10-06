@@ -88,23 +88,15 @@ class TikTokPublisher(BaseTikTokPublisher):
                 observer.dismiss_unsaved_draft_banner_if_present()
 
                 # 3. Check if existing editor session is already open (PREVENTS RE-UPLOAD)
-                is_editor_open = observer.is_editor_open_for_reel(record.reel_id, record.video_file.name)
+                is_editor_open = observer.wait_for_editor_or_upload_area(record.reel_id, record.video_file.name) == "EDITOR"
                 if is_editor_open:
                     logger.info(f"[{record.reel_id}] [RESUME_EXISTING_TIKTOK_EDITOR] Existing loaded upload editor detected. Skipping re-upload.")
                 else:
                     # Upload Video
                     logger.info(f"[{record.reel_id}] Uploading to TikTok Studio: {record.video_file.name}")
                     if not observer.upload_file(record.video_file):
-                        # The upload area is also gone when TikTok already holds THIS Reel:
-                        # it restores an interrupted upload as a draft, and a 46 MB draft
-                        # takes longer to render than the quick editor check above waits
-                        # (2026-W41, REEL-2026-0109 and 0115). After the 20-second wait the
-                        # editor is on screen; carry on only if it shows this Reel's own file.
-                        if observer.is_editor_open_for_reel(record.reel_id, record.video_file.name):
-                            logger.info(f"[{record.reel_id}] [RESUME_EXISTING_TIKTOK_EDITOR] Restored draft of this Reel found after the upload area did not mount.")
-                        else:
-                            record.mark_failed("TikTok file input not found on page.")
-                            return record
+                        record.mark_failed("TikTok file input not found on page.")
+                        return record
 
                     # Wait for Upload Completion
                     if not observer.wait_for_upload_completion(timeout_seconds=120):

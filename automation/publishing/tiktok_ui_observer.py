@@ -430,6 +430,31 @@ class TikTokUIObserver:
                 return False
             time.sleep(1.0)
 
+    def wait_for_editor_or_upload_area(self, reel_id: str, filename: str, timeout_seconds: float = FILE_INPUT_WAIT_SECONDS) -> str:
+        """
+        "EDITOR" when TikTok shows this Reel's own editor, "UPLOAD_AREA" when an empty
+        upload area is ready, "NEITHER" when the wait runs out.
+
+        TikTok restores an interrupted upload as a draft, and a 46 MB draft renders well
+        after the page loads. Deciding in the first second used to send a draft page down
+        the upload path, whose fallback pressed the sidebar's "Yükle" button -- which, on
+        an open editor, raises TikTok's "Çıkmak istediğinizden emin misiniz?" dialog over
+        the caption field (2026-W41, REEL-2026-0115). Nothing is clicked while waiting.
+        """
+        deadline = time.time() + timeout_seconds
+        while True:
+            if self.is_editor_open_for_reel(reel_id, filename):
+                return "EDITOR"
+            for sel in TikTokSelectors.FILE_INPUT_SELECTORS:
+                try:
+                    if self.page.locator(sel).first.count() > 0:
+                        return "UPLOAD_AREA"
+                except Exception:
+                    pass
+            if time.time() >= deadline:
+                return "NEITHER"
+            time.sleep(1.0)
+
     def wait_for_upload_completion(self, timeout_seconds: int = 120) -> bool:
         """Wait until TikTok Studio finishes uploading and processing the video."""
         start = time.time()
