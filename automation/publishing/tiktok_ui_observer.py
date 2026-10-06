@@ -439,10 +439,17 @@ class TikTokUIObserver:
         after the page loads. Deciding in the first second used to send a draft page down
         the upload path, whose fallback pressed the sidebar's "Yükle" button -- which, on
         an open editor, raises TikTok's "Çıkmak istediğinizden emin misiniz?" dialog over
-        the caption field (2026-W41, REEL-2026-0115). Nothing is clicked while waiting.
+        the caption field (2026-W41, REEL-2026-0115).
+
+        After a reload TikTok may instead put up its "bir video kaydedilmedi" resume banner,
+        which leaves neither an editor nor an upload area -- and it, too, renders after the
+        one-shot banner check that runs before this. So the banner is looked for on every
+        pass and cleared the way dismiss_unsaved_draft_banner_if_present always has (its
+        'Sil', never 'Devam'). Nothing else is clicked while waiting.
         """
         deadline = time.time() + timeout_seconds
         while True:
+            self.dismiss_unsaved_draft_banner_if_present()
             if self.is_editor_open_for_reel(reel_id, filename):
                 return "EDITOR"
             for sel in TikTokSelectors.FILE_INPUT_SELECTORS:
