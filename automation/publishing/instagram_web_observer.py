@@ -682,6 +682,16 @@ class InstagramWebObserver:
                     self.capture_success_evidence()
                     self._close_success_dialog()
                     return True, "INSTAGRAM_SCHEDULED"
+                # Instagram's own refusal: a "Gönderi planlanamadı" dialog saying "Bir sorun
+                # oluştu. Lütfen tekrar dene." No post exists, so a retry cannot duplicate
+                # anything. It used to sit out the whole window and come back as
+                # SUBMITTED_UNVERIFIED -- which is never retried -- so on 2026-10-06 two
+                # W41 Reels that Instagram had plainly rejected were recorded as probably
+                # scheduled.
+                if self._has_rejection_marker(body):
+                    logger.error("[IG WEB] Instagram 'Gonderi planlanamadi' dedi -- gonderi olusmadi, yeniden denenebilir.")
+                    self.capture_error_snapshot("schedule_rejected_by_instagram")
+                    return False, "SCHEDULE_REJECTED_BY_INSTAGRAM"
             except Exception:
                 pass
             time.sleep(2.0)
@@ -692,6 +702,20 @@ class InstagramWebObserver:
     @staticmethod
     def _has_success_marker(lower_body: str) -> bool:
         return any(m in lower_body for m in InstagramWebSelectors.SCHEDULE_SUCCESS_MARKERS)
+
+    # The refusal dialog as captured on 2026-10-06 (screenshots/errors/
+    # error_ig_schedule_confirmation_not_verified_20261006_041308.html): role="dialog",
+    # aria-label "Gönderi planlanamadı", body "Gönderin planlanamadı. Lütfen tekrar dene."
+    SCHEDULE_REJECTION_MARKERS = (
+        "gönderin planlanamadı",
+        "gönderi planlanamadı",
+        "your post couldn't be scheduled",
+        "post couldn't be scheduled",
+    )
+
+    @classmethod
+    def _has_rejection_marker(cls, lower_body: str) -> bool:
+        return any(m in lower_body for m in cls.SCHEDULE_REJECTION_MARKERS)
 
     def _success_dialog_visible(self) -> bool:
         for sel in InstagramWebSelectors.SUCCESS_DIALOG_DONE_BUTTONS:

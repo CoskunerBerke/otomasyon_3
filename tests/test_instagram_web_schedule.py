@@ -212,6 +212,26 @@ def test_refuses_to_submit_when_success_wording_is_already_on_the_page():
     assert page.primary.clicks == 0, "must not submit into a state that cannot be verified"
 
 
+def test_instagrams_own_refusal_is_retryable_not_unverified():
+    """
+    2026-10-06, 2026-W41: Instagram answered 'Planla' with "Gönderi planlanamadı --
+    Gönderin planlanamadı. Lütfen tekrar dene." Read as a missing confirmation, two
+    rejected Reels were recorded SUBMITTED_UNVERIFIED, which is never retried. The
+    refusal means no post exists, so it must come back as its own retryable reason.
+    """
+    page = _Page(
+        schedule_on=True, body="",
+        body_after_click="Gönderi planlanamadı Gönderin planlanamadı. Lütfen tekrar dene.",
+    )
+    obs = InstagramWebObserver(page)
+
+    ok, reason = obs.click_schedule_and_verify(timeout_seconds=30)
+
+    assert ok is False
+    assert reason == "SCHEDULE_REJECTED_BY_INSTAGRAM"
+    assert page.primary.clicks == 1
+
+
 def test_bare_word_is_not_enough_for_confirmation():
     """The dialog's phrase and its Bitti button are both required; a stray word is not."""
     page = _Page(schedule_on=True, body="", body_after_click="içerik planlandı olarak işaretlendi")
