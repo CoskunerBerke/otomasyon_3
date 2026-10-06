@@ -168,17 +168,29 @@ class InstagramWebObserver:
         """Attach the video. Prefers the hidden file input; falls back to the visible
         'Bilgisayardan seç' button driving a native file chooser."""
         video_path = Path(video_path).resolve()
+        handed_over = False
 
         for sel in InstagramWebSelectors.FILE_INPUTS:
             try:
                 loc = self.page.locator(sel).first
                 if loc.count() > 0:
+                    handed_over = True
                     loc.set_input_files(str(video_path))
                     logger.info(f"[IG WEB] Dosya dogrudan input'a verildi: {video_path.name}")
                     time.sleep(UPLOAD_SETTLE_SECONDS)
                     return True
             except Exception as e:
                 logger.debug(f"[IG WEB] file input {sel}: {e}")
+
+        # set_input_files can raise after Instagram has already taken the file: the input
+        # unmounts as the composer moves on to its crop screen. REEL-2026-0115 failed
+        # UPLOAD_FILE on 2026-10-06 with its video on that crop screen. Every Reel starts
+        # from a freshly loaded page and a newly opened composer, so an 'İleri' showing up
+        # right after this hand-over can only be this file's.
+        if handed_over and self._first_visible(InstagramWebSelectors.NEXT_BUTTONS, timeout_ms=10000) is not None:
+            logger.info(f"[IG WEB] Dosya alinmis (Kirp ekrani acik): {video_path.name}")
+            time.sleep(UPLOAD_SETTLE_SECONDS)
+            return True
 
         btn = self._first_visible(InstagramWebSelectors.SELECT_FROM_COMPUTER_BUTTONS)
         if btn is not None:

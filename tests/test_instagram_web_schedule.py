@@ -547,3 +547,50 @@ def test_navigates_forward_across_a_year_boundary():
 
     assert ok is True
     assert page.clicked == [(2027, 1, 15)]
+
+
+# ---------------------------------------------------------------------------
+# A file Instagram took is not reported as a missing file input
+# ---------------------------------------------------------------------------
+
+def _upload_obs(monkeypatch, input_present, next_visible):
+    from unittest.mock import MagicMock
+    import automation.publishing.instagram_web_observer as mod
+
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+    page = MagicMock()
+    loc = MagicMock()
+    loc.count.return_value = 1 if input_present else 0
+    loc.set_input_files.side_effect = RuntimeError("Element is not attached to the DOM")
+    page.locator.return_value.first = loc
+    obs = InstagramWebObserver(page)
+
+    def first_visible(selectors, timeout_ms=0):
+        if selectors is InstagramWebSelectors.NEXT_BUTTONS and next_visible:
+            return object()
+        return None
+
+    monkeypatch.setattr(obs, "_first_visible", first_visible)
+    return obs
+
+
+def test_a_file_instagram_took_counts_even_if_the_hand_over_raised(monkeypatch, tmp_path):
+    """
+    2026-10-06, REEL-2026-0115: set_input_files raised as the input unmounted, while the
+    video was already on the composer's crop screen. That is an attached file.
+    """
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"0")
+    assert _upload_obs(monkeypatch, input_present=True, next_visible=True).upload_file(video) is True
+
+
+def test_no_hand_over_means_no_upload_even_with_a_next_button(monkeypatch, tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"0")
+    assert _upload_obs(monkeypatch, input_present=False, next_visible=True).upload_file(video) is False
+
+
+def test_a_raised_hand_over_with_no_crop_screen_still_fails(monkeypatch, tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"0")
+    assert _upload_obs(monkeypatch, input_present=True, next_visible=False).upload_file(video) is False
