@@ -76,6 +76,14 @@ DATE_READBACK_INTERVAL_SECONDS = 0.5
 class TikTokUIObserver:
     """Interacts with visible DOM elements of TikTok Studio."""
 
+    # TikTok keeps the final button disabled until the upload has finished, and the caption
+    # editor -- which is what wait_for_upload_completion takes as "done" -- appears long
+    # before that. A 720p Reel was about 10 MB and finished inside the old 3-second poll;
+    # the 1080p Reels are about 46 MB, and on 2026-10-06 the first one of 2026-W41 was still
+    # uploading when the poll gave up. The button's own disabled state is the safe signal
+    # to wait on: nothing is clicked until TikTok itself enables it.
+    FINAL_BUTTON_READY_SECONDS = 240.0
+
     def __init__(self, page: Any):
         self.page = page
 
@@ -1905,7 +1913,13 @@ class TikTokUIObserver:
 
             final_btn = self.page.locator("button[data-e2e='post_video_button']").first
             poll_start = time.time()
-            while time.time() - poll_start < 3.0:
+            # The first attempt waits out the upload; a second attempt only rechecks.
+            poll_budget = self.FINAL_BUTTON_READY_SECONDS if attempt == 1 else 3.0
+            next_note = poll_start + 15.0
+            while time.time() - poll_start < poll_budget:
+                if time.time() >= next_note:
+                    logger.info(f"[TIKTOK FINAL] Waiting for the upload to finish ({int(time.time() - poll_start)}s, button still disabled)")
+                    next_note += 15.0
                 try:
                     if hasattr(final_btn, "wait_for"):
                         final_btn.wait_for(state="visible", timeout=300)
@@ -1931,7 +1945,7 @@ class TikTokUIObserver:
                             break
                 except Exception as e:
                     logger.debug(f"[TIKTOK FINAL] post_video_button poll exception: {e}")
-                time.sleep(0.2)
+                time.sleep(0.5)
 
             if submit_btn is None:
                 for sel in TikTokSelectors.FINAL_ACTION_BUTTONS:

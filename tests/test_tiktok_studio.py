@@ -10,6 +10,15 @@ from automation.publishing.config import PublishingConfig, get_default_tiktok_pr
 from automation.publishing.tiktok_selectors import TikTokSelectors
 from automation.publishing.tiktok_browser import TikTokBrowserManager
 from automation.publishing.tiktok_ui_observer import TikTokUIObserver
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _short_final_button_wait(monkeypatch):
+    """Production waits minutes for TikTok to finish an upload; a mocked page never will."""
+    monkeypatch.setattr(TikTokUIObserver, "FINAL_BUTTON_READY_SECONDS", 1.0)
 from automation.publishing.tiktok_publisher import MockTikTokPublisher, TikTokPublisher
 
 def test_tiktok_studio_selectors_and_url_support():
@@ -1449,6 +1458,48 @@ def test_tiktok_final_post_video_button_exact_dom_resolution_and_click():
     success, msg = observer.click_schedule_and_verify(schedule_mode_verified=True, timeout_seconds=2)
     assert success is True
     assert msg == "TIKTOK_FINAL_SCHEDULE_SUBMITTED"
+    mock_btn.click.assert_called_once()
+
+
+def test_tiktok_final_button_waits_for_the_upload_to_finish(monkeypatch):
+    """
+    2026-10-06, 2026-W41: the 1080p Reels are about 46 MB, and TikTok keeps
+    post_video_button disabled until the upload is done. The first Reel failed
+    FINAL_BUTTON_NOT_READY after a 3-second poll while it was still uploading. The button
+    turning enabled by itself must be waited for -- and only then clicked, normally.
+    """
+    monkeypatch.setattr(TikTokUIObserver, "FINAL_BUTTON_READY_SECONDS", 10.0)
+    mock_page = MagicMock()
+    mock_page.url = "https://www.tiktok.com/tiktokstudio/content"
+
+    reads = {"n": 0}
+
+    def attr(name):
+        if name == "data-disabled":
+            reads["n"] += 1
+            return "true" if reads["n"] <= 6 else "false"
+        return "false" if name in ("aria-disabled", "data-loading") else None
+
+    mock_btn = MagicMock()
+    mock_btn.is_visible.return_value = True
+    mock_btn.is_enabled.return_value = True
+    mock_btn.get_attribute.side_effect = attr
+    mock_btn.inner_text.return_value = "Planla"
+
+    def loc_side_effect(sel):
+        res = MagicMock()
+        if "post_video_button" in sel:
+            res.first = mock_btn
+        else:
+            res.first = MagicMock(is_visible=MagicMock(return_value=False), wait_for=MagicMock(side_effect=TimeoutError("not visible")), is_enabled=MagicMock(return_value=False))
+        return res
+
+    mock_page.locator.side_effect = loc_side_effect
+    observer = TikTokUIObserver(mock_page)
+
+    success, msg = observer.click_schedule_and_verify(schedule_mode_verified=True, timeout_seconds=2)
+    assert success is True, msg
+    assert reads["n"] > 6
     mock_btn.click.assert_called_once()
 
 
