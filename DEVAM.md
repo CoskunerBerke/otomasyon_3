@@ -1,12 +1,25 @@
-# Devam — Reels AI Factory (29 Eylül 2026)
+# Devam — Reels AI Factory (6 Ekim 2026)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
-Branch: **`fix/cbm-youtube-titles`** (push'lu, PR bekliyor) — main'e alınmadan main'e geçilirse
-CBM başlık düzeltmesi kaybolur.
+Branch: **`feat/cbm-top-performer-concepts`** (push'lu, PR bekliyor; `fix/cbm-youtube-titles`'ı da
+içeriyor) — seslendirme, 1080p, yeni konseptler ve TikTok/Instagram düzeltmeleri sadece bu dalda.
+main'e alınmadan main'e geçilirse hepsi kaybolur.
 
 **Türkçe cevap ver. Detaylı rapor ver. Canlı çalıştırma (Flow/yayın) sadece açık talimatla.**
 
 ---
+
+## BuildVerse W41 tam (6 Ekim)
+
+- 14 yeni konsept eklendi (7 hikâye + 7 kesit); W41'e 11'i girdi (Kaymakli, Matera, Seattle W42'nin başında).
+- Her Reel artık seslendirmeli (edge-tts `en-US-ChristopherNeural`, `automation/audio/voiceover.py`)
+  ve 1080×1920, CRF 17 + **10 Mbps tavan** (Flow'un ücretsiz indirmesi 720p; Playwright CDP'de 50 MB üstü
+  dosya aktaramıyor — W41'de 0115/0119 bu yüzden yeniden kodlandı, orijinaller
+  `workspace/downloads/_oversize_originals_2026-W41/`, SHA'lar manifest + ReelState'te güncel).
+- TikTok: final butonu yükleme bitene kadar 4 dk bekleniyor; geri gelen taslak beklenip devam ediliyor.
+- Instagram: "Gönderi planlanamadı" artık `FAILED_RETRYABLE` (eskiden `SUBMITTED_UNVERIFIED`, hiç
+  denenmiyordu); 0110/0111 bu yüzden elle yeniden denenebilir yapıldı ve planlandı.
+- Craftsbyman W41 (9 Ekim'den) henüz üretilmedi; 14 yeni CBM konsepti + birinci ağızdan seslendirme hazır.
 
 ## Durum: W40 iki kanalda tam (29 Eylül 11:27)
 
@@ -23,6 +36,7 @@ yüklüyor — ayrı düzeltme işi açıldı. **YouTube yüklemesi sürerken Ct
 | BuildVerse | `2026-W38` | 14–20 Eyl | 14/14 | 14/14 | 14/14 | 14/14 |
 | BuildVerse | `2026-W39` | 22–28 Eyl (kaydırıldı) | 14/14 | 14/14 | 14/14 | 14/14 |
 | BuildVerse | `2026-W40` | 29 Eyl–5 Eki | 14/14 | 14/14 (kanaldan doğrulandı) | 14/14 | 14/14 |
+| BuildVerse | `2026-W41` | 7–13 Eki | 14/14 (seslendirmeli, 1080p) | 14/14 | 14/14 | 14/14 |
 | Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W40` | 2–8 Eki | 14/14 | 14/14 (kanaldan doğrulandı) | 14/14 | kapalı |
