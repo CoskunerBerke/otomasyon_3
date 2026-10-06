@@ -250,3 +250,86 @@ def test_the_submit_still_fails_when_nothing_confirms_it():
     body = src.split("def click_schedule_and_verify")[1].split("\n    def ")[0]
 
     assert 'return False, "TIKTOK_SCHEDULE_CONFIRMATION_TIMEOUT"' in body
+
+
+# --------------------------------------------------------------------------
+# A restored draft of the same Reel is resumed, not reported as a missing upload area
+# --------------------------------------------------------------------------
+
+class _FakeBrowserMgr:
+    def __init__(self, page):
+        self.page = page
+
+    def connect(self):
+        import contextlib
+
+        @contextlib.contextmanager
+        def _cm():
+            yield None, type("Ctx", (), {"pages": [self.page], "new_page": lambda s: self.page})()
+        return _cm()
+
+
+def _publish_with(monkeypatch, tmp_path, editor_answers):
+    """Drive upload_and_schedule up to the caption step with a scripted observer."""
+    from automation.publishing import tiktok_publisher as mod
+    from automation.publishing.models import Platform, PublishRecord
+
+    answers = list(editor_answers)
+
+    class FakeObserver:
+        def __init__(self, page):
+            pass
+
+        def is_logged_in(self):
+            return True
+
+        def verify_logged_in_username(self, expected):
+            return True, expected, ""
+
+        def dismiss_unsaved_draft_banner_if_present(self, *a, **k):
+            return True, "NO_BANNER"
+
+        def is_editor_open_for_reel(self, reel_id, filename):
+            return answers.pop(0)
+
+        def upload_file(self, path):
+            return False
+
+        def wait_for_upload_completion(self, timeout_seconds=120):
+            return True
+
+        def replace_caption(self, description, hashtags):
+            return False, "STOP_AFTER_UPLOAD_STEP"
+
+    monkeypatch.setattr(mod, "TikTokUIObserver", FakeObserver)
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+    video = tmp_path / "clean_clean_REEL-2026-0115_villa-epecuen-story.mp4"
+    video.write_bytes(b"0" * 16)
+    page = type("Page", (), {"url": "https://www.tiktok.com/tiktokstudio/upload", "goto": lambda *a, **k: None})()
+    publisher = mod.TikTokPublisher.__new__(mod.TikTokPublisher)
+    publisher.config = type("Cfg", (), {"tiktok_url": "https://www.tiktok.com/tiktokstudio/upload",
+                                        "tiktok_expected_username": "@x", "login_bat": "x.bat",
+                                        "ai_disclosure": True})()
+    publisher.browser_mgr = _FakeBrowserMgr(page)
+    rec = PublishRecord(
+        publish_id="p", batch_id="2026-W41", reel_id="REEL-2026-0115", platform=Platform.TIKTOK,
+        video_file=video, video_sha256="0" * 64, title="t", description="d", hashtags=[],
+        scheduled_at_local="2026-10-10 19:30", scheduled_at_utc="2026-10-10T16:30:00Z",
+    )
+    return publisher.upload_and_schedule(rec)
+
+
+def test_a_restored_draft_of_this_reel_is_resumed(monkeypatch, tmp_path):
+    """
+    2026-W41: TikTok restored REEL-2026-0115's 48 MB upload as a draft. The quick editor
+    check ran before the draft had rendered, the upload area never mounted, and the Reel
+    failed "file input not found" with its own video sitting in the editor.
+    """
+    rec = _publish_with(monkeypatch, tmp_path, editor_answers=[False, True])
+    assert "file input not found" not in (rec.last_error or "")
+    assert "STOP_AFTER_UPLOAD_STEP" in (rec.last_error or "")
+
+
+def test_an_editor_holding_another_reel_still_fails(monkeypatch, tmp_path):
+    rec = _publish_with(monkeypatch, tmp_path, editor_answers=[False, False])
+    assert rec.last_error == "TikTok file input not found on page."
