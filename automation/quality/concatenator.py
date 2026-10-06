@@ -32,6 +32,12 @@ VIDEO_ENCODE_ARGS = [
     "-c:v", "libx264",
     "-preset", "medium",
     "-crf", "17",
+    # A ceiling under the quality target. Busy AI footage at CRF 17 ran to 66 MB for 30s
+    # (2026-W41), and Playwright cannot hand a file over 50 MB to a browser it reaches over
+    # CDP -- TikTok and Instagram uploads failed on exactly the two Reels above it. 10 Mbps
+    # caps a 30s Reel near 38 MB, still above YouTube's 8 Mbps recommendation for 1080p30.
+    "-maxrate", "10M",
+    "-bufsize", "20M",
     "-profile:v", "high",
     "-pix_fmt", "yuv420p",
     "-r", "30",
