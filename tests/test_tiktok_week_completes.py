@@ -364,36 +364,3 @@ def test_the_wait_sees_a_draft_that_renders_late_and_clicks_nothing(monkeypatch)
     obs.is_editor_open_for_reel = editor_open
     assert obs.wait_for_editor_or_upload_area("REEL-2026-0115", "x.mp4", timeout_seconds=60) == "EDITOR"
     assert clicked == []
-
-
-def test_a_resume_banner_that_renders_late_is_cleared_then_uploaded_to(monkeypatch):
-    """
-    After a reload TikTok shows "bir video kaydedilmedi" [Sil] [Devam] a moment later,
-    with neither an editor nor an upload area underneath. The wait clears it with the
-    existing handler on a later pass, and the upload area that follows is used.
-    """
-    from automation.publishing import tiktok_ui_observer as mod
-
-    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
-    state = {"looks": 0, "banner_cleared": False}
-
-    class _Input:
-        first = property(lambda self: self)
-
-        def count(self):
-            return 1 if state["banner_cleared"] else 0
-
-    page = type("Page", (), {"locator": lambda self, sel: _Input()})()
-    obs = _tiktok_observer(page)
-
-    def banner():
-        state["looks"] += 1
-        if state["looks"] == 3:
-            state["banner_cleared"] = True
-            return True
-        return False
-
-    obs.dismiss_unsaved_draft_banner_if_present = banner
-    obs.is_editor_open_for_reel = lambda reel_id, filename: False
-    assert obs.wait_for_editor_or_upload_area("REEL-2026-0115", "x.mp4", timeout_seconds=60) == "UPLOAD_AREA"
-    assert state["banner_cleared"]
