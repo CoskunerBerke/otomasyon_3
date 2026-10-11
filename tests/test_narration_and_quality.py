@@ -191,3 +191,45 @@ def test_concept_without_script_or_brand_without_voice_is_left_alone(tmp_path, m
     assert SimpleWeeklyPipeline._narrate(_fake_pipeline(real), _plan("locomotive-sauna"), video) == video
     assert SimpleWeeklyPipeline._narrate(_fake_pipeline(real, voice=""), _plan("pompeii"), video) == video
     mixer.assert_not_called()
+
+
+def test_a_refused_speech_request_is_retried(monkeypatch, tmp_path):
+    """2026-10-11: the speech service answered 403 twice in a row and stopped the week."""
+    import sys
+    import types
+    import automation.audio.voiceover as vo
+
+    calls = {"n": 0}
+
+    class _Comm:
+        def __init__(self, *a, **k):
+            pass
+
+        async def save(self, path):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("403, message='Invalid response status'")
+            Path(path).write_bytes(b"0" * 2000)
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_Comm))
+    monkeypatch.setattr(vo.time, "sleep", lambda *_: None)
+    vo.edge_tts_synthesize("hello", "voice", tmp_path / "a.mp3")
+    assert calls["n"] == 3
+
+
+def test_a_speech_service_that_keeps_refusing_still_fails(monkeypatch, tmp_path):
+    import sys
+    import types
+    import automation.audio.voiceover as vo
+
+    class _Comm:
+        def __init__(self, *a, **k):
+            pass
+
+        async def save(self, path):
+            raise RuntimeError("403")
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_Comm))
+    monkeypatch.setattr(vo.time, "sleep", lambda *_: None)
+    with pytest.raises(VoiceoverError, match="VOICEOVER_TTS_FAILED after 3 attempts"):
+        vo.edge_tts_synthesize("hello", "voice", tmp_path / "a.mp3")

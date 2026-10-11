@@ -14,6 +14,7 @@ import asyncio
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -32,6 +33,9 @@ LOUDNESS_FILTER = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000"
 # A line slightly too long is sped up to fit; one far too long is a script problem.
 MAX_TEMPO = 1.25
 
+# Waits between attempts when the speech service refuses a request.
+TTS_RETRY_PAUSES_SECONDS = (10, 30)
+
 # (text, voice, output path) -> writes an audio file at output path.
 Synthesizer = Callable[[str, str, Path], None]
 
@@ -49,10 +53,17 @@ def edge_tts_synthesize(text: str, voice: str, out_path: Path) -> None:
     async def _run() -> None:
         await edge_tts.Communicate(text, voice, rate=DEFAULT_RATE).save(str(out_path))
 
-    try:
-        asyncio.run(_run())
-    except Exception as e:
-        raise VoiceoverError(f"VOICEOVER_TTS_FAILED: {e}") from e
+    # The speech service refuses now and then: on 2026-10-11 it answered 403 for two
+    # Crafts By Man Reels in a row, which stopped the week as a repeated failure, and the
+    # same call worked minutes later. A short backoff rides that out.
+    for attempt, pause in enumerate(TTS_RETRY_PAUSES_SECONDS + (None,), start=1):
+        try:
+            asyncio.run(_run())
+            break
+        except Exception as e:
+            if pause is None:
+                raise VoiceoverError(f"VOICEOVER_TTS_FAILED after {attempt} attempts: {e}") from e
+            time.sleep(pause)
     if not out_path.exists() or out_path.stat().st_size < 1000:
         raise VoiceoverError(f"VOICEOVER_TTS_FAILED: no audio written for '{text[:40]}'")
 
