@@ -1,4 +1,4 @@
-# Devam — Reels AI Factory (6 Ekim 2026)
+# Devam — Reels AI Factory (11 Ekim 2026)
 
 Repo: `C:\Users\berke\OneDrive\Masaüstü\Projeler\Otomasyon_3`
 Branch: **`feat/cbm-top-performer-concepts`** (push'lu, PR bekliyor; `fix/cbm-youtube-titles`'ı da
@@ -19,7 +19,9 @@ main'e alınmadan main'e geçilirse hepsi kaybolur.
 - TikTok: final butonu yükleme bitene kadar 4 dk bekleniyor; geri gelen taslak beklenip devam ediliyor.
 - Instagram: "Gönderi planlanamadı" artık `FAILED_RETRYABLE` (eskiden `SUBMITTED_UNVERIFIED`, hiç
   denenmiyordu); 0110/0111 bu yüzden elle yeniden denenebilir yapıldı ve planlandı.
-- Craftsbyman W41 (9 Ekim'den) henüz üretilmedi; 14 yeni CBM konsepti + birinci ağızdan seslendirme hazır.
+- Craftsbyman W41 (11–17 Eki) 11 Ekim'de tamamlandı. Ses servisi aralıklı 403 veriyor: seslendirme artık
+  `workspace/narration_cache`'ten okunuyor; yeni konsept eklenince koşudan önce
+  `.venv\Scripts\python.exe -m automation.audio.warm_narration_cache` çalıştır. CBM YouTube token'ı 11 Eki'de yenilendi.
 
 ## Durum: W40 iki kanalda tam (29 Eylül 11:27)
 
@@ -40,6 +42,7 @@ yüklüyor — ayrı düzeltme işi açıldı. **YouTube yüklemesi sürerken Ct
 | Craftsbyman | `CBM-2026-W38` | 18–24 Eyl | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W39` | 25 Eyl–1 Eki | 14/14 | 14/14 | 14/14 | kapalı |
 | Craftsbyman | `CBM-2026-W40` | 2–8 Eki | 14/14 | 14/14 (kanaldan doğrulandı) | 14/14 | kapalı |
+| Craftsbyman | `CBM-2026-W41` | 11–17 Eki | 14/14 (13'ü seslendirmeli) | 14/14 | 14/14 | kapalı |
 
 ✅ Token'lar 29 Eylül 11:09 / 11:23'te yenilendi, iki haftanın YouTube'u tamamlandı; CBM W40'ın 14 başlığı
 kanalda temiz. Bir sonraki ölüm ~6 Ekim.
