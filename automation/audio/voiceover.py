@@ -11,6 +11,7 @@ is the same class of bug as the concatenator that once pasted segment bytes toge
 when FFmpeg was missing; the segments stay on disk, so a rerun costs no Flow credits.
 """
 import asyncio
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -34,7 +35,14 @@ LOUDNESS_FILTER = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000"
 MAX_TEMPO = 1.25
 
 # Waits between attempts when the speech service refuses a request.
-TTS_RETRY_PAUSES_SECONDS = (10, 30)
+TTS_RETRY_PAUSES_SECONDS = (10, 30, 90)
+
+# Every line ever spoken, keyed by voice, rate and text. The speech service refuses
+# requests for stretches at a time (403, 2026-10-11, again after three tries), and a
+# Reel's narration never changes once written -- so each line is fetched once, kept,
+# and the week's run reads it from disk. Warm it ahead of a run with
+# `python -m automation.audio.warm_narration_cache`.
+NARRATION_CACHE_DIR = Path("workspace/narration_cache")
 
 # (text, voice, output path) -> writes an audio file at output path.
 Synthesizer = Callable[[str, str, Path], None]
@@ -68,11 +76,27 @@ def edge_tts_synthesize(text: str, voice: str, out_path: Path) -> None:
         raise VoiceoverError(f"VOICEOVER_TTS_FAILED: no audio written for '{text[:40]}'")
 
 
+def narration_cache_path(text: str, voice: str) -> Path:
+    key = hashlib.sha1(f"{voice}|{DEFAULT_RATE}|{text}".encode("utf-8")).hexdigest()[:20]
+    return NARRATION_CACHE_DIR / f"{voice}_{key}.mp3"
+
+
+def cached_synthesize(text: str, voice: str, out_path: Path) -> None:
+    """edge_tts_synthesize, served from NARRATION_CACHE_DIR whenever the line is there."""
+    cached = narration_cache_path(text, voice)
+    if not (cached.exists() and cached.stat().st_size >= 1000):
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        partial = cached.with_suffix(".part.mp3")
+        edge_tts_synthesize(text, voice, partial)
+        partial.replace(cached)
+    shutil.copyfile(cached, out_path)
+
+
 class VoiceoverMixer:
     def __init__(
         self,
         voice: str,
-        synthesize: Synthesizer = edge_tts_synthesize,
+        synthesize: Synthesizer = cached_synthesize,
         ffmpeg_bin: Optional[str] = None,
         ffprobe_bin: Optional[str] = None,
     ):

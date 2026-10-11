@@ -231,5 +231,23 @@ def test_a_speech_service_that_keeps_refusing_still_fails(monkeypatch, tmp_path)
 
     monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_Comm))
     monkeypatch.setattr(vo.time, "sleep", lambda *_: None)
-    with pytest.raises(VoiceoverError, match="VOICEOVER_TTS_FAILED after 3 attempts"):
+    with pytest.raises(VoiceoverError, match=f"VOICEOVER_TTS_FAILED after {len(vo.TTS_RETRY_PAUSES_SECONDS) + 1} attempts"):
         vo.edge_tts_synthesize("hello", "voice", tmp_path / "a.mp3")
+
+
+def test_each_line_is_fetched_once_and_then_served_from_the_cache(monkeypatch, tmp_path):
+    import automation.audio.voiceover as vo
+
+    calls = []
+
+    def fake_tts(text, voice, out_path):
+        calls.append(text)
+        Path(out_path).write_bytes(b"0" * 2000)
+
+    monkeypatch.setattr(vo, "NARRATION_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(vo, "edge_tts_synthesize", fake_tts)
+    vo.cached_synthesize("same line", "voice", tmp_path / "a.mp3")
+    vo.cached_synthesize("same line", "voice", tmp_path / "b.mp3")
+    vo.cached_synthesize("same line", "other-voice", tmp_path / "c.mp3")
+    assert calls == ["same line", "same line"]
+    assert (tmp_path / "b.mp3").stat().st_size == 2000
